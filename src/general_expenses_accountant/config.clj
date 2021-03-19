@@ -5,12 +5,6 @@
                               :type :string}
              :bot-api-token {:description "Telegram Bot API token"
                              :type :string}
-             :datetime-format {:type :string
-                               :default "dd-MM-yyyy (HH:mm:ss)"}
-             :starting-message {:type :string
-                                :default "Starting the bot..."}
-             :not-found-message {:type :string
-                                 :default "No such API endpoint"}
              :port {:type :number
                     :default 8080}})
 

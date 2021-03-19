@@ -4,17 +4,17 @@
   (:require
     [ring.adapter.jetty :refer [run-jetty]]
     [ring.middleware.reload :refer [wrap-reload]]
-    ;[taoensso.timbre :as log]
+    [taoensso.timbre :as log]
 
     [general-expenses-accountant.config :as config]
-    [general-expenses-accountant.handler :refer [app]]))
+    [general-expenses-accountant.handler :refer [app]]
+    [general-expenses-accountant.l10n :as l10n]))
 
 (defn -main [& args]
   (config/load-and-validate)
   (let [handler (if (config/in-dev?)
                   (wrap-reload #'app)
                   app)]
-    ;; TODO: Re-write with proper logger.
-    (println (config/get-prop :starting-message))
+    (log/info (l10n/tr :en :starting))
     (run-jetty handler {:port (config/get-prop :port)
-                        :join? false}))) ;; TODO: Figure out, why ':join? false' is left???
+                        :join? false})))

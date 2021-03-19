@@ -7,7 +7,7 @@
 
   :dependencies [[org.clojure/clojure "1.10.1"]
                  [org.clojure/core.async "1.3.610"]
-                 ;[medley "1.3.0"]
+
                  [fipp "0.6.23"]
 
                  [compojure "1.6.2"]
@@ -20,6 +20,8 @@
 
                  [morse "0.4.3"]
 
+                 [tongue "0.2.10"]
+
                  ;; TODO: Use these libs as well.
                  ;; - enable some more ring middleware
                  ;[metosin/compojure-api "1.1.9"]
@@ -31,6 +33,7 @@
                  ;[coldnew/config "1.2.0"]
                  ;[wrench "0.3.3"]
                  ;; - set up logging properly
+                 [com.taoensso/timbre "5.1.2"]
                  ;[org.clojure/tools.logging "0.3.1"]
                  ;[spootnik/unilog "0.7.27"]
                  ]
@@ -38,9 +41,12 @@
   :plugins [[lein-ring "0.12.5"]] ;; to run an app locally
   :ring {:handler general-expenses-accountant.handler/app}
 
-  :profiles {:uberjar {:aot :all ;; forcing Java classes compilation
-                       :jvm-opts ["-Dclojure.compiler.direct-linking=true"] ;; TODO: Test on Heroku!
+  :profiles {:dev {:jvm-opts ["-Dclojure.spec.compile-asserts=true"]}
+             :uberjar {:aot :all ;; forcing Java classes compilation
+                       :jvm-opts ["-Dclojure.compiler.direct-linking=true" ;; TODO: Test on Heroku!
+                                  "-Dclojure.spec.compile-asserts=false"]
                        :main general-expenses-accountant.main
                        :omit-source true
                        :uberjar-name "gea-bot-standalone.jar"}}
+
   :repl-options {:init-ns general-expenses-accountant.core})

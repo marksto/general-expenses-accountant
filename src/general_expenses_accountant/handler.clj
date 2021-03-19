@@ -9,8 +9,8 @@
      [json :refer [wrap-json-body]]
      [reload :refer [wrap-reload]]]
 
-    [general-expenses-accountant.config :as config]
-    [general-expenses-accountant.core :refer [bot-api]]))
+    [general-expenses-accountant.core :refer [bot-api]]
+    [general-expenses-accountant.l10n :as l10n]))
 
 (defroutes app-routes
   (POST "/api" {body :body}
@@ -18,7 +18,7 @@
   ;(POST "/debug" {body :body}
   ;  (pprint body))
   (route/not-found
-    (config/get-prop :not-found-message)))
+    (l10n/tr :en :not-found)))
 
 (def app
   (-> (wrap-defaults app-routes api-defaults)

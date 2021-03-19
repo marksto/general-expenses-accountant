@@ -2,14 +2,10 @@
   (:require
     [cheshire.core :as json]
     [morse.api :as morse]
-    ;[taoensso.timbre :as log]
+    [taoensso.timbre :as log]
 
-    [general-expenses-accountant.config :as config]))
-
-(defn- log
-  [str]
-  (println str))
-
+    [general-expenses-accountant.config :as config]
+    [general-expenses-accountant.l10n :as l10n]))
 
 ;; Business Logic
 
@@ -40,8 +36,7 @@
   [{message :message
     post :channel_post
     :as full-msg-body}]
-  ;; TODO: Re-write with proper logger.
-  (log (json/generate-string full-msg-body))
+  (log/debug (json/generate-string full-msg-body))
 
   (if (not (nil? message))
     (handle-private-message message))
@@ -49,4 +44,4 @@
     (handle-channel-post post))
 
   {:status 200
-   :body "Bot API request processed"})
+   :body (l10n/tr :en :processed)})
