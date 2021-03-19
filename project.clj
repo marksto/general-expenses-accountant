@@ -12,6 +12,8 @@
 
                  [compojure "1.6.2"]
 
+                 [hiccup "1.0.5"]
+
                  [ring/ring-core "1.9.1"]
                  [ring/ring-devel "1.9.1"]
                  [ring/ring-jetty-adapter "1.9.1"]
