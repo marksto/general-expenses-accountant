@@ -1,0 +1,7 @@
+{
+ :bot-api-token     "<TELEGRAM BOT API TOKEN>"
+ :datetime-format   "dd-MM-yyyy (HH:mm:ss)"
+ :not-found-message "No such API endpoint"
+ :starting-message  "Starting the bot..."
+ :port              "8080"
+ }
