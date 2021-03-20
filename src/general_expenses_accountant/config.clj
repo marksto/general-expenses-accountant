@@ -5,6 +5,7 @@
 
 (cfg/define {:bot-api-token {:description "Telegram Bot API token"
                              :verifier #(= (count %2) 46)
+                             :required true
                              :type :string}
              :bot-url {:description "The bot URL (for a webhook)"
                        :required false
