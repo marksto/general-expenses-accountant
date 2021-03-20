@@ -4,8 +4,7 @@
     [morse.api :as morse]
     [taoensso.timbre :as log]
 
-    [general-expenses-accountant.config :as config]
-    [general-expenses-accountant.l10n :as l10n]))
+    [general-expenses-accountant.config :as config]))
 
 ;; Business Logic
 
@@ -37,11 +36,12 @@
     post :channel_post
     :as full-msg-body}]
   (log/debug (json/generate-string full-msg-body))
+  (let [tg-resp-body
+        (cond
+          (not (nil? message))
+          (handle-private-message message)
 
-  (if (not (nil? message))
-    (handle-private-message message))
-  (if (not (nil? post))
-    (handle-channel-post post))
-
-  {:status 200
-   :body (l10n/tr :en :processed)})
+          (not (nil? post))
+          (handle-channel-post post))]
+    (log/debug tg-resp-body)
+    tg-resp-body))

@@ -17,9 +17,13 @@
   (GET "/" []
     landing/home)
   (POST "/api" {body :body}
-    (bot-api body))
-  ;(POST "/debug" {body :body}
-  ;  (pprint body))
+    (bot-api body)
+    {:status 200
+     :headers {"Content-Type" "text/plain"}
+     :body (l10n/tr :en :processed)})
+  (POST "/debug" {body :body}
+    (pprint body)
+    {:status 200})
   (route/not-found
     (l10n/tr :en :not-found)))
 
