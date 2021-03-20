@@ -9,6 +9,10 @@ Leveraging the power of the Telegram Bot API to account for general expenses.
 ;; 'heroku config:add JVM_OPTS=...' will change the value used here
 web: java $JVM_OPTS -cp target/uberjar/myapp.jar clojure.main -m myapp.web
 ```
+or, in case you've got a `-main` function which starts a server,
+```
+web: java $JVM_OPTS -jar target/uberjar/myapp.jar
+```
 
 2. With Leiningen:
 ```
