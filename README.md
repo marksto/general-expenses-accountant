@@ -30,3 +30,12 @@ lein repl :connect http://$REPL_USER:$REPL_PASSWORD@{{name}}.herokuapp.com/repl
 heroku run lein repl
 heroku run lein run -m hello.hi
 ```
+
+## Stop Heroku build
+
+A stuck build can be cancelled manually by running the following:
+
+```
+heroku plugins:install heroku-builds
+heroku builds:cancel BUILD_UUID -a APP_NAME
+```

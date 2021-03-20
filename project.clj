@@ -27,6 +27,7 @@
 
                  [tongue "0.2.10"]]
 
+  :min-lein-version "2.0.0"
   :plugins [[lein-ring "0.12.5"]] ;; to run an app locally
   :ring {:handler general-expenses-accountant.handler/app}
 
