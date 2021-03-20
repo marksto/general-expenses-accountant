@@ -1,1 +1,1 @@
-web: java $JVM_OPTS -jar target/uberjar/gea-bot-standalone.jar
+web: java $JVM_OPTS -jar target/gea-bot-standalone.jar
