@@ -3,12 +3,13 @@
 
 (def ^:private dev-env "DEV")
 
-(cfg/define {:active-profile {:description "Either 'DEV' or 'PROD'"
-                              :one-of #{dev-env "PROD"}
-                              :type :string}
-             :bot-api-token {:description "Telegram Bot API token"
+(cfg/define {:bot-api-token {:description "Telegram Bot API token"
                              :verifier #(= (count %2) 46)
                              :type :string}
+             :environment {:description "Either 'DEV' or 'PROD'"
+                           :one-of #{dev-env "PROD"}
+                           :required false
+                           :type :string}
              :port {:type :number
                     :default 8080}})
 
@@ -18,7 +19,7 @@
 
 (defn in-dev?
   []
-  (= (get-prop :active-profile) dev-env))
+  (= (get-prop :environment) dev-env))
 
 (defn load-and-validate
   []
