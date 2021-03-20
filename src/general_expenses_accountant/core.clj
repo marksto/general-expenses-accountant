@@ -15,6 +15,7 @@
 (defn- handle-private-message
   [message]
   (let [chat-id (-> message :chat :id)]
+    ;; TODO: Make this call asynchronous.
     (morse/send-text
       (config/get-prop :bot-api-token)
       chat-id
@@ -23,6 +24,7 @@
 (defn- handle-channel-post
   [post]
   (let [chat-id (-> post :chat :id)]
+    ;; TODO: Make this call asynchronous.
     (morse/send-text
       (config/get-prop :bot-api-token)
       chat-id
