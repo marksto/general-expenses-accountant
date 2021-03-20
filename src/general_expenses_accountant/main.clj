@@ -18,6 +18,7 @@
     (let [token (config/get-prop :bot-api-token)
           bot-url (or (config/get-prop :bot-url)
                       (str (config/get-prop :heroku-app-name) ".herokuapp.com"))]
+      (log/info (str "Bot URL: " bot-url))
       (morse/set-webhook token (str bot-url api-path)))))
 
 (defn -main [& args]
