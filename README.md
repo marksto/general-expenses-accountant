@@ -2,6 +2,24 @@
 
 Leveraging the power of the Telegram Bot API to account for general expenses.
 
+## Creating the app
+
+While creating the new application, don't forget to set the EU as region.
+
+```
+heroku apps:create <app name> --region eu
+```
+
+## Getting the application name
+
+Once app created, the metadata should be made available for inspection as config vars.
+
+```
+heroku labs:enable runtime-dyno-metadata -a <app name>
+```
+
+Then, the `HEROKU_APP_NAME` variable will become available from inside the app.
+
 ## Procfile variants
 
 1. Usual:
