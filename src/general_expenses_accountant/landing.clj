@@ -22,6 +22,7 @@
      [:div.ui.vertical.masthead.center.aligned.segment
       [:div.ui.test.container
        [:h1.header "Welcome to General Expenses Accountant!"]
+       ;; TODO: Add instruction on how to use this bot (create chat, add it there, set Google Sheets ID and API token).
        [:h3 "Telegram bot that helps you to account for general expenses!"]
        [:a.ui.huge.button
         {:href "tg://resolve?domain=gen_exp_acc_bot"}
