@@ -1,22 +1,21 @@
-(ns general-expenses-accountant.landing
-  "Layouts for server-side rendered pages"
-  (:require [hiccup.core :refer [html]]
-            [hiccup.page :refer [include-css]]))
+(ns general-expenses-accountant.html
+  "Layouts for server-side rendered HTML pages"
+  (:require [hiccup.core :as hiccup]
+            [hiccup.page :as h-page]))
 
 (defn page
   "Renders HTML page with provided content"
   [content]
-  (html
-    [:html
-     [:head
-      [:meta {:charset "utf-8"}]
-      [:meta {:name "viewport" :content "width=device-width, initial-scale=1"}]
-      [:title "General Expenses Accountant"]
-      (include-css "//cdnjs.cloudflare.com/ajax/libs/semantic-ui/2.4.1/semantic.min.css")
-      (include-css "/style.css")]
-     [:body content]]))
+  (h-page/html5
+    [:head
+     [:meta {:charset "utf-8"}]
+     [:meta {:name "viewport" :content "width=device-width, initial-scale=1"}]
+     [:title "General Expenses Accountant"]
+     (h-page/include-css "//cdnjs.cloudflare.com/ajax/libs/semantic-ui/2.4.1/semantic.min.css")
+     (h-page/include-css "/style.css")]
+    [:body content]))
 
-(def home
+(def landing
   (page
     [:div#landing-outer.ui.container
      [:div.ui.vertical.masthead.center.aligned.segment

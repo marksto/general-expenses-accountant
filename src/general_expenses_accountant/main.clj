@@ -1,31 +1,37 @@
 (ns general-expenses-accountant.main
   "Responsible for starting Application from the Command Line"
   (:gen-class) ;; generates Java class which acts as an entry point for the JAR
-  (:require
-    [morse.api :as morse]
-    [ring.adapter.jetty :refer [run-jetty]]
-    [ring.middleware.reload :refer [wrap-reload]]
-    [taoensso.timbre :as log]
+  (:require [ring.adapter.jetty :refer [run-jetty]]
+            [ring.middleware.reload :refer [wrap-reload]]
+            [taoensso.timbre :as log]
 
-    [general-expenses-accountant.config :as config]
-    [general-expenses-accountant.handler :refer [api-path app]]
-    [general-expenses-accountant.l10n :as l10n]))
+            [general-expenses-accountant.config :as config]
+            [general-expenses-accountant.l10n :as l10n]
+            [general-expenses-accountant.web :as web]))
 
 (defn init
+  "Extracted to be used also as a 'lein-ring' init target,
+   for a case when the app's JAR is not executed directly."
   []
-  (config/load-and-validate)
-  (if (not (config/in-dev?))
-    (let [token (config/get-prop :bot-api-token)
-          bot-url (or (config/get-prop :bot-url)
-                      (str (config/get-prop :heroku-app-name) ".herokuapp.com"))]
-      (log/info (str "Bot URL: " bot-url))
-      (morse/set-webhook token (str bot-url api-path)))))
+  (config/load-and-validate! "dev-config.edn")
+  (web/set-up-tg-updates!)
+  (log/info (l10n/tr :en :init-fine)))
 
-(defn -main [& args]
+(defn- prepare-handler-for-jetty
+  "Prepares an app's web handler for use in DEV env (only),
+   passing it as a var wrapped for reloading together with
+   all modified namespaces on each request.
+   This will prevent you from having to reload the modified
+   namespaces manually or to reload your entire system when
+   only the handler function changes.
+   A 'lein-ring' plugin doesn't require such preparations."
+  []
+  (if (config/in-dev?)
+    (wrap-reload #'web/app)
+    web/app))
+
+(defn -main [& _args]
   (init)
-  (let [handler (if (config/in-dev?)
-                  (wrap-reload #'app)
-                  app)]
-    (log/info (l10n/tr :en :starting))
-    (run-jetty handler {:port (config/get-prop :port)
-                        :join? false})))
+  (run-jetty (prepare-handler-for-jetty)
+             {:port (config/get-prop :port)
+              :join? false}))

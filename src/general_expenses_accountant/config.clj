@@ -1,5 +1,7 @@
 (ns general-expenses-accountant.config
-  (:require [omniconf.core :as cfg]))
+  (:require [clojure.java.io :as io]
+            [omniconf.core :as cfg]
+            [taoensso.timbre :as log]))
 
 (def ^:private dev-env "DEV")
 
@@ -22,15 +24,21 @@
 
 (defn get-prop
   [key]
-  (cfg/get key))
+  (cfg/get key)) ;; internally memoized
 
 (defn in-dev?
   []
   (= (get-prop :environment) dev-env))
 
-(defn load-and-validate
-  []
-  (cfg/populate-from-env)
-  (cfg/verify
-    :quit-on-error true
-    :silent (not (in-dev?))))
+(defn load-and-validate!
+  ([]
+   (load-and-validate! nil))
+  ([file]
+   (cfg/populate-from-env)
+   (when (and (some? file) in-dev?)
+     (if (.exists (io/as-file file))
+       (cfg/populate-from-file file)
+       (log/warn "Can't find local dev configuration file '" file "'")))
+   (cfg/verify
+     :quit-on-error true
+     :silent (not (in-dev?)))))

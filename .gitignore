@@ -16,5 +16,5 @@ pom.xml.asc
 /.idea
 .DS_Store
 
-config.edn
+dev-config.edn
 /log

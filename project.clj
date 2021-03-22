@@ -5,6 +5,8 @@
   :license {:name "The MIT License"
             :url "http://opensource.org/licenses/mit-license.php"}
 
+  :min-lein-version "2.0.0"
+
   :dependencies [[org.clojure/clojure "1.10.1"]
                  [org.clojure/core.async "1.3.610"]
 
@@ -27,9 +29,9 @@
 
                  [tongue "0.2.10"]]
 
-  :min-lein-version "2.0.0"
-  :plugins [[lein-ring "0.12.5"]] ;; to run an app locally
-  :ring {:handler general-expenses-accountant.handler/app}
+  :plugins [[lein-ring "0.12.5"]] ;; to run an app locally with 'lein ring server(-headless)'
+  :ring {:handler general-expenses-accountant.web/app
+         :init general-expenses-accountant.main/init}
 
   :profiles {:dev {:jvm-opts ["-Dclojure.spec.compile-asserts=true"]}
              :uberjar {:aot :all ;; forcing Java classes compilation
