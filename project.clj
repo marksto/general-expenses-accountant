@@ -7,7 +7,7 @@
 
   :min-lein-version "2.0.0"
 
-  :dependencies [[org.clojure/clojure "1.10.1"]
+  :dependencies [[org.clojure/clojure "1.10.3"]
                  [org.clojure/core.async "1.3.610"]
 
                  [com.grammarly/omniconf "0.2.2"]
@@ -33,8 +33,9 @@
   :ring {:handler general-expenses-accountant.web/app
          :init general-expenses-accountant.main/init}
 
-  :profiles {:dev {:jvm-opts ["-Dclojure.spec.compile-asserts=true"]}
-             :uberjar {:aot :all ;; forcing Java classes compilation
+  :profiles {:dev {:global-vars {*warn-on-reflection* true}
+                   :jvm-opts ["-Dclojure.spec.check-asserts=true"]}
+             :uberjar {:aot :all ;; forcing Java classes compilation to speed up the app startup
                        :jvm-opts ["-Dclojure.compiler.direct-linking=true" ;; TODO: Test on Heroku!
                                   "-Dclojure.spec.compile-asserts=false"]
                        :main general-expenses-accountant.main
