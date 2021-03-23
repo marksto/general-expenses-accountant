@@ -1,6 +1,5 @@
 (ns general-expenses-accountant.core
-  (:require [cheshire.core :as json]
-            [morse
+  (:require [morse
              [api :as m-api]
              [handlers :as m-hlr]]
             [taoensso.timbre :as log]

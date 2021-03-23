@@ -1,7 +1,6 @@
 (ns general-expenses-accountant.html
   "Layouts for server-side rendered HTML pages"
-  (:require [hiccup.core :as hiccup]
-            [hiccup.page :as h-page]))
+  (:require [hiccup.page :as h-page]))
 
 (defn page
   "Renders HTML page with provided content"
