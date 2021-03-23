@@ -85,5 +85,5 @@
           (System/exit 1)))
       (let [bot-url (or (config/get-prop :bot-url)
                         (str (config/get-prop :heroku-app-name) ".herokuapp.com"))]
-        (log/info "Bot URL: " bot-url)
+        (log/info "Bot URL:" bot-url)
         (m-api/set-webhook token (str bot-url api-path))))))

@@ -61,13 +61,13 @@
   (m-hlr/command-fn
     "start"
     (fn [{{chat-id :id :as chat} :chat :as _message}]
-      (log/debug "Joined new chat: " chat)
+      (log/debug "Joined new chat:" chat)
       (m-api/send-text token chat-id "Welcome!")))
 
   (m-hlr/command-fn
     "help"
     (fn [{{chat-id :id :as chat} :chat :as _message}]
-      (log/debug "Help requested in chat: " chat)
+      (log/debug "Help requested in chat:" chat)
       (m-api/send-text token chat-id "Help is on the way!")))
 
   ;; TODO: Re-map an old API call delegation logic here.
@@ -75,5 +75,5 @@
   ; A "match-all catch-through" case:
   (m-hlr/message-fn
     (fn [{{chat-id :id} :chat :as message}]
-      (log/debug "Received message: " message)
+      (log/debug "Received message:" message)
       (m-api/send-text token chat-id "I don't do a whole lot... yet."))))
