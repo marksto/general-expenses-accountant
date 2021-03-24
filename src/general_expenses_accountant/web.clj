@@ -43,11 +43,11 @@
 
 ;; Telegram-specific set-up
 
-(def ^:private updates-channel* (atom nil))
+(def ^:private *updates-channel (atom nil))
 
 (defn- start-long-polling!
   [token]
-  (reset! updates-channel*
+  (reset! *updates-channel
           (try
             (m-poll/start token bot-api)
             (catch Exception _
@@ -55,13 +55,13 @@
 
 (defn- not-polling?
   []
-  (let [upd-chan @updates-channel*]
+  (let [upd-chan @*updates-channel]
     (or (nil? upd-chan)
         (closed? upd-chan))))
 
 (defn stop-long-polling!
   []
-  (m-poll/stop @updates-channel*))
+  (m-poll/stop @*updates-channel))
 
 (defn set-up-tg-updates!
   "As Telegram Bot API docs state, there are two ways of getting updates:
