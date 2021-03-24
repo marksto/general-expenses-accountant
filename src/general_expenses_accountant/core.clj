@@ -1,5 +1,6 @@
 (ns general-expenses-accountant.core
-  (:require [morse
+  (:require [fipp.edn :as f-edn]
+            [morse
              [api :as m-api]
              [handlers :as m-hlr]]
             [taoensso.timbre :as log]
@@ -39,4 +40,8 @@
   (m-hlr/message-fn
     (fn [{{chat-id :id} :chat :as message}]
       (log/debug "Received message:" message)
-      (m-api/send-text (token) chat-id "I don't do a whole lot... yet."))))
+      (try
+        (m-api/send-text (token) chat-id "I don't do a whole lot... yet.")
+        (catch Exception e
+          (log/error "Failed to send text to chat:" chat-id)
+          (f-edn/pprint e))))))
