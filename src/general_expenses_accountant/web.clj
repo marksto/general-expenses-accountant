@@ -26,8 +26,13 @@
   app-routes
   (GET "/" []
     html/landing)
-  (POST api-path {{updates :result} :body}
-    (map bot-api updates)
+  (POST api-path {body :body}
+    (log/debug "Request body:" body)
+    ;; TODO: Test this on PROD server.
+    (if-let [updates (body :updates)]
+      (doseq [update updates]
+        (bot-api update))
+      (bot-api body))
     {:status 200
      :headers {"Content-Type" "text/plain"}
      :body (l10n/tr :en :processed)})
