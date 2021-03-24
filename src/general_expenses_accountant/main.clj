@@ -12,8 +12,8 @@
 (defn init
   "Extracted to be used also as a 'lein-ring' init target,
    for a case when the app's JAR is not executed directly."
-  []
-  (config/load-and-validate! "dev-config.edn")
+  [& args]
+  (config/load-and-validate! args "dev-config.edn")
   (web/set-up-tg-updates!)
   (log/info (l10n/tr :en :init-fine)))
 
@@ -30,8 +30,8 @@
     (wrap-reload #'web/app)
     web/app))
 
-(defn -main [& _args]
-  (init)
+(defn -main [& args]
+  (apply init args)
   (run-jetty (prepare-handler-for-jetty)
              {:port (config/get-prop :port)
               :join? false}))
