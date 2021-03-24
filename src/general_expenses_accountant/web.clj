@@ -28,7 +28,6 @@
     html/landing)
   (POST api-path {body :body}
     (log/debug "Request body:" body)
-    ;; TODO: Test this on PROD server.
     (if-let [updates (body :updates)]
       (doseq [update updates]
         (bot-api update))

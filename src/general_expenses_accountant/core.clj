@@ -14,45 +14,9 @@
 
 ;; Business Logic
 
-(defn- stub-answer
-  []
-  "Yo!")
-
-(defn- handle-private-message
-  [message]
-  (let [chat-id (-> message :chat :id)]
-    ;; TODO: Make this call asynchronous?
-    (m-api/send-text
-      (token)
-      chat-id
-      (stub-answer))))
-
-(defn- handle-channel-post
-  [post]
-  (let [chat-id (-> post :chat :id)]
-    ;; TODO: Make this call asynchronous?
-    (m-api/send-text
-      (token)
-      chat-id
-      (stub-answer))))
 
 
 ;; API
-
-;(defn bot-api
-;  [{message :message
-;    post :channel_post
-;    :as full-msg-body}]
-;  (log/debug (json/generate-string full-msg-body))
-;  (let [tg-resp-body
-;        (cond
-;          (not (nil? message))
-;          (handle-private-message message)
-;
-;          (not (nil? post))
-;          (handle-channel-post post))]
-;    (log/debug tg-resp-body)
-;    tg-resp-body))
 
 (m-hlr/defhandler
   bot-api
@@ -60,7 +24,7 @@
   (m-hlr/command-fn
     "start"
     (fn [{{chat-id :id :as chat} :chat :as _message}]
-      (log/debug "Joined new chat:" chat)
+      (log/debug "Conversation started in chat:" chat)
       (m-api/send-text (token) chat-id "Welcome!")))
 
   (m-hlr/command-fn
