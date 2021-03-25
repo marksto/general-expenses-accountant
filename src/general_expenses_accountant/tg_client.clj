@@ -5,7 +5,7 @@
              [polling :as m-poll]]
             [taoensso.timbre :as log]
 
-            [general-expenses-accountant.core :refer [bot-api get-webhook-path]]
+            [general-expenses-accountant.core :refer [bot-api]]
             [general-expenses-accountant.config :as config]
             [general-expenses-accountant.web :refer [api-path]]))
 
@@ -33,6 +33,11 @@
   []
   (m-poll/stop @*updates-channel))
 
+(defn- construct-webhook-url
+  [bot-url token]
+  ;; Telegram Bot API recommendation
+  (str bot-url api-path "/" token))
+
 (defn set-up-tg-updates!
   "As Telegram Bot API docs state, there are two ways of getting updates:
    - WEBHOOK — we provide a public HTTP endpoint, through which Telegram will
@@ -56,7 +61,7 @@
           (System/exit 1)))
       (let [bot-url (or (config/get-prop :bot-url)
                         (str (config/get-prop :heroku-app-name) ".herokuapp.com"))
-            webhook-url (str bot-url (get-webhook-path api-path))]
+            webhook-url (construct-webhook-url bot-url token)]
         (log/info "Bot URL:" bot-url)
         (m-api/set-webhook token webhook-url)))))
 

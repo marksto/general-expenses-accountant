@@ -6,29 +6,25 @@
 
             [general-expenses-accountant.config :as config]))
 
-;; Helpers
+;; State
 
-(defn- get-bot-api-token
-  []
-  (config/get-prop :bot-api-token))
+;; TODO: Move to a dedicated 'db' ns.
+(defonce ^:private bot-data (atom []))
 
-(defn get-webhook-path
-  [base-api-path]
-  ;; Telegram Bot API recommendation
-  (str base-api-path (get-bot-api-token)))
 
 ;; Business Logic
 
 (defn respond!
   [{:keys [type chat-id text] :as with-what}]
   (try
-    (let [token (get-bot-api-token)]
+    (let [token (config/get-prop :bot-api-token)]
       ;; TODO: Implement other types of responses.
       (case type
         :text (m-api/send-text token chat-id text)))
     (catch Exception e
       (log/error "Failed to respond to chat" chat-id "with:" with-what)
       (println e))))
+
 
 ;; API
 

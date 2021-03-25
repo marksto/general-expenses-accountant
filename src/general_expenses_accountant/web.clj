@@ -12,7 +12,8 @@
              [session :refer [wrap-session]]]
             [drawbridge.core :as drawbridge]
 
-            [general-expenses-accountant.core :refer [bot-api get-webhook-path]]
+            [general-expenses-accountant.core :refer [bot-api]]
+            [general-expenses-accountant.config :as config]
             [general-expenses-accountant.html :as html]
             [general-expenses-accountant.l10n :as l10n]))
 
@@ -43,18 +44,20 @@
 
 (def api-path "/api")
 
-(def webhook-path
-  (get-webhook-path api-path))
-
 (cmpj/defroutes
   app-routes
   (GET "/" []
     html/landing)
-  (POST webhook-path {body :body}
-    (bot-api body)
-    {:status 200
-     :headers {"Content-Type" "text/plain"}
-     :body (l10n/tr :en :processed)})
+
+  (cmpj/context api-path []
+    (POST "/:token" {{token :token} :route-params
+                     body :body}
+      (if (= token (config/get-prop :bot-api-token))
+        (bot-api body))
+      {:status 200
+       :headers {"Content-Type" "text/plain"}
+       :body (l10n/tr :en :processed)}))
+
   (cmpj-route/not-found
     (l10n/tr :en :not-found)))
 
