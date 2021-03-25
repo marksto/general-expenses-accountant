@@ -32,7 +32,8 @@
 
                  [tongue "0.2.10"]]
 
-  :plugins [[lein-ring "0.12.5"]] ;; to run an app locally with 'lein ring server(-headless)'
+  :plugins [[lein-ring "0.12.5"] ;; to run an app locally with 'lein ring server(-headless)'
+            [nrepl/drawbridge "0.2.1"]]
   :ring {:handler general-expenses-accountant.web/app
          :init general-expenses-accountant.main/init}
 
