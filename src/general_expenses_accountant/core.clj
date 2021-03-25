@@ -12,6 +12,11 @@
   []
   (config/get-prop :bot-api-token))
 
+(defn get-webhook-path
+  [base-api-path]
+  ;; Telegram Bot API recommendation
+  (str base-api-path (get-bot-api-token)))
+
 ;; Business Logic
 
 (defn respond!
@@ -28,7 +33,7 @@
 ;; API
 
 (m-hlr/defhandler
-  bot-api
+  handler
   ; Each bot has to handle /start and /help commands.
   (m-hlr/command-fn
     "start"
@@ -46,12 +51,17 @@
                  :chat-id chat-id
                  :text "Help is on the way!"})))
 
-  ;; TODO: Re-map an old API call delegation logic here.
+  ;; TODO: Implement the handler mapping.
 
   ; A "match-all catch-through" case:
   (m-hlr/message-fn
-    (fn [{{chat-id :id} :chat :as message}]
-      (log/debug "Received message:" message)
+    (fn [{{chat-id :id :as chat} :chat :as _message}]
+      (log/debug "Unprocessed message in chat:" chat)
       (respond! {:type :text
                  :chat-id chat-id
                  :text "I don't do a whole lot... yet."}))))
+
+(defn bot-api
+  [update]
+  (log/debug "Received update:" update)
+  (handler update))

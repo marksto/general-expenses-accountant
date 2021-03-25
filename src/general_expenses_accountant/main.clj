@@ -7,6 +7,7 @@
 
             [general-expenses-accountant.config :as config]
             [general-expenses-accountant.l10n :as l10n]
+            [general-expenses-accountant.tg-client :as tg-client]
             [general-expenses-accountant.web :as web]))
 
 (defn initialize
@@ -14,7 +15,7 @@
    for a case when the app's JAR is not executed directly."
   [& args]
   (config/load-and-validate! args "dev-config.edn")
-  (web/set-up-tg-updates!)
+  (tg-client/set-up-tg-updates!)
   (log/info (l10n/tr :en :init-fine)))
 
 (defn- prepare-handler-for-jetty
@@ -34,7 +35,7 @@
 
 (defn finalize
   []
-  (web/tear-down-tg-updates!))
+  (tg-client/tear-down-tg-updates!))
 
 (defn -main [& args]
   (apply initialize args)
