@@ -1,0 +1,24 @@
+{
+  "update_id": 426300779,
+  "message": {
+    "message_id": 1,
+    "from": {
+      "id": 1087968824,
+      "is_bot": true,
+      "first_name": "Group",
+      "username": "GroupAnonymousBot"
+    },
+    "sender_chat": {
+      "id": -1001000000000,
+      "title": "Test Create",
+      "type": "supergroup"
+    },
+    "chat": {
+      "id": -1001000000000,
+      "title": "Test Create",
+      "type": "supergroup"
+    },
+    "date": 1616614061,
+    "migrate_from_chat_id": -560000000
+  }
+}

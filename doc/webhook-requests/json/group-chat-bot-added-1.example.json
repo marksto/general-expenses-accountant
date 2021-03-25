@@ -1,0 +1,38 @@
+{
+  "update_id": 426300762,
+  "my_chat_member": {
+    "chat": {
+      "id": -480000000,
+      "title": "Test Add",
+      "type": "group",
+      "all_members_are_administrators": true
+    },
+    "from": {
+      "id": 280000000,
+      "is_bot": false,
+      "first_name": "User",
+      "last_name": "Name",
+      "username": "username",
+      "language_code": "en"
+    },
+    "date": 1616602745,
+    "old_chat_member": {
+      "user": {
+        "id": 1400000000,
+        "is_bot": true,
+        "first_name": "My Bot",
+        "username": "my_bot"
+      },
+      "status": "left"
+    },
+    "new_chat_member": {
+      "user": {
+        "id": 1400000000,
+        "is_bot": true,
+        "first_name": "My Bot",
+        "username": "my_bot"
+      },
+      "status": "member"
+    }
+  }
+}

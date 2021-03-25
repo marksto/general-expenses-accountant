@@ -1,0 +1,47 @@
+{
+  "update_id": 426300780,
+  "my_chat_member": {
+    "chat": {
+      "id": -1001000000000,
+      "title": "Test Create",
+      "type": "supergroup"
+    },
+    "from": {
+      "id": 280000000,
+      "is_bot": false,
+      "first_name": "User",
+      "last_name": "Name",
+      "username": "username",
+      "language_code": "en"
+    },
+    "date": 1616614062,
+    "old_chat_member": {
+      "user": {
+        "id": 1400000000,
+        "is_bot": true,
+        "first_name": "My Bot",
+        "username": "my_bot"
+      },
+      "status": "member"
+    },
+    "new_chat_member": {
+      "can_manage_voice_chats": false,
+      "can_invite_users": false,
+      "can_delete_messages": true,
+      "can_pin_messages": true,
+      "can_be_edited": false,
+      "is_anonymous": false,
+      "can_change_info": false,
+      "can_restrict_members": false,
+      "status": "administrator",
+      "can_promote_members": false,
+      "can_manage_chat": true,
+      "user": {
+        "id": 1400000000,
+        "is_bot": true,
+        "first_name": "My Bot",
+        "username": "my_bot"
+      }
+    }
+  }
+}

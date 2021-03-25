@@ -1,0 +1,23 @@
+{
+  "update_id": 426300757,
+  "message": {
+    "message_id": 13,
+    "from": {
+      "id": 280000000,
+      "is_bot": false,
+      "first_name": "User",
+      "last_name": "Name",
+      "username": "username",
+      "language_code": "en"
+    },
+    "chat": {
+      "id": 280000000,
+      "first_name": "User",
+      "last_name": "Name",
+      "username": "username",
+      "type": "private"
+    },
+    "date": 1616599743,
+    "text": "Howdy!"
+  }
+}

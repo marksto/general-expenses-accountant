@@ -1,0 +1,21 @@
+{
+  "update_id": 426300781,
+  "message": {
+    "message_id": 3,
+    "from": {
+      "id": 280000000,
+      "is_bot": false,
+      "first_name": "User",
+      "last_name": "Name",
+      "username": "username",
+      "language_code": "en"
+    },
+    "chat": {
+      "id": -1001000000000,
+      "title": "Test Create",
+      "type": "supergroup"
+    },
+    "date": 1616614083,
+    "text": "Bot can finally hear us as a group admin!"
+  }
+}
