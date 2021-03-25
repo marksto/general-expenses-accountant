@@ -1,6 +1,5 @@
 (ns general-expenses-accountant.core
-  (:require [fipp.edn :as f-edn]
-            [morse
+  (:require [morse
              [api :as m-api]
              [handlers :as m-hlr]]
             [taoensso.timbre :as log]
@@ -9,13 +8,22 @@
 
 ;; Helpers
 
-(defn- token
+(defn- get-bot-api-token
   []
   (config/get-prop :bot-api-token))
 
 ;; Business Logic
 
-
+(defn respond!
+  [{:keys [type chat-id text] :as with-what}]
+  (try
+    (let [token (get-bot-api-token)]
+      ;; TODO: Implement other types of responses.
+      (case type
+        :text (m-api/send-text token chat-id text)))
+    (catch Exception e
+      (log/error "Failed to respond to chat" chat-id "with:" with-what)
+      (println e))))
 
 ;; API
 
@@ -26,13 +34,17 @@
     "start"
     (fn [{{chat-id :id :as chat} :chat :as _message}]
       (log/debug "Conversation started in chat:" chat)
-      (m-api/send-text (token) chat-id "Welcome!")))
+      (respond! {:type :text
+                 :chat-id chat-id
+                 :text "Welcome!"})))
 
   (m-hlr/command-fn
     "help"
     (fn [{{chat-id :id :as chat} :chat :as _message}]
       (log/debug "Help requested in chat:" chat)
-      (m-api/send-text (token) chat-id "Help is on the way!")))
+      (respond! {:type :text
+                 :chat-id chat-id
+                 :text "Help is on the way!"})))
 
   ;; TODO: Re-map an old API call delegation logic here.
 
@@ -40,8 +52,6 @@
   (m-hlr/message-fn
     (fn [{{chat-id :id} :chat :as message}]
       (log/debug "Received message:" message)
-      (try
-        (m-api/send-text (token) chat-id "I don't do a whole lot... yet.")
-        (catch Exception e
-          (log/error "Failed to send text to chat:" chat-id)
-          (f-edn/pprint e))))))
+      (respond! {:type :text
+                 :chat-id chat-id
+                 :text "I don't do a whole lot... yet."}))))
