@@ -9,7 +9,7 @@
             [general-expenses-accountant.l10n :as l10n]
             [general-expenses-accountant.web :as web]))
 
-(defn init
+(defn initialize
   "Extracted to be used also as a 'lein-ring' init target,
    for a case when the app's JAR is not executed directly."
   [& args]
@@ -32,8 +32,14 @@
     (wrap-reload #'web/app)
     (web/wrap-repl web/app)))
 
+(defn finalize
+  []
+  (web/tear-down-tg-updates!))
+
 (defn -main [& args]
-  (apply init args)
+  (apply initialize args)
   (run-jetty (prepare-handler-for-jetty)
              {:port (config/get-prop :port)
-              :join? false}))
+              :join? false})
+  (doto (Runtime/getRuntime)
+    (.addShutdownHook (Thread. finalize))))

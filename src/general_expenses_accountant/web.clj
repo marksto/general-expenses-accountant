@@ -56,10 +56,7 @@
     html/landing)
   (POST api-path {body :body}
     (log/debug "Request body:" body)
-    (if-let [updates (body :updates)]
-      (doseq [update updates]
-        (bot-api update))
-      (bot-api body))
+    (bot-api body)
     {:status 200
      :headers {"Content-Type" "text/plain"}
      :body (l10n/tr :en :processed)})
@@ -92,7 +89,7 @@
     (or (nil? upd-chan)
         (closed? upd-chan))))
 
-(defn stop-long-polling!
+(defn- stop-long-polling!
   []
   (m-poll/stop @*updates-channel))
 
@@ -111,6 +108,7 @@
   (let [token (config/get-prop :bot-api-token)]
     (if (config/in-dev?)
       (do
+        (m-api/set-webhook token "") ;; polling won't work if a webhook is set up
         (start-long-polling! token)
         (Thread/sleep 1000) ;; await a bit
         (when (not-polling?)
@@ -120,3 +118,8 @@
                         (str (config/get-prop :heroku-app-name) ".herokuapp.com"))]
         (log/info "Bot URL:" bot-url)
         (m-api/set-webhook token (str bot-url api-path))))))
+
+(defn tear-down-tg-updates!
+  []
+  (if (config/in-dev?)
+    (stop-long-polling!)))
