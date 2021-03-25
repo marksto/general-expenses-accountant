@@ -9,8 +9,13 @@
              [polling :as m-poll]]
             [ring.middleware
              [defaults :refer [api-defaults wrap-defaults]]
+             [basic-authentication :refer [wrap-basic-authentication]]
              [json :refer [wrap-json-body]]
-             [reload :refer [wrap-reload]]]
+             [keyword-params :refer [wrap-keyword-params]]
+             [nested-params :refer [wrap-nested-params]]
+             [params :refer [wrap-params]]
+             [session :refer [wrap-session]]]
+            [drawbridge.core :as drawbridge]
             [taoensso.timbre :as log]
 
             [general-expenses-accountant.core :refer [bot-api]]
@@ -18,7 +23,30 @@
             [general-expenses-accountant.html :as html]
             [general-expenses-accountant.l10n :as l10n]))
 
-;; HTTP API
+;; nREPL-over-HTTP
+
+(def repl-path "/repl")
+
+(def repl-handler
+  (-> (drawbridge/ring-handler)
+      (wrap-keyword-params)
+      (wrap-nested-params)
+      (wrap-params)
+      (wrap-session)))
+
+(defn- authed? [name pass]
+  (= [name pass]
+     [(System/getenv "REPL_USER") (System/getenv "REPL_PASSWORD")]))
+
+(defn wrap-repl [handler]
+  (fn [req]
+    (let [handler* (if (= (:uri req) repl-path)
+                     (wrap-basic-authentication repl-handler authed?)
+                     handler)]
+      (handler* req))))
+
+
+;; App's HTTP API
 
 (def api-path "/api")
 
@@ -45,9 +73,10 @@
   (-> (wrap-defaults app-routes api-defaults)
       (wrap-json-body {:keywords? true})))
 
+
 ;; Telegram-specific set-up
 
-(def ^:private *updates-channel (atom nil))
+(defonce ^:private *updates-channel (atom nil))
 
 (defn- start-long-polling!
   [token]

@@ -24,8 +24,11 @@
                  [ring/ring-jetty-adapter "1.9.1"]
                  [ring/ring-json "0.5.0"]
                  [ring/ring-defaults "0.3.2"]
+                 [ring-basic-authentication "1.1.0"]
 
                  [morse "0.4.3"]
+
+                 [nrepl/drawbridge "0.2.1"]
 
                  [tongue "0.2.10"]]
 

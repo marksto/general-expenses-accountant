@@ -41,7 +41,7 @@ web: lein with-profile production trampoline run -m myapp.web
 
 ## Remote REPL
 
-1. Usual:
+1. With pre-setup [Drawbridge](https://devcenter.heroku.com/articles/debugging-clojure) handler:
 ```
 heroku config:add REPL_USER=[...] REPL_PASSWORD=[...]
 lein repl :connect http://$REPL_USER:$REPL_PASSWORD@{{name}}.herokuapp.com/repl

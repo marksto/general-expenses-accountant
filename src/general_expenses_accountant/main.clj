@@ -24,11 +24,13 @@
    This will prevent you from having to reload the modified
    namespaces manually or to reload your entire system when
    only the handler function changes.
-   A 'lein-ring' plugin doesn't require such preparations."
+   A 'lein-ring' plugin doesn't require such preparations.
+   Additionally, the app is wrapped in an 'nREPL-over-HTTP'
+   handler to allow interactive development in non-DEV env."
   []
   (if (config/in-dev?)
     (wrap-reload #'web/app)
-    web/app))
+    (web/wrap-repl web/app)))
 
 (defn -main [& args]
   (apply init args)
