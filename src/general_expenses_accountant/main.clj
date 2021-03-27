@@ -5,17 +5,18 @@
             [ring.middleware.reload :refer [wrap-reload]]
             [taoensso.timbre :as log]
 
+            [general-expenses-accountant.core :refer [bot-api]]
             [general-expenses-accountant.config :as config]
             [general-expenses-accountant.l10n :as l10n]
             [general-expenses-accountant.tg-client :as tg-client]
-            [general-expenses-accountant.web :as web]))
+            [general-expenses-accountant.web :as web :refer [api-path]]))
 
 (defn initialize
   "Extracted to be used also as a 'lein-ring' init target,
    for a case when the app's JAR is not executed directly."
   [& args]
   (config/load-and-validate! args "dev-config.edn")
-  (tg-client/set-up-tg-updates!)
+  (tg-client/set-up-tg-updates! api-path bot-api)
   (log/info (l10n/tr :en :init-fine)))
 
 (defn- prepare-handler-for-jetty
