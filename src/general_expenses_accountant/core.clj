@@ -78,7 +78,19 @@
 
   ; A "match-all catch-through" case.
   (m-hlr/message-fn
-    (fn [{{chat-id :id :as chat} :chat :as _message}]
+    (fn [{_msg-id :message_id _date :date _text :text
+          {_user-id :id _first-name :first_name _last-name :last_name
+           _username :username _is-bot :is_bot _lang :language_code :as _user} :from
+          {chat-id :id _type :type _title :title _username :username :as chat} :chat
+          _original-msg :reply_to_message ;; for replies
+          _new-chat-members :new_chat_members
+          _left-chat-member :left_chat_member
+          _group-chat-created :group_chat_created
+          _migrate-to-chat-id :migrate_to_chat_id
+          _migrate-from-chat-id :migrate_from_chat_id
+          _pinned-message :pinned_message
+          _reply-markup :reply_markup
+          :as _message}]
       (log/debug "Unprocessed message in chat:" chat)
       (respond! {:type :text
                  :chat-id chat-id
