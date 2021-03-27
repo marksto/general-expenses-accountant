@@ -9,7 +9,57 @@
 ;; State
 
 ;; TODO: Move to a dedicated 'db' ns.
-(defonce ^:private bot-data (atom []))
+(defonce ^:private *bot-data (atom {}))
+
+#_(def sample-data
+    ;; chat-id -> chat-specific settings
+    {-560000000 {:state :initial
+
+                 ;; to reply to (for newcomers intro)
+                 :entry-msg-id 1
+
+                 ;; configured by users
+                 :accounts {:general {0 {:id 0
+                                         :type :general
+                                         :created 426300760
+                                         :revoked 432500000
+                                         :members [1 2 3]}}
+                            :personal {1 {:id 1
+                                          :type :personal
+                                          :name "Alice"
+                                          :created 426300760
+                                          :user-id 1400000000}
+                                       2 {:id 2
+                                          :type :personal
+                                          :name "Bob"
+                                          :created 426301230
+                                          :user-id 1200000000}
+                                       3 {:id 3
+                                          :type :personal
+                                          :name "Carl"
+                                          :created 426320300
+                                          :revoked 432500000
+                                          :user-id 2000000000}}
+                            :group {4 {:id 4
+                                       :type :group
+                                       :name "Alice & Bob"
+                                       :created 426307670
+                                       :revoked 432500000
+                                       :members [1 2]}}}
+                 :expense-items [{:code "food"
+                                  :desc "foodstuffs & manufactured goods"}
+                                 {:code "out"
+                                  :decs "cafes and coffee (eating out)"}
+                                 {:code "gas"
+                                  :desc "gasoline & car expenses"}]
+                 :data-store {:type :google-sheets
+                              :url "..."
+                              :api-key "..."}
+
+                 ;; precomputed values
+                 :user-account-mapping {1400000000 1
+                                        1200000000 2
+                                        2000000000 3}}})
 
 
 ;; Business Logic
