@@ -190,4 +190,4 @@
 
 (defn build-reply-markup
   [type & args]
-  (apply (find reply-markup-builders-by-type type) args))
+  (apply (get reply-markup-builders-by-type type) args))
