@@ -44,4 +44,4 @@
              {:port (config/get-prop :port)
               :join? false})
   (doto (Runtime/getRuntime)
-    (.addShutdownHook (Thread. finalize))))
+    (.addShutdownHook (Thread. ^Runnable finalize))))
