@@ -17,6 +17,7 @@
   [& args]
   (config/load-and-validate! args "dev-config.edn")
   (tg-client/set-up-tg-updates! api-path bot-api)
+  (general-expenses-accountant.core/init!)
   (log/info (l10n/tr :en :init-fine)))
 
 (defn- prepare-handler-for-jetty

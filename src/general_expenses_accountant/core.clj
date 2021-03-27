@@ -59,6 +59,8 @@
                                         1200000000 2
                                         2000000000 3}}})
 
+(defonce ^:private *bot-user (atom nil))
+
 
 ;; Business Logic
 
@@ -133,3 +135,9 @@
   [update]
   (log/debug "Received update:" update)
   (handler update))
+
+(defn init!
+  []
+  (let [bot-user (get (tg-client/get-me) :result)]
+    (log/debug "Identified myself:" bot-user)
+    (reset! *bot-user bot-user)))

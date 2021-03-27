@@ -1,5 +1,6 @@
 (ns general-expenses-accountant.tg-client
   (:require [clojure.core.async.impl.protocols :refer [closed?]]
+            [clj-http.client :as http] ;; comes with Morse
             [morse
              [api :as m-api]
              [polling :as m-poll]]
@@ -72,6 +73,15 @@
 
 
 ;; Operations
+
+(def base-url "https://api.telegram.org/bot")
+
+(defn get-me
+  []
+  (let [token (config/get-prop :bot-api-token)
+        url (str base-url token "/getMe")
+        resp (http/get url {:as :json})]
+    (get resp :body)))
 
 (defn respond!
   [{:keys [type chat-id text inline-query-id results callback-query-id show-alert options]
