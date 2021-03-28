@@ -56,6 +56,7 @@
       (do
         (m-api/set-webhook token "") ;; polling won't work if a webhook is set up
         (start-long-polling! token upd-handler)
+        ;; TODO: Make this an async task that aims to "re-spawn" the long-polling.
         (Thread/sleep 1000) ;; await a bit...
         (when (not-polling?)
           (log/fatal "Fatal error during the long-polling setup")
@@ -96,5 +97,4 @@
       (log/debug "Telegram returned:" tg-response)
       tg-response)
     (catch Exception e
-      (log/error "Failed to respond with:" response)
-      (println e))))
+      (log/error e "Failed to respond with:" response))))
