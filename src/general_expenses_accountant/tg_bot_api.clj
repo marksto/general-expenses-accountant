@@ -191,3 +191,15 @@
 (defn build-reply-markup
   [type & args]
   (apply (get reply-markup-builders-by-type type) args))
+
+
+(comment
+  (build-message-options
+    {:reply-markup (build-reply-markup :inline-keyboard
+                                       [[(build-inline-kbd-btn "Callback" :callback_data "<some_data>")]])})
+  (build-message-options
+    {:reply-markup (build-reply-markup :custom-keyboard [["Add expense"]])})
+
+  (build-message-options {:reply-markup (build-reply-markup :remove-keyboard {:selective true})})
+
+  (build-message-options {:reply-markup (build-reply-markup :force-reply {:selective true})}))
