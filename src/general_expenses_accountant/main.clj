@@ -11,6 +11,9 @@
             [general-expenses-accountant.tg-client :as tg-client]
             [general-expenses-accountant.web :as web :refer [api-path]]))
 
+; logger configuration
+(log/set-level! :debug)
+
 (defn initialize
   "Extracted to be used also as a 'lein-ring' init target,
    for a case when the app's JAR is not executed directly."
