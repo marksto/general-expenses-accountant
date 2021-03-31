@@ -1,7 +1,22 @@
 
+## /getMe
+  
+A simple method for testing your bot's auth token. Requires no parameters. 
+Returns basic information about the bot in form of a `User` object.
+
+## /getChatMembersCount
+
+Use this method to get the number of members in a chat. Returns `Int` on success.
+
+```
+Parameter 	Type              	Required 	Description
+chat_id   	Integer or String 	Yes      	Unique identifier for the target chat or username of the target 
+          	                  	         	supergroup or channel (in the format @channelusername)
+```
+
 ## /sendMessage
 
-Use this method to send text messages. On success, the sent Message is returned.
+Use this method to send text messages. On success, the sent `Message` is returned.
 (Links `tg://user?id=<user_id>` can be used to mention a user by their ID without using a username.)
 
 ```
