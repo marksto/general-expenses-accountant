@@ -1,6 +1,6 @@
 (ns dev.user)
 
-(load "../general_expenses_accountant/main")
+(load "../../src/general_expenses_accountant/main")
 (general-expenses-accountant.main/-main)
 
 (in-ns 'general-expenses-accountant.core)
