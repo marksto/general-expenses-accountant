@@ -265,6 +265,7 @@
   [chat-id msg-key msg-id]
   (set-chat-data! chat-id [:bot-messages msg-key] msg-id))
 
+;; TODO: Remove duplicates fn (see 'get-group-chat-state').
 (defn get-private-chat-state
   [user-id]
   (get (get-chat-data user-id) :state))
@@ -335,14 +336,15 @@
 
                    upd-private-chat-groups-fn
                    (fn [bot-data]
-                     (assoc-in bot-data [user-id :state] :initial)
                      (let [upd-fn (fn [old-val & new-vals]
                                     (if (nil? old-val)
                                       (vec new-vals)
                                       (into old-val new-vals)))
                            new-group {:id chat-id
                                       :title chat-title}]
-                       (update-in bot-data [user-id :groups] upd-fn new-group)))]
+                       (-> bot-data
+                           (update-in [user-id :groups] upd-fn new-group)
+                           (assoc-in [user-id :state] :initial))))]
                (-> bot-data
                    upd-general-acc-fn
                    upd-with-personal-acc-fn
