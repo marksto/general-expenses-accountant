@@ -10,11 +10,24 @@
 (defonce ^:private *bot-data (atom {}))
 
 #_(def sample-data
-    ;; chat-id -> chat-specific settings
+    ;; private chat-id -> user-specific
+    {280000000 {:groups [{:id -560000000
+                          :title "Family"}
+                         {:id -1001000000000
+                          :title "Family"}]
+
+                ;; for data input
+                :state :input
+                :input 3
+                :group -560000000
+                :expense-item "food"}}
+
+    ;; group chat-id -> group-level settings
     {-560000000 {:state :initial
 
-                 ;; to reply to (for newcomers intro)
-                 :entry-msg-id 1
+                 ;; messages to delete/check replies to
+                 :bot-messages {:intro-msg-id 1
+                                :name-request-msg-id 2}
 
                  ;; configured by users
                  :accounts {:general {0 {:id 0
@@ -26,17 +39,21 @@
                                           :type :personal
                                           :name "Alice"
                                           :created 426300760
-                                          :user-id 1400000000}
+                                          :msg-id 3
+                                          :user-id 1400000000
+                                          :user-input "100"}
                                        2 {:id 2
                                           :type :personal
                                           :name "Bob"
                                           :created 426301230
+                                          :msg-id 4
                                           :user-id 1200000000}
                                        3 {:id 3
                                           :type :personal
                                           :name "Carl"
                                           :created 426320300
                                           :revoked 432500000
+                                          :msg-id 5
                                           :user-id 2000000000}}
                             :group {4 {:id 4
                                        :type :group
@@ -44,12 +61,16 @@
                                        :created 426307670
                                        :revoked 432500000
                                        :members [1 2]}}}
-                 :expense-items [{:code "food"
-                                  :desc "foodstuffs & manufactured goods"}
-                                 {:code "out"
-                                  :decs "cafes and coffee (eating out)"}
-                                 {:code "gas"
-                                  :desc "gasoline & car expenses"}]
+                 :expenses {:items [{:code "food"
+                                     :desc "foodstuffs & manufactured goods"}
+                                    {:code "out"
+                                     :desc "cafes and coffee (eating out)"}
+                                    {:code "gas"
+                                     :desc "gasoline & car expenses"}]
+                            ;; TODO: Implement smart sorting of items.
+                            :popularity {"food" 5
+                                         "out" 2
+                                         "gas" 1}}
                  :data-store {:type :google-sheets
                               :url "..."
                               :api-key "..."}
@@ -57,7 +78,10 @@
                  ;; precomputed values
                  :user-account-mapping {1400000000 1
                                         1200000000 2
-                                        2000000000 3}}})
+                                        2000000000 3}}
+
+     ;; supergroup chat-id -> group chat-id (special case for 'admin' bots)
+     -1001000000000 -560000000})
 
 (defonce ^:private *bot-user (atom nil))
 
