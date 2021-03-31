@@ -342,9 +342,7 @@
                                       (into old-val new-vals)))
                            new-group {:id chat-id
                                       :title chat-title}]
-                       (-> bot-data
-                           (update-in [user-id :groups] upd-fn new-group)
-                           (assoc-in [user-id :state] :initial))))]
+                       (update-in bot-data [user-id :groups] upd-fn new-group)))]
                (-> bot-data
                    upd-general-acc-fn
                    upd-with-personal-acc-fn
@@ -388,10 +386,9 @@
   (let [chat-data (get-chat-data chat-id)]
     (case (:action event)
       [:ui-transition :input]
-      (let [prev-state (get-private-chat-state user-id)]
+      (do
         (drop-private-chat-state! user-id)
-        (when (= prev-state :initial)
-          {:message (get-private-introduction-msg (:first-name opts))}))
+        {:message (get-private-introduction-msg (:first-name opts))})
 
       [:ui-transition :group-selection]
       (do
@@ -431,8 +428,7 @@
     (fn [{{user-id :id first-name :first_name :as _user} :from
           {chat-id :id type :type :as chat} :chat :as _message}]
       (log/debug "Conversation started in chat:" chat)
-      (when (and (= type "private")
-                 (= :initial (get-private-chat-state user-id)))
+      (when (= type "private")
         (let [event {:action [:ui-transition :input]}
               result (process-state-transition event {:chat-id chat-id :user-id user-id
                                                       :first-name first-name})]
