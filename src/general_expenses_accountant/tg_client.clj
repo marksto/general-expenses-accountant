@@ -3,6 +3,7 @@
             [clj-http.client :as http] ;; comes with Morse
             [morse
              [api :as m-api]
+             [handlers :as m-hlr]
              [polling :as m-poll]]
             [taoensso.timbre :as log]
 
@@ -124,3 +125,22 @@
       tg-response)
     (catch Exception e
       (log/error e "Failed to respond with:" response))))
+
+
+;; Handlers
+
+;; TODO: Morse improvement. Implement a Compojure 'let-routes'-like 'let-handler' macro.
+
+(defn bot-chat-member-status-fn [handler-fn]
+  (m-hlr/update-fn [:my_chat_member] handler-fn))
+
+(defmacro bot-chat-member-status
+  [bindings & body]
+  `(bot-chat-member-status-fn (fn [~bindings] ~@body)))
+
+(defn chat-member-status-fn [handler-fn]
+  (m-hlr/update-fn [:chat_member] handler-fn))
+
+(defmacro chat-member-status
+  [bindings & body]
+  `(chat-member-status-fn (fn [~bindings] ~@body)))
