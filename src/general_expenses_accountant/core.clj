@@ -1,8 +1,11 @@
 (ns general-expenses-accountant.core
   "Bot API and business logic (core functionality)"
-  (:require [morse.handlers :as m-hlr]
+  (:require [morse
+             [api :as m-api]
+             [handlers :as m-hlr]]
             [taoensso.timbre :as log]
 
+            [general-expenses-accountant.config :as config]
             [general-expenses-accountant.nums :as nums]
             [general-expenses-accountant.tg-bot-api :as tg-api]
             [general-expenses-accountant.tg-client :as tg-client]
@@ -480,9 +483,24 @@
 
 ;; RECIPROCAL ACTIONS
 
+;; NB: Properly wrapped in try-catch and logged to highlight the exact HTTP client error.
+(defn respond!
+  [{:keys [type chat-id text inline-query-id results callback-query-id options]
+    :as response}]
+  (try
+    (let [token (config/get-prop :bot-api-token)
+          tg-response (case type
+                        :text (m-api/send-text token chat-id options text)
+                        :inline (m-api/answer-inline token inline-query-id options results)
+                        :callback (tg-client/answer-callback-query token callback-query-id options))]
+      (log/debug "Telegram returned:" tg-response)
+      tg-response)
+    (catch Exception e
+      (log/error e "Failed to respond with:" response))))
+
 (defn respond-attentively!
   [response tg-response-handler-fn]
-  (let [tg-response (tg-client/respond! response)]
+  (let [tg-response (respond! response)]
     (if (:ok tg-response)
       (tg-response-handler-fn (:result tg-response)))))
 
@@ -525,7 +543,7 @@
         (let [result (handle-state-transition {:transition [:private :input]}
                                               {:chat-id chat-id
                                                :first-name first-name})]
-          (tg-client/respond! (assoc (:message result) :chat-id chat-id)))
+          (respond! (assoc (:message result) :chat-id chat-id)))
         op-succeed)))
 
   (m-hlr/command-fn
@@ -533,9 +551,9 @@
     (fn [{{chat-id :id :as chat} :chat :as _message}]
       (log/debug "Help requested in chat:" chat)
       ;; TODO: Implement proper '/help' message (w/ the list of commands, etc.).
-      (tg-client/respond! {:type :text
-                           :chat-id chat-id
-                           :text "Help is on the way!"})
+      (respond! {:type :text
+                 :chat-id chat-id
+                 :text "Help is on the way!"})
       op-succeed))
 
   (m-hlr/command-fn
@@ -546,7 +564,7 @@
                  (= :input (get-chat-state chat-id)))
         (let [result (handle-state-transition {:transition [:private :upd-user-input]}
                                               {:chat-id chat-id})]
-          (tg-client/respond! (assoc (:message result) :chat-id chat-id)))
+          (respond! (assoc (:message result) :chat-id chat-id)))
         op-succeed)))
 
   ;; TODO: Implement the commands handling.
@@ -587,7 +605,7 @@
                                                 {:chat-id chat-id :user-id user-id
                                                  :expense-items expense-items
                                                  :first-name first-name})]
-            (tg-client/respond! (assoc (:message result) :chat-id chat-id)))
+            (respond! (assoc (:message result) :chat-id chat-id)))
           op-succeed))))
 
   (m-hlr/callback-fn
@@ -604,7 +622,7 @@
                 result (handle-state-transition {:transition [:private :accounts-selection]}
                                                 {:chat-id chat-id
                                                  :accounts accounts})]
-            (tg-client/respond! (assoc (:message result) :chat-id chat-id)))
+            (respond! (assoc (:message result) :chat-id chat-id)))
           op-succeed))))
 
   (m-hlr/callback-fn
@@ -620,7 +638,7 @@
               group-notification-msg (get-group-expense-msg (:input chat-data)
                                                             account-name
                                                             (:expense-item chat-data))]
-          (tg-client/respond! (assoc group-notification-msg :chat-id group-chat-id)))
+          (respond! (assoc group-notification-msg :chat-id group-chat-id)))
         ;; TODO: Write some success confirmation message to the private chat.
         (handle-state-transition {:transition [:private :input]}
                                  {:chat-id chat-id})
@@ -646,7 +664,8 @@
       (log/debug "Bot chat member status updated in:" chat)
       (if (and (some? new-chat-member) (= "member" new-status) (= "left" old-status))
         (do
-          (let [chat-members-count (tg-client/get-chat-members-count chat-id)]
+          (let [token (config/get-prop :bot-api-token)
+                chat-members-count (tg-client/get-chat-members-count token chat-id)]
             (setup-new-group-chat! chat-id chat-members-count)
             (when (>= chat-members-count min-members-for-general-acc)
               (create-general-account! chat-id date)))
@@ -697,12 +716,12 @@
               uncreated-count (get-personal-accounts-uncreated-count chat-id chat-members-count)
               event (if (zero? uncreated-count)
                       {:transition [:group :ready]}
-                       ;:params {:bot-username (get @*bot-user :username)} ;; TODO: Re-write in this way?
+                      ;:params {:bot-username (get @*bot-user :username)} ;; TODO: Re-write in this way?
                       {:transition [:group :waiting-for-user]})
               result (handle-state-transition event {:chat-id chat-id
                                                      :bot-username (get @*bot-user :username)
                                                      :uncreated-count uncreated-count})]
-          (tg-client/respond! (assoc (:message result) :chat-id chat-id)))
+          (respond! (assoc (:message result) :chat-id chat-id)))
         op-succeed)))
 
   ;; TODO: Implement scenario for migration from a 'group' chat to a 'supergroup' chat (catch ':migrate_to_chat_id').
@@ -730,7 +749,7 @@
                                                       {:chat-id chat-id :user-id user-id
                                                        :expense-items expense-items
                                                        :first-name first-name})))]
-              (tg-client/respond! (assoc (:message result) :chat-id chat-id)))
+              (respond! (assoc (:message result) :chat-id chat-id)))
             op-succeed)))))
 
   (m-hlr/message-fn
@@ -746,7 +765,7 @@
               accounts (get-group-accounts group-chat-id user-id)
               result (handle-state-transition {:transition [:private :accounts-selection]}
                                               {:chat-id chat-id :accounts accounts})]
-          (tg-client/respond! (assoc (:message result) :chat-id chat-id)))
+          (respond! (assoc (:message result) :chat-id chat-id)))
         op-succeed)))
 
   ;; TODO: Implement the messages handling.
@@ -776,6 +795,7 @@
 
 (defn init!
   []
-  (let [bot-user (get (tg-client/get-me) :result)]
+  (let [token (config/get-prop :bot-api-token)
+        bot-user (get (tg-client/get-me token) :result)]
     (log/debug "Identified myself:" bot-user)
     (reset! *bot-user bot-user)))

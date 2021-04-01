@@ -4,12 +4,13 @@
 (general-expenses-accountant.main/-main)
 
 (in-ns 'general-expenses-accountant.core)
-(deref *bot-user)
 
-(defn restart-tg-long-polling []
-  (tg-client/tear-down-tg-updates!)
-  (tg-client/set-up-tg-updates! "/api" bot-api))
+(defn restart-long-polling
+  []
+  (tg-client/stop-long-polling!)
+  (tg-client/setup-long-polling!
+    (config/get-prop :bot-api-token) bot-api))
 
 (comment
   ;; in case it had stopped
-  (restart-tg-long-polling))
+  (restart-long-polling))

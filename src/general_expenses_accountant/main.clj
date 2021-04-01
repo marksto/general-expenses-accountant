@@ -14,12 +14,20 @@
 ; logger configuration
 (log/set-level! :debug)
 
+(defn- get-bot-url
+  []
+  (or (config/get-prop :bot-url)
+      (str (config/get-prop :heroku-app-name) ".herokuapp.com")))
+
 (defn initialize
   "Extracted to be used also as a 'lein-ring' init target,
    for a case when the app's JAR is not executed directly."
   [& args]
   (config/load-and-validate! args "dev-config.edn")
-  (tg-client/set-up-tg-updates! api-path bot-api)
+  (let [token (config/get-prop :bot-api-token)]
+    (if (config/in-dev?)
+      (tg-client/setup-long-polling! token bot-api)
+      (tg-client/setup-webhook! token (get-bot-url) api-path)))
   (general-expenses-accountant.core/init!)
   (log/info (l10n/tr :en :init-fine)))
 
@@ -40,7 +48,8 @@
 
 (defn finalize
   []
-  (tg-client/tear-down-tg-updates!))
+  (if (config/in-dev?)
+    (tg-client/stop-long-polling!)))
 
 (defn -main [& args]
   (apply initialize args)
