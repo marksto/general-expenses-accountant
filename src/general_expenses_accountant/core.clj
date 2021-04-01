@@ -435,33 +435,33 @@
 ;; STATE TRANSITIONS
 
 ;; TODO: Re-write it as plain data with 'state-mutator', 'msg-generator', etc.
-(defn process-state-transition
+(defn handle-state-transition
   [event {:keys [chat-id] :as opts}]
   (let [chat-data (get-chat-data chat-id)]
-    (case (:action event)
+    (case (:transition event)
       ;; TODO: Segregate ':group' state transitions from ':private' ones.
-      [:ui-transition :waiting-for-user]
+      [:group :waiting-for-user]
       (do
         (change-group-chat-state! chat-id :waiting)
         {:message (get-personal-accounts-left-msg (:uncreated-count opts))})
 
-      [:ui-transition :ready]
+      [:group :ready]
       (do
         (change-group-chat-state! chat-id :ready)
         {:message bot-readiness-msg})
 
 
-      [:ui-transition :input]
+      [:private :input]
       (do
         (change-private-chat-state! chat-id :input)
         {:message (get-private-introduction-msg (:first-name opts))})
 
-      [:ui-transition :group-selection]
+      [:private :group-selection]
       (do
         (change-private-chat-state! chat-id :select-group)
         {:message (get-group-selection-msg (:groups opts))})
 
-      [:ui-transition :expense-item-selection]
+      [:private :expense-item-selection]
       (do
         (change-private-chat-state! chat-id :select-expense-item)
         (let [expense-items (:expense-items opts)]
@@ -470,7 +470,7 @@
                       (get-expense-manual-description-msg
                         (:first-name opts) (:user-id opts)))}))
 
-      [:ui-transition :accounts-selection]
+      [:private :accounts-selection]
       (do
         (change-private-chat-state! chat-id :select-account)
         {:message (get-account-selection-msg (:accounts opts))}))))
@@ -490,9 +490,9 @@
           {chat-id :id type :type :as chat} :chat :as _message}]
       (log/debug "Conversation started in chat:" chat)
       (when (= type "private")
-        (let [result (process-state-transition {:action [:ui-transition :input]}
-                                               {:chat-id chat-id
-                                                :first-name first-name})]
+        (let [result (handle-state-transition {:transition [:private :input]}
+                                              {:chat-id chat-id
+                                               :first-name first-name})]
           (tg-client/respond! (assoc (:message result) :chat-id chat-id)))
         op-succeed)))
 
@@ -512,8 +512,8 @@
       (log/debug "Calculator opened in chat:" chat)
       (when (and (= type "private")
                  (= :input (get-chat-state chat-id)))
-        (let [result (process-state-transition {:action [:ui-transition :upd-user-input]}
-                                               {:chat-id chat-id})]
+        (let [result (handle-state-transition {:transition [:private :upd-user-input]}
+                                              {:chat-id chat-id})]
           (tg-client/respond! (assoc (:message result) :chat-id chat-id)))
         op-succeed)))
 
@@ -550,10 +550,10 @@
           (set-chat-data! chat-id [:group] group-chat-id)
           ;; TODO: This pattern '(let [callback ... result ...] (...)' is repeated quite often.
           (let [expense-items (get-group-expense-items group-chat-id)
-                result (process-state-transition {:action [:ui-transition :expense-item-selection]}
-                                                 {:chat-id chat-id :user-id user-id
-                                                  :expense-items expense-items
-                                                  :first-name first-name})]
+                result (handle-state-transition {:transition [:private :expense-item-selection]}
+                                                {:chat-id chat-id :user-id user-id
+                                                 :expense-items expense-items
+                                                 :first-name first-name})]
             (tg-client/respond! (assoc (:message result) :chat-id chat-id)))
           op-succeed))))
 
@@ -568,9 +568,9 @@
           (set-chat-data! chat-id [:expense-item] expense-item)
           (let [group-chat-id (:group (get-chat-data chat-id))
                 accounts (get-group-accounts group-chat-id user-id)
-                result (process-state-transition {:action [:ui-transition :accounts-selection]}
-                                                 {:chat-id chat-id
-                                                  :accounts accounts})]
+                result (handle-state-transition {:transition [:private :accounts-selection]}
+                                                {:chat-id chat-id
+                                                 :accounts accounts})]
             (tg-client/respond! (assoc (:message result) :chat-id chat-id)))
           op-succeed))))
 
@@ -589,8 +589,8 @@
                                                             (:expense-item chat-data))]
           (tg-client/respond! (assoc group-notification-msg :chat-id group-chat-id)))
         ;; TODO: Write some success confirmation message to the private chat.
-        (process-state-transition {:action [:ui-transition :input]}
-                                  {:chat-id chat-id})
+        (handle-state-transition {:transition [:private :input]}
+                                 {:chat-id chat-id})
         op-succeed)))
 
   ;; TODO: Implement the callback queries handling.
@@ -624,8 +624,8 @@
           (let [tg-response (tg-client/respond! (assoc personal-account-name-msg :chat-id chat-id))]
             (->> tg-response :result :message_id (set-bot-msg-id! chat-id :name-request-msg-id)))
 
-          (process-state-transition {:action [:ui-transition :waiting-for-user]}
-                                    {:chat-id chat-id})
+          (handle-state-transition {:transition [:group :waiting-for-user]}
+                                   {:chat-id chat-id})
           op-succeed)
         (ignore "bot chat member status update dated %s in chat=%s" date chat-id))))
 
@@ -664,10 +664,10 @@
         (let [chat-members-count (:members-count (get-chat-data chat-id))
               uncreated-count (get-personal-accounts-uncreated-count chat-id chat-members-count)
               event (if (zero? uncreated-count)
-                      {:action [:ui-transition :ready]}
-                      {:action [:ui-transition :waiting-for-user]})
-              result (process-state-transition event {:chat-id chat-id
-                                                      :uncreated-count uncreated-count})]
+                      {:transition [:group :ready]}
+                      {:transition [:group :waiting-for-user]})
+              result (handle-state-transition event {:chat-id chat-id
+                                                     :uncreated-count uncreated-count})]
           (tg-client/respond! (assoc (:message result) :chat-id chat-id)))
         op-succeed)))
 
@@ -686,16 +686,16 @@
             (set-chat-data! chat-id [:input] input)
             (let [groups (:groups (get-chat-data chat-id))
                   result (if (> (count groups) 1)
-                           (process-state-transition {:action [:ui-transition :group-selection]}
-                                                     {:chat-id chat-id :groups groups})
+                           (handle-state-transition {:transition [:private :group-selection]}
+                                                    {:chat-id chat-id :groups groups})
                            (let [group-chat-id (:id (first groups))
                                  expense-items (get-group-expense-items group-chat-id)]
                              (log/debug "Group chat auto-selected:" group-chat-id)
                              (set-chat-data! chat-id [:group] group-chat-id)
-                             (process-state-transition {:action [:ui-transition :expense-item-selection]}
-                                                       {:chat-id chat-id :user-id user-id
-                                                        :expense-items expense-items
-                                                        :first-name first-name})))]
+                             (handle-state-transition {:transition [:private :expense-item-selection]}
+                                                      {:chat-id chat-id :user-id user-id
+                                                       :expense-items expense-items
+                                                       :first-name first-name})))]
               (tg-client/respond! (assoc (:message result) :chat-id chat-id)))
             op-succeed)))))
 
@@ -710,8 +710,8 @@
         (set-chat-data! chat-id [:expense-item] text)
         (let [group-chat-id (:group (get-chat-data chat-id))
               accounts (get-group-accounts group-chat-id user-id)
-              result (process-state-transition {:action [:ui-transition :accounts-selection]}
-                                               {:chat-id chat-id :accounts accounts})]
+              result (handle-state-transition {:transition [:private :accounts-selection]}
+                                              {:chat-id chat-id :accounts accounts})]
           (tg-client/respond! (assoc (:message result) :chat-id chat-id)))
         op-succeed)))
 
