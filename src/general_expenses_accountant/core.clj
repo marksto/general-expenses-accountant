@@ -89,7 +89,6 @@
      ;; supergroup chat-id -> group chat-id (special case for 'admin' bots)
      -1001000000000 -560000000})
 
-;; TODO: Use somewhere or get rid of it.
 (defonce ^:private *bot-user (atom nil))
 
 (def min-members-for-general-acc
@@ -98,36 +97,14 @@
   3)
 
 
-;; API RESPONSES
-
-;; IMPORTANT: The main idea of a group of handlers of any type (message, callback query, etc.)
-;;            is to organize a flow of the following nature:
-;;            - the first handler of a type have to log the incoming object
-;;            - any handler "in between" have to either:
-;;              - result in 'op-succeed' — which will stop the further processing
-;;              - result in 'nil' — which will pass the request for processing to the next handler
-;;                                  (in the order of their declaration in the 'defhandler' body)
-;;            - the last handler, in case the request wasn't processed, have to result in 'ignore'
-
-;; NB: Any non-nil will do.
-(def op-succeed {:ok true})
-
-(defmacro ignore
-  [msg & args]
-  `(do
-     (log/debugf (str "Ignored: " ~msg) ~@args)
-     op-succeed))
-
-
 ;; MESSAGE TEMPLATES & CALLBACK DATA
 
-;; TODO: Can be made namespaced keywords?
 (def cd-accounts "<accounts>")
 (def cd-expense-items "<expense_items>")
 (def cd-data-store "<data_store>")
 (def cd-expense-item-prefix "ei::")
-(def cd-group-id-prefix "gr::")
-(def cd-account-prefix "acc::")
+(def cd-group-chat-prefix "gc::")
+(def cd-account-prefix "ac::")
 
 ;; TODO: Make messages texts localizable:
 ;;       - take the ':language_code' of the chat initiator (no personal settings)
@@ -158,15 +135,15 @@
   {:type :text
    :text (format "Ожидаем остальных... Осталось %s." count)})
 
-(def bot-readiness-msg
+(defn get-bot-readiness-msg
+  [bot-username]
   {:type :text
    :text "Я готов к ведению учёта. Давайте же начнём!"
    :options (tg-api/build-message-options
               {:reply-markup (tg-api/build-reply-markup
                                :inline-keyboard
                                [[(tg-api/build-inline-kbd-btn "Перейти в чат для ввода расходов"
-                                                              ;; TODO: Make this bot name configurable.
-                                                              :url (str "https://t.me/gen_exp_acc_bot"))]])})})
+                                                              :url (str "https://t.me/" bot-username))]])})})
 
 (defn get-private-introduction-msg
   [first-name]
@@ -187,7 +164,7 @@
   (build-select-items-options groups
                               :title
                               (constantly :callback_data)
-                              #(str cd-group-id-prefix (:id %))))
+                              #(str cd-group-chat-prefix (:id %))))
 
 (defn get-group-selection-msg
   [groups]
@@ -247,6 +224,11 @@
                                     :members-count chat-members-count
                                     :accounts {:last-id -1}})))
 
+(defn setup-new-private-chat!
+  [chat-id]
+  (swap! *bot-data assoc chat-id {:state :input
+                                  :groups []}))
+
 (defn get-real-chat-id
   "Built-in insurance in case of 'supergroup' chat."
   [chat-id]
@@ -274,37 +256,28 @@
   [chat-id msg-key msg-id]
   (set-chat-data! chat-id [:bot-messages msg-key] msg-id))
 
-;; TODO: Get rid of Race Condition when this fn is called.
 (defn get-chat-state
+  "Returns the state of the given chat.
+   NB: Be aware that calling that function, e.g. during a state change,
+       can cause a race condition (RC) and result in an obsolete value."
   [chat-id]
   (get (get-chat-data chat-id) :state))
 
-;; TODO: Re-write with State Machine.
-(defn change-private-chat-state!
-  [chat-id new-state]
-  (let [curr-state (get-chat-state chat-id)
-        possible-new-states (case curr-state
-                              :input #{:select-group :select-expense-item :select-account :input}
-                              :select-group #{:select-expense-item :select-account :input}
-                              :select-expense-item #{:select-account :input}
-                              :select-account #{:input})]
-    (if (contains? possible-new-states new-state)
-      (if (= new-state :input)
-        (swap! *bot-data assoc chat-id (-> (get-chat-data chat-id)
-                                           (select-keys [:groups])
-                                           (assoc :state :input)))
-        (set-chat-data! chat-id [:state] new-state)))))
-
-;; TODO: Re-write with State Machine.
-(defn change-group-chat-state!
-  [chat-id new-state]
-  (let [curr-state (get-chat-state chat-id)
-        possible-new-states (case curr-state
-                              :initial #{:waiting :ready}
-                              :waiting #{:waiting :ready}
-                              :ready #{:initial :waiting})]
-    (if (contains? possible-new-states new-state)
-      (set-chat-data! chat-id [:state] new-state))))
+(defn- change-chat-state!
+  [chat-states chat-id new-state]
+  (swap! *bot-data
+         (fn [bot-data]
+           (let [curr-state (get-chat-state chat-id)
+                 possible-new-states (or (-> chat-states curr-state :to)
+                                         (-> chat-states curr-state))]
+             (if (contains? possible-new-states new-state)
+               (let [state-init-fn (-> chat-states new-state :init-fn)]
+                 (as-> bot-data $
+                       (if (some? state-init-fn)
+                         (update-in $ [chat-id] state-init-fn)
+                         $)
+                       (assoc-in $ [chat-id :state] new-state)))
+               bot-data)))))
 
 (defn get-accounts-next-id
   [chat-id]
@@ -380,13 +353,11 @@
 
                    upd-private-chat-groups-fn
                    (fn [bot-data]
-                     (let [upd-fn (fn [old-val & new-vals]
-                                    (if (nil? old-val)
-                                      (vec new-vals)
-                                      (into old-val new-vals)))
-                           new-group {:id chat-id ;; TODO: Check if it works in case of a 'supergroup'.
+                     (let [new-group {;; TODO: Check if it works in case of a 'supergroup'.
+                                      :id chat-id
+                                      ;; TODO: Should be updated when the group title is changed.
                                       :title chat-title}]
-                       (update-in bot-data [user-id :groups] upd-fn new-group)))]
+                       (update-in bot-data [user-id :groups] conj new-group)))]
                (-> bot-data
                    upd-accounts-next-id-fn
                    upd-with-personal-acc-fn
@@ -436,49 +407,105 @@
                            (.intValue (biginteger (nth account-path-str 1))))]
     (:name (get-in chat-data account-path))))
 
+(defn- is-reply-to?
+  [chat-id msg-key {msg-id :message_id :as msg}]
+  (and (some? msg)
+       (= msg-id (get-bot-msg-id chat-id msg-key))))
+
 
 ;; STATE TRANSITIONS
+
+;; TODO: Re-write with State Machines.
+
+(def ^:private private-chat-states
+  {:input {:to #{:select-group :select-expense-item :select-account :input}
+           :init-fn (fn [chat-data]
+                      (select-keys chat-data [:groups]))}
+   :select-group #{:select-expense-item :select-account :input}
+   :select-expense-item #{:select-account :input}
+   :select-account #{:input}})
+
+(defn change-private-chat-state!
+  [chat-id new-state]
+  (change-chat-state! private-chat-states chat-id new-state))
+
+(def ^:private group-chat-states
+  {:initial #{:waiting :ready}
+   :waiting #{:waiting :ready}
+   :ready #{:initial :waiting}})
+
+(defn change-group-chat-state!
+  [chat-id new-state]
+  (change-chat-state! group-chat-states chat-id new-state))
 
 ;; TODO: Re-write it as plain data with 'state-mutator', 'msg-generator', etc.
 (defn handle-state-transition
   [event {:keys [chat-id] :as opts}]
-  (let [chat-data (get-chat-data chat-id)]
-    (case (:transition event)
-      ;; TODO: Segregate ':group' state transitions from ':private' ones.
-      [:group :waiting-for-user]
-      (do
-        (change-group-chat-state! chat-id :waiting)
-        {:message (get-personal-accounts-left-msg (:uncreated-count opts))})
+  (case (:transition event)
+    [:group :waiting-for-user]
+    (do
+      (change-group-chat-state! chat-id :waiting)
+      {:message (get-personal-accounts-left-msg (:uncreated-count opts))})
 
-      [:group :ready]
-      (do
-        (change-group-chat-state! chat-id :ready)
-        {:message bot-readiness-msg})
+    [:group :ready]
+    (do
+      (change-group-chat-state! chat-id :ready)
+      {:message (get-bot-readiness-msg (:bot-username opts))})
 
 
-      [:private :input]
-      (do
-        (change-private-chat-state! chat-id :input)
-        {:message (get-private-introduction-msg (:first-name opts))})
+    [:private :input]
+    (do
+      (change-private-chat-state! chat-id :input)
+      {:message (get-private-introduction-msg (:first-name opts))})
 
-      [:private :group-selection]
-      (do
-        (change-private-chat-state! chat-id :select-group)
-        {:message (get-group-selection-msg (:groups opts))})
+    [:private :group-selection]
+    (do
+      (change-private-chat-state! chat-id :select-group)
+      {:message (get-group-selection-msg (:groups opts))})
 
-      [:private :expense-item-selection]
-      (do
-        (change-private-chat-state! chat-id :select-expense-item)
-        (let [expense-items (:expense-items opts)]
-          {:message (if (seq expense-items)
-                      (get-expense-item-selection-msg expense-items)
-                      (get-expense-manual-description-msg
-                        (:first-name opts) (:user-id opts)))}))
+    [:private :expense-item-selection]
+    (do
+      (change-private-chat-state! chat-id :select-expense-item)
+      (let [expense-items (:expense-items opts)]
+        {:message (if (seq expense-items)
+                    (get-expense-item-selection-msg expense-items)
+                    (get-expense-manual-description-msg
+                      (:first-name opts) (:user-id opts)))}))
 
-      [:private :accounts-selection]
-      (do
-        (change-private-chat-state! chat-id :select-account)
-        {:message (get-account-selection-msg (:accounts opts))}))))
+    [:private :accounts-selection]
+    (do
+      (change-private-chat-state! chat-id :select-account)
+      {:message (get-account-selection-msg (:accounts opts))})))
+
+
+;; RECIPROCAL ACTIONS
+
+(defn respond-attentively!
+  [response tg-response-handler-fn]
+  (let [tg-response (tg-client/respond! response)]
+    (if (:ok tg-response)
+      (tg-response-handler-fn (:result tg-response)))))
+
+
+;; API RESPONSES
+
+;; IMPORTANT: The main idea of a group of handlers of any type (message, callback query, etc.)
+;;            is to organize a flow of the following nature:
+;;            - the first handler of a type have to log the incoming object
+;;            - any handler "in between" have to either:
+;;              - result in 'op-succeed' — which will stop the further processing
+;;              - result in 'nil' — which will pass the request for processing to the next handler
+;;                                  (in the order of their declaration in the 'defhandler' body)
+;;            - the last handler, in case the request wasn't processed, have to result in 'ignore'
+
+;; NB: Any non-nil will do.
+(def op-succeed {:ok true})
+
+(defmacro ignore
+  [msg & args]
+  `(do
+     (log/debugf (str "Ignored: " ~msg) ~@args)
+     op-succeed))
 
 
 ;; Bot API
@@ -549,11 +576,12 @@
           callback-btn-data :data :as _callback-query}]
       (when (and (= type "private")
                  (= :select-group (get-chat-state chat-id))
-                 (str/starts-with? callback-btn-data cd-group-id-prefix))
-        (let [group-chat-id-str (str/replace-first callback-btn-data cd-group-id-prefix "")
+                 (str/starts-with? callback-btn-data cd-group-chat-prefix))
+        (let [group-chat-id-str (str/replace-first callback-btn-data cd-group-chat-prefix "")
               group-chat-id (nums/parse-int group-chat-id-str)]
           (set-chat-data! chat-id [:group] group-chat-id)
-          ;; TODO: This pattern '(let [callback ... result ...] (...)' is repeated quite often.
+          ;; TODO: This pattern '(let [result (handle-state-transition ...)] (respond! ...)'
+          ;;       is repeated quite often. It should be automation with an intermediary fn.
           (let [expense-items (get-group-expense-items group-chat-id)
                 result (handle-state-transition {:transition [:private :expense-item-selection]}
                                                 {:chat-id chat-id :user-id user-id
@@ -623,11 +651,11 @@
             (when (>= chat-members-count min-members-for-general-acc)
               (create-general-account! chat-id date)))
 
-          ;; TODO: This pattern '(let [tg-response ...] (->> tg-response ...)' is repeated quite often.
-          (let [tg-response (tg-client/respond! (assoc introduction-msg :chat-id chat-id))]
-            (->> tg-response :result :message_id (set-bot-msg-id! chat-id :intro-msg-id)))
-          (let [tg-response (tg-client/respond! (assoc personal-account-name-msg :chat-id chat-id))]
-            (->> tg-response :result :message_id (set-bot-msg-id! chat-id :name-request-msg-id)))
+          (respond-attentively! (assoc introduction-msg :chat-id chat-id)
+                                #(->> % :message_id (set-bot-msg-id! chat-id :intro-msg-id)))
+
+          (respond-attentively! (assoc personal-account-name-msg :chat-id chat-id)
+                                #(->> % :message_id (set-bot-msg-id! chat-id :name-request-msg-id)))
 
           (handle-state-transition {:transition [:group :waiting-for-user]}
                                    {:chat-id chat-id})
@@ -657,21 +685,22 @@
     (fn [{msg-id :message_id date :date text :text
           {user-id :id :as _user} :from
           {chat-id :id type :type chat-title :title} :chat
-          {original-msg-id :message_id :as original-msg} :reply_to_message ;; for replies
+          original-msg :reply_to_message
           :as _message}]
       (when (and (contains? #{"group" "supergroup"} type)
                  (= :waiting (get-chat-state chat-id))
-                 ;; TODO: Factor out this logic into a separate fn?
-                 (some? original-msg) ;; this is a reply to bot's request
-                 (= original-msg-id (get-bot-msg-id chat-id :name-request-msg-id)))
+                 (is-reply-to? chat-id :name-request-msg-id original-msg))
+        (setup-new-private-chat! user-id)
         (create-personal-account! chat-id chat-title user-id text date msg-id)
 
         (let [chat-members-count (:members-count (get-chat-data chat-id))
               uncreated-count (get-personal-accounts-uncreated-count chat-id chat-members-count)
               event (if (zero? uncreated-count)
                       {:transition [:group :ready]}
+                       ;:params {:bot-username (get @*bot-user :username)} ;; TODO: Re-write in this way?
                       {:transition [:group :waiting-for-user]})
               result (handle-state-transition event {:chat-id chat-id
+                                                     :bot-username (get @*bot-user :username)
                                                      :uncreated-count uncreated-count})]
           (tg-client/respond! (assoc (:message result) :chat-id chat-id)))
         op-succeed)))
