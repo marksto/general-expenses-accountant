@@ -92,6 +92,11 @@
 ;; TODO: Use somewhere or get rid of it.
 (defonce ^:private *bot-user (atom nil))
 
+(def min-members-for-general-acc
+  "The number of users in a group chat (including the bot)
+   required to create a general account."
+  3)
+
 
 ;; API RESPONSES
 
@@ -615,7 +620,7 @@
         (do
           (let [chat-members-count (tg-client/get-chat-members-count chat-id)]
             (setup-new-group-chat! chat-id chat-members-count)
-            (when (> chat-members-count 2) ;; me + bot
+            (when (>= chat-members-count min-members-for-general-acc)
               (create-general-account! chat-id date)))
 
           ;; TODO: This pattern '(let [tg-response ...] (->> tg-response ...)' is repeated quite often.
