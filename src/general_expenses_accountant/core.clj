@@ -416,9 +416,14 @@
        (= msg-id (get-bot-msg-id chat-id msg-key))))
 
 
-;; STATE TRANSITIONS
+;; STATES & STATE TRANSITIONS
 
 ;; TODO: Re-write with State Machines.
+
+(def ^:private group-chat-states
+  {:initial #{:waiting :ready}
+   :waiting #{:waiting :ready}
+   :ready #{:initial :waiting}})
 
 (def ^:private private-chat-states
   {:input {:to #{:select-group :select-expense-item :select-account :input}
@@ -428,57 +433,45 @@
    :select-expense-item #{:select-account :input}
    :select-account #{:input}})
 
-(defn change-private-chat-state!
-  [chat-id new-state]
-  (change-chat-state! private-chat-states chat-id new-state))
+(defn change-chat-state!*
+  [chat-type chat-id new-state]
+  (let [chat-states (case chat-type
+                      :group group-chat-states
+                      :private private-chat-states)]
+    (change-chat-state! chat-states chat-id new-state)))
 
-(def ^:private group-chat-states
-  {:initial #{:waiting :ready}
-   :waiting #{:waiting :ready}
-   :ready #{:initial :waiting}})
+(def ^:private state-transitions
+  {:group {:waiting-for-user {:to-state :waiting
+                              :message-fn get-personal-accounts-left-msg
+                              :message-params [:uncreated-count]}
+           :ready {:to-state :ready
+                   :message-fn get-bot-readiness-msg
+                   :message-params [:bot-username]}}
 
-(defn change-group-chat-state!
-  [chat-id new-state]
-  (change-chat-state! group-chat-states chat-id new-state))
+   :private {:input {:to-state :input
+                     :message-fn get-private-introduction-msg
+                     :message-params [:first-name]}
+             :group-selection {:to-state :select-group
+                               :message-fn get-group-selection-msg
+                               :message-params [:groups]}
+             :expense-item-selection {:to-state :select-expense-item
+                                      :message-fn get-expense-item-selection-msg
+                                      :message-params [:expense-items]}
+             :expense-manual-description {:to-state :select-expense-item
+                                          :message-fn get-expense-manual-description-msg
+                                          :message-params [:first-name :user-id]}
+             :accounts-selection {:to-state :select-account
+                                  :message-fn get-account-selection-msg
+                                  :message-params [:accounts]}}})
 
-;; TODO: Re-write it as plain data with 'state-mutator', 'msg-generator', etc.
 (defn handle-state-transition
   [event {:keys [chat-id] :as opts}]
-  (case (:transition event)
-    [:group :waiting-for-user]
-    (do
-      (change-group-chat-state! chat-id :waiting)
-      {:message (get-personal-accounts-left-msg (:uncreated-count opts))})
-
-    [:group :ready]
-    (do
-      (change-group-chat-state! chat-id :ready)
-      {:message (get-bot-readiness-msg (:bot-username opts))})
-
-
-    [:private :input]
-    (do
-      (change-private-chat-state! chat-id :input)
-      {:message (get-private-introduction-msg (:first-name opts))})
-
-    [:private :group-selection]
-    (do
-      (change-private-chat-state! chat-id :select-group)
-      {:message (get-group-selection-msg (:groups opts))})
-
-    [:private :expense-item-selection]
-    (do
-      (change-private-chat-state! chat-id :select-expense-item)
-      (let [expense-items (:expense-items opts)]
-        {:message (if (seq expense-items)
-                    (get-expense-item-selection-msg expense-items)
-                    (get-expense-manual-description-msg
-                      (:first-name opts) (:user-id opts)))}))
-
-    [:private :accounts-selection]
-    (do
-      (change-private-chat-state! chat-id :select-account)
-      {:message (get-account-selection-msg (:accounts opts))})))
+  (let [chat-type (first (:transition event))
+        transition (get-in state-transitions (:transition event))
+        message-fn (:message-fn transition)]
+    (change-chat-state!* chat-type chat-id (:to-state transition))
+    (when message-fn
+      {:message (apply message-fn (map opts (:message-params transition)))})))
 
 
 ;; RECIPROCAL ACTIONS
@@ -601,7 +594,10 @@
           ;; TODO: This pattern '(let [result (handle-state-transition ...)] (respond! ...)'
           ;;       is repeated quite often. It should be automation with an intermediary fn.
           (let [expense-items (get-group-expense-items group-chat-id)
-                result (handle-state-transition {:transition [:private :expense-item-selection]}
+                state-transition (if (seq expense-items)
+                                   [:private :expense-item-selection]
+                                   [:private :expense-manual-description])
+                result (handle-state-transition {:transition state-transition}
                                                 {:chat-id chat-id :user-id user-id
                                                  :expense-items expense-items
                                                  :first-name first-name})]
@@ -741,14 +737,19 @@
                   result (if (> (count groups) 1)
                            (handle-state-transition {:transition [:private :group-selection]}
                                                     {:chat-id chat-id :groups groups})
-                           (let [group-chat-id (:id (first groups))
-                                 expense-items (get-group-expense-items group-chat-id)]
+                           (let [group-chat-id (:id (first groups))]
                              (log/debug "Group chat auto-selected:" group-chat-id)
                              (set-chat-data! chat-id [:group] group-chat-id)
-                             (handle-state-transition {:transition [:private :expense-item-selection]}
-                                                      {:chat-id chat-id :user-id user-id
-                                                       :expense-items expense-items
-                                                       :first-name first-name})))]
+
+                             ;; TODO: Code duplication. Extract the logic into a dedicated fn.
+                             (let [expense-items (get-group-expense-items group-chat-id)
+                                   state-transition (if (seq expense-items)
+                                                      [:private :expense-item-selection]
+                                                      [:private :expense-manual-description])]
+                               (handle-state-transition {:transition state-transition}
+                                                        {:chat-id chat-id :user-id user-id
+                                                         :expense-items expense-items
+                                                         :first-name first-name}))))]
               (respond! (assoc (:message result) :chat-id chat-id)))
             op-succeed)))))
 
