@@ -394,9 +394,9 @@
                              second)
             group-accs (->> (get-in chat-data [:accounts :group])
                             (map val))
-            pers-acc-id (get-in chat-data [:user-account-mapping user-id])
+            user-pers-acc (get-in chat-data [:user-account-mapping user-id])
             pers-accs (as-> (get-in chat-data [:accounts :personal]) $
-                            (dissoc $ pers-acc-id)
+                            (dissoc $ user-pers-acc)
                             (map val $))]
         ;; TODO: Sort them according popularity.
         (into [general-acc] (concat group-accs pers-accs))))))
