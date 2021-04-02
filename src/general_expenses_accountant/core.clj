@@ -18,10 +18,11 @@
 
 #_(def sample-data
     ;; private chat-id -> user-specific
-    {280000000 {:groups [{:id -560000000
-                          :title "Family"}
-                         {:id -1001000000000
-                          :title "Family"}]
+    ;; TODO: Store in ':groups' only IDs.
+    {280000000 {:groups #{{:id -560000000
+                           :title "Family"}
+                          {:id -1001000000000
+                           :title "Family"}}
 
                 ;; for data input
                 :state :input
@@ -31,6 +32,7 @@
 
     ;; group chat-id -> group-level settings
     {-560000000 {:state :initial
+                 ;; TODO: Store/update a group 'title'.
                  :members-count 3
 
                  ;; messages to delete/check replies to
@@ -40,9 +42,21 @@
                  ;; configured by users
                  :accounts {:general {0 {:id 0
                                          :type :general
+                                         :name "Common"
                                          :created 426300760
+                                         :revoked 426320300
+                                         :members #{1 2}}
+                                      5 {:id 5
+                                         :type :general
+                                         :name "Common"
+                                         :created 426320300
                                          :revoked 432500000
-                                         :members [1 2 3]}}
+                                         :members #{1 2 3}}
+                                      6 {:id 6
+                                         :type :general
+                                         :name "Common"
+                                         :created 432500000
+                                         :members #{1 2}}}
                             :personal {1 {:id 1
                                           :type :personal
                                           :name "Alice"
@@ -68,8 +82,9 @@
                                        :name "Alice & Bob"
                                        :created 426307670
                                        :revoked 432500000
-                                       :members [1 2]}}
-                            :last-id 5}
+                                       :members #{1 2}}}
+                            :last-id 6}
+                 ;; TODO: Re-implement ':items' with another data structure.
                  :expenses {:items [{:code "food"
                                      :desc "foodstuffs & manufactured goods"}
                                     {:code "out"
@@ -94,7 +109,7 @@
 
 (defonce ^:private *bot-user (atom nil))
 
-(def min-members-for-general-acc
+(def min-members-for-general-account
   "The number of users in a group chat (including the bot)
    required to create a general account."
   3)
@@ -108,6 +123,9 @@
 (def cd-expense-item-prefix "ei::")
 (def cd-group-chat-prefix "gc::")
 (def cd-account-prefix "ac::")
+
+;; TODO: Proper localization (with fn).
+(def default-general-acc-name "общие")
 
 ;; TODO: Make messages texts localizable:
 ;;       - take the ':language_code' of the chat initiator (no personal settings)
@@ -152,6 +170,11 @@
   [first-name]
   {:type :text
    :text (str "Привет, " first-name "! Чтобы добавить новый расход просто напиши мне сумму.")})
+
+(defn get-added-to-new-group-msg
+  [chat-title]
+  {:type :text
+   :text (str "Вас добавили в группу \"" chat-title "\".")})
 
 (defn build-select-items-options
   [items name-extr-fn key-extr-fn val-extr-fn]
@@ -220,17 +243,21 @@
 
 ;; AUXILIARY FUNCTIONS
 
+(defn- setup-new-chat!
+  [chat-id init-chat-data]
+  (if-not (contains? @*bot-data chat-id) ;; petty RC
+    (swap! *bot-data assoc chat-id init-chat-data)))
+
 (defn setup-new-group-chat!
   [chat-id chat-members-count]
-  (if-not (contains? @*bot-data chat-id) ;; petty RC
-    (swap! *bot-data assoc chat-id {:state :initial
-                                    :members-count chat-members-count
-                                    :accounts {:last-id -1}})))
+  (setup-new-chat! chat-id {:state :initial
+                            :members-count chat-members-count
+                            :accounts {:last-id -1}}))
 
 (defn setup-new-private-chat!
-  [chat-id]
-  (swap! *bot-data assoc chat-id {:state :input
-                                  :groups []}))
+  [chat-id group]
+  (setup-new-chat! chat-id {:state :initial
+                            :groups #{group}}))
 
 (defn get-real-chat-id
   "Built-in insurance in case of 'supergroup' chat."
@@ -296,39 +323,76 @@
    :user-id user-id})
 
 (defn- build-general-account
-  [id created members]
+  [id name created members]
   {:id id
    :type :general
-   :name "общие" ;; TODO: Proper l10n.
+   :name name
    :created created
-   :members members})
+   :members (set members)})
+
+(defn- get-current-general-account
+  [chat-data]
+  (let [gen-accs (get-in chat-data [:accounts :general])]
+    (if (some? gen-accs)
+      (->> (get-in chat-data [:accounts :general])
+           (apply max-key key)
+           second))))
+
+(defn- get-personal-account-ids
+  [chat-data]
+  (->> (get-in chat-data [:accounts :personal])
+       (map (comp :id val))))
 
 (defn create-general-account!
   [chat-id created-dt]
   (swap! *bot-data
          (fn [bot-data]
            (let [real-chat-id (get-real-chat-id chat-id)
+                 chat-data (get bot-data real-chat-id)
+                 existing-gen-acc (get-current-general-account chat-data)
+                 curr-gen-acc-id (:id existing-gen-acc)
                  next-id (get-accounts-next-id real-chat-id)
-                 general-acc (build-general-account next-id created-dt [])]
-             (-> bot-data
-                 (assoc-in [real-chat-id :accounts :last-id] next-id)
-                 (assoc-in [real-chat-id :accounts :general next-id] general-acc))))))
+                 acc-name (if (nil? existing-gen-acc)
+                            default-general-acc-name
+                            (:name existing-gen-acc))
+                 members (if (nil? existing-gen-acc)
+                           (get-personal-account-ids chat-data)
+                           (:members existing-gen-acc))
+                 general-acc (build-general-account next-id acc-name created-dt members)]
+             (as-> bot-data $
+                   (assoc-in $ [real-chat-id :accounts :last-id] next-id)
+                   (if-not (nil? existing-gen-acc)
+                     (assoc-in $ [real-chat-id :accounts :general curr-gen-acc-id :revoked] created-dt)
+                     $)
+                   (assoc-in $ [real-chat-id :accounts :general next-id] general-acc))))))
 
-(defn update-general-account-members
+;; TODO: There have to be another version that removes an old member.
+(defn add-general-account-member
   [chat-data new-pers-acc-id]
-  ;; TODO: Should have a bit more complicated logic at some point.
-  ;;       The 'general' account must have multiple versions that
-  ;;       are created when the 'pers-acc-count' changes.
-  (let [curr-general-acc-id 0
-        existing-pers-accs (->> (get-in chat-data [:accounts :personal])
-                                (map (comp :id val)))]
-    (assoc-in chat-data
-              [:accounts :general curr-general-acc-id :members]
-              (conj existing-pers-accs new-pers-acc-id))))
+  (let [curr-gen-acc-id (:id (get-current-general-account chat-data))]
+    (update-in chat-data [:accounts :general curr-gen-acc-id :members] conj new-pers-acc-id)))
+
+(defn- get-personal-account-id
+  [chat-data user-id]
+  (get-in chat-data [:user-account-mapping user-id]))
+
+(defn- set-personal-account-id
+  [chat-data user-id pers-acc-id]
+  (assoc-in chat-data [:user-account-mapping user-id] pers-acc-id))
+
+(defn- build-new-group
+  [chat-id chat-title]
+  {:id chat-id ;; TODO: Check if it works in case of a 'supergroup'.
+   :title chat-title})
+
+(defn- update-private-chat-groups!
+  [chat-id new-group]
+  (let [real-chat-id (get-real-chat-id chat-id)] ;; petty RC
+    (swap! *bot-data update-in [real-chat-id :groups] conj new-group)))
 
 (defn create-personal-account!
-  [chat-id chat-title user-id acc-name created-dt first-msg-id]
-  (if (nil? (get-in (get-chat-data chat-id) [:user-account-mapping user-id])) ;; petty RC
+  [chat-id user-id acc-name created-dt first-msg-id]
+  (if (nil? (get-personal-account-id (get-chat-data chat-id) user-id)) ;; petty RC
     (swap! *bot-data
            (fn [bot-data]
              (let [real-chat-id (get-real-chat-id chat-id)
@@ -340,39 +404,46 @@
 
                    upd-with-personal-acc-fn
                    (fn [bot-data]
-                     (let [new-pers-acc (build-personal-account
+                     (let [chat-data (get bot-data real-chat-id)
+                           new-pers-acc (build-personal-account
                                           next-id acc-name created-dt first-msg-id user-id)]
-                       (-> bot-data
-                           (assoc-in [real-chat-id :accounts :personal next-id] new-pers-acc)
-                           (assoc-in [real-chat-id :user-account-mapping user-id] next-id))))
+                       (assoc-in bot-data [real-chat-id]
+                                 (-> chat-data
+                                     (assoc-in [:accounts :personal next-id] new-pers-acc)
+                                     (set-personal-account-id user-id next-id)))))
 
                    upd-general-acc-members-fn
                    (fn [bot-data]
-                     (let [chat-data (get-chat-data real-chat-id)]
+                     (let [chat-data (get bot-data real-chat-id)]
                        (if-not (empty? (-> chat-data :accounts :general))
                          (assoc bot-data
-                           real-chat-id (update-general-account-members chat-data next-id))
-                         bot-data)))
-
-                   upd-private-chat-groups-fn
-                   (fn [bot-data]
-                     (let [new-group {;; TODO: Check if it works in case of a 'supergroup'.
-                                      :id chat-id
-                                      ;; TODO: Should be updated when the group title is changed.
-                                      :title chat-title}]
-                       (update-in bot-data [user-id :groups] conj new-group)))]
+                           real-chat-id (add-general-account-member chat-data next-id))
+                         bot-data)))]
                (-> bot-data
                    upd-accounts-next-id-fn
                    upd-with-personal-acc-fn
-                   upd-general-acc-members-fn
-                   upd-private-chat-groups-fn))))))
+                   upd-general-acc-members-fn))))))
+
+(defn update-personal-account!
+  [chat-id user-id acc-name]
+  (let [user-pers-acc (get-personal-account-id (get-chat-data chat-id) user-id)]
+    (if (some? user-pers-acc) ;; petty RC
+      (swap! *bot-data
+             (fn [bot-data]
+               (let [real-chat-id (get-real-chat-id chat-id)
+
+                     upd-acc-name-fn
+                     (fn [bot-data]
+                       (assoc-in bot-data
+                                 [real-chat-id :accounts :personal user-pers-acc :name]
+                                 acc-name))]
+                 (-> bot-data
+                     upd-acc-name-fn)))))))
 
 (defn get-personal-accounts-uncreated-count
   [chat-id chat-members-count]
   (let [chat-data (get-chat-data chat-id)
-        pers-acc-num (->> (get-in chat-data [:accounts :personal])
-                          (filter (fn [[k _]] (some? k)))
-                          count)]
+        pers-acc-num (count (get-personal-account-ids chat-data))]
     (- chat-members-count pers-acc-num 1)))
 
 (defn get-group-expense-items
@@ -389,12 +460,10 @@
                             (map val $))]
         (assert (= (count pers-accs) 1))
         pers-accs)
-      (let [general-acc (->> (get-in chat-data [:accounts :general])
-                             (apply max-key key)
-                             second)
+      (let [general-acc (get-current-general-account chat-data)
             group-accs (->> (get-in chat-data [:accounts :group])
                             (map val))
-            user-pers-acc (get-in chat-data [:user-account-mapping user-id])
+            user-pers-acc (get-personal-account-id chat-data user-id)
             pers-accs (as-> (get-in chat-data [:accounts :personal]) $
                             (dissoc $ user-pers-acc)
                             (map val $))]
@@ -410,10 +479,9 @@
                            (.intValue (biginteger (nth account-path-str 1))))]
     (:name (get-in chat-data account-path))))
 
-(defn- is-reply-to?
-  [chat-id msg-key {msg-id :message_id :as msg}]
-  (and (some? msg)
-       (= msg-id (get-bot-msg-id chat-id msg-key))))
+(defn- is-reply-to-bot?
+  [chat-id bot-msg-key message]
+  (tg-api/is-reply-to? (get-bot-msg-id chat-id bot-msg-key) message))
 
 
 ;; STATES & STATE TRANSITIONS
@@ -426,7 +494,8 @@
    :ready #{:initial :waiting}})
 
 (def ^:private private-chat-states
-  {:input {:to #{:select-group :select-expense-item :select-account :input}
+  {:initial #{:input}
+   :input {:to #{:select-group :select-expense-item :select-account :input}
            :init-fn (fn [chat-data]
                       (select-keys chat-data [:groups]))}
    :select-group #{:select-expense-item :select-account :input}
@@ -531,9 +600,9 @@
   (m-hlr/command-fn
     "start"
     (fn [{{first-name :first_name :as _user} :from
-          {chat-id :id type :type :as chat} :chat :as _message}]
+          {chat-id :id :as chat} :chat :as _message}]
       (log/debug "Conversation started in chat:" chat)
-      (when (= type "private")
+      (when (tg-api/is-private? chat)
         (let [result (handle-state-transition chat-id
                                               {:transition [:private :input]
                                                :params {:first-name first-name}})]
@@ -552,16 +621,16 @@
 
   (m-hlr/command-fn
     "calc"
-    (fn [{{chat-id :id type :type :as chat} :chat :as _message}]
+    (fn [{{chat-id :id :as chat} :chat :as _message}]
       (log/debug "Calculator opened in chat:" chat)
-      (when (and (= type "private")
+      (when (and (tg-api/is-private? chat)
                  (= :input (get-chat-state chat-id)))
         (let [result (handle-state-transition chat-id
                                               {:transition [:private :upd-user-input]})]
           (respond! (assoc (:message result) :chat-id chat-id)))
         op-succeed)))
 
-  ;; TODO: Implement the commands handling.
+  ;; TODO: Implement the commands handling (including '/cancel' for private chat).
 
   ;; INLINE QUERIES
 
@@ -584,16 +653,16 @@
 
   (m-hlr/callback-fn
     (fn [{{user-id :id first-name :first_name :as _user} :from
-          {{chat-id :id type :type} :chat :as _msg} :message
+          {{chat-id :id :as chat} :chat :as _msg} :message
           callback-btn-data :data :as _callback-query}]
-      (when (and (= type "private")
+      (when (and (tg-api/is-private? chat)
                  (= :select-group (get-chat-state chat-id))
                  (str/starts-with? callback-btn-data cd-group-chat-prefix))
         (let [group-chat-id-str (str/replace-first callback-btn-data cd-group-chat-prefix "")
               group-chat-id (nums/parse-int group-chat-id-str)]
           (set-chat-data! chat-id [:group] group-chat-id)
           ;; TODO: This pattern '(let [result (handle-state-transition ...)] (respond! ...)'
-          ;;       is repeated quite often. It should be automation with an intermediary fn.
+          ;;       is repeated quite often. It should be automated with an intermediary fn.
           (let [expense-items (get-group-expense-items group-chat-id)
                 event (if (seq expense-items)
                         {:transition [:private :expense-item-selection]
@@ -606,9 +675,9 @@
 
   (m-hlr/callback-fn
     (fn [{{user-id :id :as _user} :from
-          {{chat-id :id type :type} :chat :as _msg} :message
+          {{chat-id :id :as chat} :chat :as _msg} :message
           callback-btn-data :data :as _callback-query}]
-      (when (and (= type "private")
+      (when (and (tg-api/is-private? chat)
                  (= :select-expense-item (get-chat-state chat-id))
                  (str/starts-with? callback-btn-data cd-expense-item-prefix))
         (let [expense-item (str/replace-first callback-btn-data cd-expense-item-prefix "")]
@@ -622,9 +691,9 @@
           op-succeed))))
 
   (m-hlr/callback-fn
-    (fn [{{{chat-id :id type :type} :chat :as _msg} :message
+    (fn [{{{chat-id :id :as chat} :chat :as _msg} :message
           callback-btn-data :data :as _callback-query}]
-      (when (and (= type "private")
+      (when (and (tg-api/is-private? chat)
                  (= :select-account (get-chat-state chat-id))
                  (str/starts-with? callback-btn-data cd-account-prefix))
         (let [chat-data (get-chat-data chat-id)
@@ -653,16 +722,16 @@
           {_user-id :id _first-name :first_name _last-name :last_name
            _username :username _is-bot :is_bot _lang :language_code :as _user} :from
           date :date
-          {_old-user :user old-status :status :as _old-chat-member} :old_chat_member
-          {_new-user :user new-status :status :as new-chat-member} :new_chat_member
-          :as _my_chat_member}]
+          {_old-user :user _old-status :status :as _old-chat-member} :old_chat_member
+          {_new-user :user _new-status :status :as _new-chat-member} :new_chat_member
+          :as my-chat-member-updated}]
       (log/debug "Bot chat member status updated in:" chat)
-      (if (and (some? new-chat-member) (= "member" new-status) (= "left" old-status))
+      (if (tg-api/has-joined? my-chat-member-updated)
         (do
           (let [token (config/get-prop :bot-api-token)
                 chat-members-count (tg-client/get-chat-members-count token chat-id)]
             (setup-new-group-chat! chat-id chat-members-count)
-            (when (>= chat-members-count min-members-for-general-acc)
+            (when (>= chat-members-count min-members-for-general-account)
               (create-general-account! chat-id date)))
 
           (respond-attentively! (assoc introduction-msg :chat-id chat-id)
@@ -682,9 +751,11 @@
           date :date
           {_old-user :user _old-status :status :as _old-chat-member} :old_chat_member
           {_new-user :user _new-status :status :as _new-chat-member} :new_chat_member
-          :as _chat_member}]
+          :as _chat-member-updated}]
       (log/debug "Chat member status updated in:" chat)
+      ;; TODO: State transition of the group to ':waiting'.
       ;; TODO: Inc-/decrement the ':members-count' in this group.
+      ;; TODO: Create a general account anew (and check its ':members').
       (ignore "chat member status update dated %s in chat=%s" date chat-id)))
 
   ;; PLAIN MESSAGES
@@ -697,14 +768,19 @@
   (m-hlr/message-fn
     (fn [{msg-id :message_id date :date text :text
           {user-id :id :as _user} :from
-          {chat-id :id type :type chat-title :title} :chat
-          original-msg :reply_to_message
-          :as _message}]
-      (when (and (contains? #{"group" "supergroup"} type)
+          {chat-id :id chat-title :title :as chat} :chat
+          :as message}]
+      (when (and (tg-api/is-group? chat)
                  (= :waiting (get-chat-state chat-id))
-                 (is-reply-to? chat-id :name-request-msg-id original-msg))
-        (setup-new-private-chat! user-id)
-        (create-personal-account! chat-id chat-title user-id text date msg-id)
+                 (is-reply-to-bot? chat-id :name-request-msg-id message))
+        (let [group (build-new-group chat-id chat-title)]
+          (if-not (setup-new-private-chat! user-id group)
+            (update-private-chat-groups! user-id group)))
+
+        (if (create-personal-account! chat-id user-id text date msg-id)
+          (if (not= :initial (get-chat-state user-id))
+            (respond! (assoc (get-added-to-new-group-msg chat-title) :chat-id user-id)))
+          (update-personal-account! chat-id user-id text))
 
         (let [chat-members-count (:members-count (get-chat-data chat-id))
               uncreated-count (get-personal-accounts-uncreated-count chat-id chat-members-count)
@@ -722,9 +798,9 @@
   (m-hlr/message-fn
     (fn [{text :text
           {user-id :id first-name :first_name :as _user} :from
-          {chat-id :id type :type} :chat
+          {chat-id :id :as chat} :chat
           :as _message}]
-      (when (and (= type "private")
+      (when (and (tg-api/is-private? chat)
                  (= :input (get-chat-state chat-id)))
         (let [input (nums/parse-number text)]
           (when (number? input)
@@ -753,9 +829,9 @@
   (m-hlr/message-fn
     (fn [{text :text
           {user-id :id :as _user} :from
-          {chat-id :id type :type} :chat
+          {chat-id :id :as chat} :chat
           :as _message}]
-      (when (and (= type "private")
+      (when (and (tg-api/is-private? chat)
                  (= :select-expense-item (get-chat-state chat-id)))
         (log/debug "Expense description:" text)
         (set-chat-data! chat-id [:expense-item] text)

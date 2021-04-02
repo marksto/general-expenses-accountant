@@ -1,6 +1,41 @@
 (ns general-expenses-accountant.tg-bot-api
   "Morse's missing pieces of the Telegram Bot API")
 
+;; TODO: Define the most used "AVAILABLE TYPES" as CLJC records w/ type hints.
+
+;; AUXILIARY CHECKS
+
+; Chat
+
+(defn is-private?
+  [{type :type :as _chat}]
+  (= type "private"))
+
+(defn is-group?
+  [{type :type :as _chat}]
+  (contains? #{"group" "supergroup"} type))
+
+; Message
+
+(defn is-reply-to?
+  [msg-id {{original-msg-id :message_id :as original-msg} :reply_to_message
+           :as _message}]
+  (and (some? msg-id)
+       (some? original-msg)
+       (= msg-id original-msg-id)))
+
+; Chat Member
+
+(defn has-joined?
+  [{{old-status :status :as old-chat-member} :old_chat_member
+    {new-status :status :as new-chat-member} :new_chat_member
+    :as _chat-member-updated}]
+  (and (some? old-chat-member)
+       (some? new-chat-member)
+       (= "member" new-status)
+       (contains? #{"left" "kicked"} old-status)))
+
+
 ;; AVAILABLE METHODS
 
 ; /sendMessage
