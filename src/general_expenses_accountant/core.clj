@@ -114,6 +114,8 @@
    required to create a general account."
   3)
 
+;; TODO: Implement transactions log. Each group chat is to keep a list of all inbound expenses (as data, with IDs).
+
 
 ;; MESSAGE TEMPLATES & CALLBACK DATA
 
