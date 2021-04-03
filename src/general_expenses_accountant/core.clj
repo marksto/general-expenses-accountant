@@ -109,7 +109,7 @@
 
 (defonce ^:private *bot-user (atom nil))
 
-(def min-members-for-general-account
+(def ^:private min-members-for-general-account
   "The number of users in a group chat (including the bot)
    required to create a general account."
   3)
@@ -119,20 +119,20 @@
 
 ;; MESSAGE TEMPLATES & CALLBACK DATA
 
-(def cd-accounts "<accounts>")
-(def cd-expense-items "<expense_items>")
-(def cd-data-store "<data_store>")
-(def cd-expense-item-prefix "ei::")
-(def cd-group-chat-prefix "gc::")
-(def cd-account-prefix "ac::")
+(def ^:private cd-accounts "<accounts>")
+(def ^:private cd-expense-items "<expense_items>")
+(def ^:private cd-data-store "<data_store>")
+(def ^:private cd-expense-item-prefix "ei::")
+(def ^:private cd-group-chat-prefix "gc::")
+(def ^:private cd-account-prefix "ac::")
 
 ;; TODO: Proper localization (with fn).
-(def default-general-acc-name "общие")
+(def ^:private default-general-acc-name "общие")
 
 ;; TODO: Make messages texts localizable:
 ;;       - take the ':language_code' of the chat initiator (no personal settings)
 ;;       - externalize texts, keep only their keys (to get them via 'l10n')
-(def introduction-msg
+(def ^:private introduction-msg
   {:type :text
    :text "Привет, народ! Я — бот-бухгалтер. И я призван помочь вам с учётом ваших общих расходов.\n
 Для того, чтобы начать работу, просто ответьте на следующее сообщение.\n
@@ -147,18 +147,18 @@
                                  (tg-api/build-inline-kbd-btn "статьи" :callback_data cd-expense-items)
                                  (tg-api/build-inline-kbd-btn "хранилище" :callback_data cd-data-store)]])})})
 
-(def personal-account-name-msg
+(def ^:private personal-account-name-msg
   {:type :text
    :text "Как будет называться ваш личный счёт?"
    :options (tg-api/build-message-options
               {:reply-markup (tg-api/build-reply-markup :force-reply)})})
 
-(defn get-personal-accounts-left-msg
+(defn- get-personal-accounts-left-msg
   [count]
   {:type :text
    :text (format "Ожидаем остальных... Осталось %s." count)})
 
-(defn get-bot-readiness-msg
+(defn- get-bot-readiness-msg
   [bot-username]
   {:type :text
    :text "Я готов к ведению учёта. Давайте же начнём!"
@@ -168,17 +168,17 @@
                                [[(tg-api/build-inline-kbd-btn "Перейти в чат для ввода расходов"
                                                               :url (str "https://t.me/" bot-username))]])})})
 
-(defn get-private-introduction-msg
+(defn- get-private-introduction-msg
   [first-name]
   {:type :text
    :text (str "Привет, " first-name "! Чтобы добавить новый расход просто напиши мне сумму.")})
 
-(defn get-added-to-new-group-msg
+(defn- get-added-to-new-group-msg
   [chat-title]
   {:type :text
    :text (str "Вас добавили в группу \"" chat-title "\".")})
 
-(defn build-select-items-options
+(defn- build-select-items-options
   [items name-extr-fn key-extr-fn val-extr-fn]
   (let [select-items (for [item items]
                        [(tg-api/build-inline-kbd-btn (name-extr-fn item)
@@ -187,35 +187,35 @@
     (tg-api/build-message-options
       {:reply-markup (tg-api/build-reply-markup :inline-keyboard (vec select-items))})))
 
-(defn build-groups-options
+(defn- groups->options
   [groups]
   (build-select-items-options groups
                               :title
                               (constantly :callback_data)
                               #(str cd-group-chat-prefix (:id %))))
 
-(defn get-group-selection-msg
+(defn- get-group-selection-msg
   [groups]
   (assert (seq groups))
   {:type :text
    :text "Выберите, к чему отнести расход:"
-   :options (build-groups-options groups)})
+   :options (groups->options groups)})
 
-(defn build-expense-items-options
+(defn- expense-items->options
   [expense-items]
   (build-select-items-options expense-items
                               :desc
                               (constantly :callback_data)
                               #(str cd-expense-item-prefix (:code %))))
 
-(defn get-expense-item-selection-msg
+(defn- get-expense-item-selection-msg
   [expense-items]
   (assert (seq expense-items))
   {:type :text
    :text "Выберите статью расходов:"
-   :options (build-expense-items-options expense-items)})
+   :options (expense-items->options expense-items)})
 
-(defn get-expense-manual-description-msg
+(defn- get-expense-manual-description-msg
   [user-name user-id]
   {:type :text
    :text (str "[" user-name "](tg://user?id=" user-id "), опишите расход в двух словах:")
@@ -223,26 +223,26 @@
               {:parse-mode "MarkdownV2"
                :reply-markup (tg-api/build-reply-markup :force-reply {:selective true})})})
 
-(defn build-accounts-options
+(defn- accounts->options
   [accounts]
   (build-select-items-options accounts
                               :name
                               (constantly :callback_data)
                               #(str cd-account-prefix (name (:type %)) "-" (:id %))))
 
-(defn get-account-selection-msg
+(defn- get-account-selection-msg
   [accounts]
   (assert (seq accounts))
   {:type :text
    :text "Выберите тех, кто понёс расход:"
-   :options (build-accounts-options accounts)})
+   :options (accounts->options accounts)})
 
-(defn get-group-expense-msg
+(defn- get-group-expense-msg
   [input account expense-item]
   {:type :text
    :text (str/join " " [input account expense-item])})
 
-(def expense-added-successfully-msg
+(def ^:private expense-added-successfully-msg
   {:type :text
    :text "Запись успешно внесена в ваш гроссбух."})
 
@@ -254,29 +254,29 @@
   (if-not (contains? @*bot-data chat-id) ;; petty RC
     (swap! *bot-data assoc chat-id init-chat-data)))
 
-(defn setup-new-group-chat!
+(defn- setup-new-group-chat!
   [chat-id chat-members-count]
   (setup-new-chat! chat-id {:state :initial
                             :members-count chat-members-count
                             :accounts {:last-id -1}}))
 
-(defn setup-new-private-chat!
+(defn- setup-new-private-chat!
   [chat-id group]
   (setup-new-chat! chat-id {:state :initial
                             :groups #{group}}))
 
-(defn get-real-chat-id
+(defn- get-real-chat-id
   "Built-in insurance in case of 'supergroup' chat."
   [chat-id]
   (let [value (get-in @*bot-data [chat-id])]
     (if (int? value) (get-real-chat-id value) chat-id)))
 
-(defn get-chat-data
+(defn- get-chat-data
   [chat-id]
   (let [real-chat-id (get-real-chat-id chat-id)]
     (get-in @*bot-data [real-chat-id])))
 
-(defn set-chat-data!
+(defn- set-chat-data!
   [chat-id [key & ks] value]
   (let [real-chat-id (get-real-chat-id chat-id)
         full-path (concat [real-chat-id key] ks)]
@@ -284,15 +284,7 @@
       (swap! *bot-data update-in (butlast full-path) dissoc (last full-path))
       (swap! *bot-data assoc-in full-path value))))
 
-(defn get-bot-msg-id
-  [chat-id msg-key]
-  (get-in (get-chat-data chat-id) [:bot-messages msg-key]))
-
-(defn set-bot-msg-id!
-  [chat-id msg-key msg-id]
-  (set-chat-data! chat-id [:bot-messages msg-key] msg-id))
-
-(defn get-chat-state
+(defn- get-chat-state
   "Returns the state of the given chat.
    NB: Be aware that calling that function, e.g. during a state change,
        can cause a race condition (RC) and result in an obsolete value."
@@ -315,11 +307,7 @@
                        (assoc-in $ [chat-id :state] new-state)))
                bot-data)))))
 
-(defn get-accounts-next-id
-  [chat-id]
-  (-> (get-chat-data chat-id) :accounts :last-id inc))
-
-(defn- build-personal-account
+(defn- ->personal-account
   [id name created msg-id user-id]
   {:id id
    :type :personal
@@ -328,7 +316,7 @@
    :msg-id msg-id
    :user-id user-id})
 
-(defn- build-general-account
+(defn- ->general-account
   [id name created members]
   {:id id
    :type :general
@@ -344,12 +332,16 @@
            (apply max-key key)
            second))))
 
+(defn- get-accounts-next-id
+  [chat-id]
+  (-> (get-chat-data chat-id) :accounts :last-id inc))
+
 (defn- get-personal-account-ids
   [chat-data]
   (->> (get-in chat-data [:accounts :personal])
        (map (comp :id val))))
 
-(defn create-general-account!
+(defn- create-general-account!
   [chat-id created-dt]
   (swap! *bot-data
          (fn [bot-data]
@@ -364,7 +356,7 @@
                  members (if (nil? existing-gen-acc)
                            (get-personal-account-ids chat-data)
                            (:members existing-gen-acc))
-                 general-acc (build-general-account next-id acc-name created-dt members)]
+                 general-acc (->general-account next-id acc-name created-dt members)]
              (as-> bot-data $
                    (assoc-in $ [real-chat-id :accounts :last-id] next-id)
                    (if-not (nil? existing-gen-acc)
@@ -373,7 +365,7 @@
                    (assoc-in $ [real-chat-id :accounts :general next-id] general-acc))))))
 
 ;; TODO: There have to be another version that removes an old member.
-(defn add-general-account-member
+(defn- add-general-account-member
   [chat-data new-pers-acc-id]
   (let [curr-gen-acc-id (:id (get-current-general-account chat-data))]
     (update-in chat-data [:accounts :general curr-gen-acc-id :members] conj new-pers-acc-id)))
@@ -386,17 +378,7 @@
   [chat-data user-id pers-acc-id]
   (assoc-in chat-data [:user-account-mapping user-id] pers-acc-id))
 
-(defn- build-new-group
-  [chat-id chat-title]
-  {:id chat-id ;; TODO: Check if it works in case of a 'supergroup'.
-   :title chat-title})
-
-(defn- update-private-chat-groups!
-  [chat-id new-group]
-  (let [real-chat-id (get-real-chat-id chat-id)] ;; petty RC
-    (swap! *bot-data update-in [real-chat-id :groups] conj new-group)))
-
-(defn create-personal-account!
+(defn- create-personal-account!
   [chat-id user-id acc-name created-dt first-msg-id]
   (if (nil? (get-personal-account-id (get-chat-data chat-id) user-id)) ;; petty RC
     (swap! *bot-data
@@ -411,7 +393,7 @@
                    upd-with-personal-acc-fn
                    (fn [bot-data]
                      (let [chat-data (get bot-data real-chat-id)
-                           new-pers-acc (build-personal-account
+                           new-pers-acc (->personal-account
                                           next-id acc-name created-dt first-msg-id user-id)]
                        (assoc-in bot-data [real-chat-id]
                                  (-> chat-data
@@ -430,7 +412,7 @@
                    upd-with-personal-acc-fn
                    upd-general-acc-members-fn))))))
 
-(defn update-personal-account!
+(defn- update-personal-account!
   [chat-id user-id acc-name]
   (let [user-pers-acc (get-personal-account-id (get-chat-data chat-id) user-id)]
     (if (some? user-pers-acc) ;; petty RC
@@ -446,19 +428,21 @@
                  (-> bot-data
                      upd-acc-name-fn)))))))
 
-(defn get-personal-accounts-uncreated-count
+(defn- get-missing-personal-accounts
+  "The number of missing personal accounts
+   (which need to be created for the group to be ready)."
   [chat-id chat-members-count]
   (let [chat-data (get-chat-data chat-id)
         pers-acc-num (count (get-personal-account-ids chat-data))]
     (- chat-members-count pers-acc-num 1)))
 
-(defn get-group-expense-items
+(defn- get-group-expense-items
   [chat-id]
   (let [chat-data (get-chat-data chat-id)]
     ;; TODO: Sort them according popularity.
     (get-in chat-data [:expenses :items])))
 
-(defn get-group-accounts
+(defn- get-group-accounts
   [chat-id user-id]
   (let [chat-data (get-chat-data chat-id)]
     (if (empty? (-> chat-data :accounts :general))
@@ -476,7 +460,7 @@
         ;; TODO: Sort them according popularity.
         (into [general-acc] (concat group-accs pers-accs))))))
 
-(defn- to-account-name
+(defn- data->account-name
   [callback-btn-data chat-data]
   (let [account (str/replace-first callback-btn-data cd-account-prefix "")
         account-path-str (str/split account #"-")
@@ -485,9 +469,28 @@
                            (.intValue (biginteger (nth account-path-str 1))))]
     (:name (get-in chat-data account-path))))
 
+(defn- get-bot-msg-id
+  [chat-id msg-key]
+  (get-in (get-chat-data chat-id) [:bot-messages msg-key]))
+
+(defn- set-bot-msg-id!
+  [chat-id msg-key msg-id]
+  (set-chat-data! chat-id [:bot-messages msg-key] msg-id))
+
 (defn- is-reply-to-bot?
   [chat-id bot-msg-key message]
   (tg-api/is-reply-to? (get-bot-msg-id chat-id bot-msg-key) message))
+
+;; TODO: Remove later, when successfully switched to a set of IDs.
+(defn- ->group-ref
+  [group-chat-id group-chat-title]
+  {:id group-chat-id ;; TODO: Check if it works in case of a 'supergroup'.
+   :title group-chat-title})
+
+(defn- update-private-chat-group-refs!
+  [chat-id new-group]
+  (let [real-chat-id (get-real-chat-id chat-id)] ;; petty RC
+    (swap! *bot-data update-in [real-chat-id :groups] conj new-group)))
 
 
 ;; STATES & STATE TRANSITIONS
@@ -508,7 +511,7 @@
    :select-expense-item #{:select-account :input}
    :select-account #{:input}})
 
-(defn change-chat-state!*
+(defn- change-chat-state!*
   [chat-type chat-id new-state]
   (let [chat-states (case chat-type
                       :group group-chat-states
@@ -541,7 +544,7 @@
              :successful-input {:to-state :input
                                 :message expense-added-successfully-msg}}})
 
-(defn handle-state-transition
+(defn- handle-state-transition
   [chat-id event]
   (let [chat-type (first (:transition event))
         transition (get-in state-transitions (:transition event))
@@ -559,7 +562,7 @@
 ;; RECIPROCAL ACTIONS
 
 ;; NB: Properly wrapped in try-catch and logged to highlight the exact HTTP client error.
-(defn respond!
+(defn- respond!
   [{:keys [type chat-id text inline-query-id results callback-query-id options]
     :as response}]
   (try
@@ -573,7 +576,7 @@
     (catch Exception e
       (log/error e "Failed to respond with:" response))))
 
-(defn respond-attentively!
+(defn- respond-attentively!
   [response tg-response-handler-fn]
   (let [tg-response (respond! response)]
     (if (:ok tg-response)
@@ -592,16 +595,16 @@
 ;;            - the last handler, in case the request wasn't processed, have to result in 'ignore'
 
 ;; NB: Any non-nil will do.
-(def op-succeed {:ok true})
+(def ^:private op-succeed {:ok true})
 
-(defmacro ignore
+(defmacro ^:private ignore
   [msg & args]
   `(do
      (log/debugf (str "Ignored: " ~msg) ~@args)
      op-succeed))
 
 
-;; Bot API
+;; BOT API
 
 (m-hlr/defhandler
   handler
@@ -711,7 +714,7 @@
         (let [chat-data (get-chat-data chat-id)
               group-chat-id (:group chat-data)
               group-chat-data (get-chat-data group-chat-id)
-              account-name (to-account-name callback-btn-data group-chat-data)
+              account-name (data->account-name callback-btn-data group-chat-data)
               group-notification-msg (get-group-expense-msg (:amount chat-data)
                                                             account-name
                                                             (:expense-item chat-data))]
@@ -785,9 +788,9 @@
       (when (and (tg-api/is-group? chat)
                  (= :waiting (get-chat-state chat-id))
                  (is-reply-to-bot? chat-id :name-request-msg-id message))
-        (let [group (build-new-group chat-id chat-title)]
+        (let [group (->group-ref chat-id chat-title)]
           (if-not (setup-new-private-chat! user-id group)
-            (update-private-chat-groups! user-id group)))
+            (update-private-chat-group-refs! user-id group)))
 
         (if (create-personal-account! chat-id user-id text date msg-id)
           (if (not= :initial (get-chat-state user-id))
@@ -795,7 +798,7 @@
           (update-personal-account! chat-id user-id text))
 
         (let [chat-members-count (:members-count (get-chat-data chat-id))
-              uncreated-count (get-personal-accounts-uncreated-count chat-id chat-members-count)
+              uncreated-count (get-missing-personal-accounts chat-id chat-members-count)
               event (if (zero? uncreated-count)
                       {:transition [:group :ready]
                        :params {:bot-username (get @*bot-user :username)}}
