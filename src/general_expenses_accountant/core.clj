@@ -26,7 +26,7 @@
 
                 ;; for data input
                 :state :input
-                :input 3
+                :amount 100
                 :group -560000000
                 :expense-item "food"}}
 
@@ -241,6 +241,10 @@
   [input account expense-item]
   {:type :text
    :text (str/join " " [input account expense-item])})
+
+(def expense-added-successfully-msg
+  {:type :text
+   :text "Запись успешно внесена в ваш гроссбух."})
 
 
 ;; AUXILIARY FUNCTIONS
@@ -519,9 +523,9 @@
                    :message-fn get-bot-readiness-msg
                    :message-params [:bot-username]}}
 
-   :private {:input {:to-state :input
-                     :message-fn get-private-introduction-msg
-                     :message-params [:first-name]}
+   :private {:amount-input {:to-state :input
+                            :message-fn get-private-introduction-msg
+                            :message-params [:first-name]}
              :group-selection {:to-state :select-group
                                :message-fn get-group-selection-msg
                                :message-params [:groups]}
@@ -533,17 +537,23 @@
                                           :message-params [:first-name :user-id]}
              :accounts-selection {:to-state :select-account
                                   :message-fn get-account-selection-msg
-                                  :message-params [:accounts]}}})
+                                  :message-params [:accounts]}
+             :successful-input {:to-state :input
+                                :message expense-added-successfully-msg}}})
 
 (defn handle-state-transition
   [chat-id event]
   (let [chat-type (first (:transition event))
         transition (get-in state-transitions (:transition event))
+        message (:message transition)
         message-fn (:message-fn transition)
-        params-values (:params event)]
+        message-params (:message-params transition)]
     (change-chat-state!* chat-type chat-id (:to-state transition))
-    (when (and (some? message-fn) (some? params-values))
-      {:message (apply message-fn (map params-values (:message-params transition)))})))
+    (if (some? message)
+      {:message message}
+      (when (some? message-fn)
+        (let [param-values (or (:params event) {})]
+          {:message (apply message-fn (map param-values message-params))})))))
 
 
 ;; RECIPROCAL ACTIONS
@@ -606,7 +616,7 @@
       (log/debug "Conversation started in chat:" chat)
       (when (tg-api/is-private? chat)
         (let [result (handle-state-transition chat-id
-                                              {:transition [:private :input]
+                                              {:transition [:private :amount-input]
                                                :params {:first-name first-name}})]
           (respond! (assoc (:message result) :chat-id chat-id)))
         op-succeed)))
@@ -702,12 +712,12 @@
               group-chat-id (:group chat-data)
               group-chat-data (get-chat-data group-chat-id)
               account-name (to-account-name callback-btn-data group-chat-data)
-              group-notification-msg (get-group-expense-msg (:input chat-data)
+              group-notification-msg (get-group-expense-msg (:amount chat-data)
                                                             account-name
                                                             (:expense-item chat-data))]
           (respond! (assoc group-notification-msg :chat-id group-chat-id)))
-        ;; TODO: Write some success confirmation message to the private chat.
-        (handle-state-transition chat-id {:transition [:private :input]})
+        (let [result (handle-state-transition chat-id {:transition [:private :successful-input]})]
+          (respond! (assoc (:message result) :chat-id chat-id)))
         op-succeed)))
 
   ;; TODO: Implement the callback queries handling.
@@ -807,7 +817,7 @@
         (let [input (nums/parse-number text)]
           (when (number? input)
             (log/debug "User input:" input)
-            (set-chat-data! chat-id [:input] input)
+            (set-chat-data! chat-id [:amount] input)
             (let [groups (:groups (get-chat-data chat-id))
                   result (if (> (count groups) 1)
                            (handle-state-transition chat-id
