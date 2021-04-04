@@ -24,7 +24,9 @@
                 :state :input
                 :amount 100
                 :group -560000000
-                :expense-item "food"}}
+                :expense-item "food"
+                ;; or
+                :expense-desc "other"}}
 
     ;; group chat-id -> group-level settings
     {-560000000 {:state :initial
@@ -234,9 +236,14 @@
    :options (accounts->options accounts)})
 
 (defn- get-group-expense-msg
-  [input account expense-item]
+  [payer-acc-name amount debtor-acc-name expense-item-or-desc]
   {:type :text
-   :text (str/join " " [input account expense-item])})
+   :text (str "*" payer-acc-name "*\n"
+              (str/join " " [(str (format "%.2f" amount) "₽")
+                             "/" debtor-acc-name
+                             "/" expense-item-or-desc]))
+   :options (tg-api/build-message-options
+              {:parse-mode "MarkdownV2"})})
 
 (def ^:private expense-added-successfully-msg
   {:type :text
@@ -461,14 +468,17 @@
         ;; TODO: Sort them according popularity.
         (into [general-acc] (concat group-accs pers-accs))))))
 
+(defn- get-account-name
+  [group-chat-data acc-type acc-id]
+  (:name (get-in group-chat-data [:accounts acc-type acc-id])))
+
 (defn- data->account-name
-  [callback-btn-data chat-data]
+  [callback-btn-data group-chat-data]
   (let [account (str/replace-first callback-btn-data cd-account-prefix "")
-        account-path-str (str/split account #"-")
-        account-path (conj [:accounts]
-                           (keyword (nth account-path-str 0))
-                           (.intValue (biginteger (nth account-path-str 1))))]
-    (:name (get-in chat-data account-path))))
+        account-path (str/split account #"-")]
+    (get-account-name group-chat-data
+                      (keyword (nth account-path 0))
+                      (.intValue (biginteger (nth account-path 1))))))
 
 (defn- get-bot-msg-id
   [chat-id msg-key]
@@ -539,7 +549,7 @@
              :expense-item-selection {:to-state :select-expense-item
                                       :message-fn get-expense-item-selection-msg
                                       :message-params [:expense-items]}
-             :expense-manual-description {:to-state :select-expense-item
+             :manual-expense-description {:to-state :select-expense-item
                                           :message-fn get-expense-manual-description-msg
                                           :message-params [:first-name :user-id]}
              :accounts-selection {:to-state :select-account
@@ -616,7 +626,7 @@
         event (if (seq expense-items)
                 {:transition [:private :expense-item-selection]
                  :params {:expense-items expense-items}}
-                {:transition [:private :expense-manual-description]
+                {:transition [:private :manual-expense-description]
                  :params {:first-name first-name :user-id user-id}})]
     (proceed-and-respond! chat-id event)))
 
@@ -728,7 +738,8 @@
           op-succeed))))
 
   (m-hlr/callback-fn
-    (fn [{{{chat-id :id :as chat} :chat :as _msg} :message
+    (fn [{{user-id :id :as _user} :from
+          {{chat-id :id :as chat} :chat :as _msg} :message
           callback-btn-data :data :as _callback-query}]
       (when (and (tg-api/is-private? chat)
                  (= :select-account (get-chat-state chat-id))
@@ -736,10 +747,17 @@
         (let [chat-data (get-chat-data chat-id)
               group-chat-id (:group chat-data)
               group-chat-data (get-chat-data group-chat-id)
-              account-name (data->account-name callback-btn-data group-chat-data)
-              group-notification-msg (get-group-expense-msg (:amount chat-data)
-                                                            account-name
-                                                            (:expense-item chat-data))]
+              payer-acc-id (get-personal-account-id group-chat-data user-id)
+              payer-acc-name (get-account-name group-chat-data
+                                               :personal payer-acc-id)
+              debtor-acc-name (data->account-name callback-btn-data
+                                                  group-chat-data)
+              expense-item-or-desc (or (:expense-item chat-data)
+                                       (:expense-desc chat-data))
+              group-notification-msg (get-group-expense-msg payer-acc-name
+                                                            (:amount chat-data)
+                                                            debtor-acc-name
+                                                            expense-item-or-desc)]
           (respond! (assoc group-notification-msg :chat-id group-chat-id)))
 
         (proceed-and-respond! chat-id {:transition [:private :successful-input]})
@@ -883,7 +901,7 @@
       (when (and (tg-api/is-private? chat)
                  (= :select-expense-item (get-chat-state chat-id)))
         (log/debug "Expense description:" text)
-        (set-chat-data! chat-id [:expense-item] text)
+        (set-chat-data! chat-id [:expense-desc] text)
         (let [group-chat-id (:group (get-chat-data chat-id))
               accounts (get-group-accounts group-chat-id user-id)]
           (proceed-and-respond! chat-id {:transition [:private :accounts-selection]
