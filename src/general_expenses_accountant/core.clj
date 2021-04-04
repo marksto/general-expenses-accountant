@@ -18,11 +18,7 @@
 
 #_(def sample-data
     ;; private chat-id -> user-specific
-    ;; TODO: Store in ':groups' only IDs.
-    {280000000 {:groups #{{:id -560000000
-                           :title "Family"}
-                          {:id -1001000000000
-                           :title "Family"}}
+    {280000000 {:groups #{-560000000 -1001000000000}
 
                 ;; for data input
                 :state :input
@@ -32,7 +28,7 @@
 
     ;; group chat-id -> group-level settings
     {-560000000 {:state :initial
-                 ;; TODO: Store/update a group 'title'.
+                 :title "Family expenses"
                  :members-count 3
 
                  ;; messages to delete/check replies to
@@ -187,19 +183,19 @@
     (tg-api/build-message-options
       {:reply-markup (tg-api/build-reply-markup :inline-keyboard (vec select-items))})))
 
-(defn- groups->options
-  [groups]
-  (build-select-items-options groups
+(defn- group-refs->options
+  [group-refs]
+  (build-select-items-options group-refs
                               :title
                               (constantly :callback_data)
                               #(str cd-group-chat-prefix (:id %))))
 
 (defn- get-group-selection-msg
-  [groups]
-  (assert (seq groups))
+  [group-refs]
+  (assert (seq group-refs))
   {:type :text
-   :text "Выберите, к чему отнести расход:"
-   :options (groups->options groups)})
+   :text "Выберите, к какой группе отнести расход:"
+   :options (group-refs->options group-refs)})
 
 (defn- expense-items->options
   [expense-items]
@@ -255,15 +251,16 @@
     (swap! *bot-data assoc chat-id init-chat-data)))
 
 (defn- setup-new-group-chat!
-  [chat-id chat-members-count]
+  [chat-id chat-title chat-members-count]
   (setup-new-chat! chat-id {:state :initial
+                            :title chat-title
                             :members-count chat-members-count
                             :accounts {:last-id -1}}))
 
 (defn- setup-new-private-chat!
-  [chat-id group]
+  [chat-id group-chat-id]
   (setup-new-chat! chat-id {:state :initial
-                            :groups #{group}}))
+                            :groups #{group-chat-id}}))
 
 (defn- get-real-chat-id
   "Built-in insurance in case of 'supergroup' chat."
@@ -481,16 +478,15 @@
   [chat-id bot-msg-key message]
   (tg-api/is-reply-to? (get-bot-msg-id chat-id bot-msg-key) message))
 
-;; TODO: Remove later, when successfully switched to a set of IDs.
-(defn- ->group-ref
-  [group-chat-id group-chat-title]
-  {:id group-chat-id ;; TODO: Check if it works in case of a 'supergroup'.
-   :title group-chat-title})
-
-(defn- update-private-chat-group-refs!
-  [chat-id new-group]
+(defn- update-private-chat-groups!
+  [chat-id new-group-chat-id]
   (let [real-chat-id (get-real-chat-id chat-id)] ;; petty RC
-    (swap! *bot-data update-in [real-chat-id :groups] conj new-group)))
+    (swap! *bot-data update-in [real-chat-id :groups] conj new-group-chat-id)))
+
+(defn- ->group-ref
+  [group-chat-id]
+  {:id group-chat-id
+   :title (-> group-chat-id get-chat-data :title)})
 
 
 ;; STATES & STATE TRANSITIONS
@@ -531,7 +527,7 @@
                             :message-params [:first-name]}
              :group-selection {:to-state :select-group
                                :message-fn get-group-selection-msg
-                               :message-params [:groups]}
+                               :message-params [:group-refs]}
              :expense-item-selection {:to-state :select-expense-item
                                       :message-fn get-expense-item-selection-msg
                                       :message-params [:expense-items]}
@@ -751,7 +747,7 @@
   ;; CHAT MEMBER STATUS UPDATES
 
   (tg-client/bot-chat-member-status-fn
-    (fn [{{chat-id :id _type :type _title :title _username :username :as chat} :chat
+    (fn [{{chat-id :id _type :type chat-title :title _username :username :as chat} :chat
           {_user-id :id _first-name :first_name _last-name :last_name
            _username :username _is-bot :is_bot _lang :language_code :as _user} :from
           date :date
@@ -763,7 +759,7 @@
         (do
           (let [token (config/get-prop :bot-api-token)
                 chat-members-count (tg-client/get-chat-members-count token chat-id)]
-            (setup-new-group-chat! chat-id chat-members-count)
+            (setup-new-group-chat! chat-id chat-title chat-members-count)
             (when (>= chat-members-count min-members-for-general-account)
               (create-general-account! chat-id date)))
 
@@ -778,7 +774,7 @@
         (ignore "bot chat member status update dated %s in chat=%s" date chat-id))))
 
   (tg-client/chat-member-status-fn
-    (fn [{{chat-id :id _type :type _title :title _username :username :as chat} :chat
+    (fn [{{chat-id :id _type :type _chat-title :title _username :username :as chat} :chat
           {_user-id :id _first-name :first_name _last-name :last_name
            _username :username _is-bot :is_bot _lang :language_code :as _user} :from
           date :date
@@ -806,9 +802,9 @@
       (when (and (tg-api/is-group? chat)
                  (= :waiting (get-chat-state chat-id))
                  (is-reply-to-bot? chat-id :name-request-msg-id message))
-        (let [group (->group-ref chat-id chat-title)]
-          (if-not (setup-new-private-chat! user-id group)
-            (update-private-chat-group-refs! user-id group)))
+        (let [group-chat-id (get-real-chat-id chat-id)]
+          (if-not (setup-new-private-chat! user-id group-chat-id)
+            (update-private-chat-groups! user-id group-chat-id)))
 
         (if (create-personal-account! chat-id user-id text date msg-id)
           (if (not= :initial (get-chat-state user-id))
@@ -825,7 +821,18 @@
           (proceed-and-respond! chat-id event))
         op-succeed)))
 
-  ;; TODO: Implement scenario for migration from a 'group' chat to a 'supergroup' chat (catch ':migrate_to_chat_id').
+  (m-hlr/message-fn
+    (fn [{{chat-id :id :as chat} :chat
+          new-chat-title :new_chat_title
+          :as _message}]
+      (when (and (tg-api/is-group? chat)
+                 (some? new-chat-title))
+        (log/debugf "Chat %s title was changed to '%s'" chat-id new-chat-title)
+        (set-chat-data! chat-id [:title] new-chat-title)
+        op-succeed)))
+
+  ;; TODO: Implement scenario for migration from a 'group' chat to a 'supergroup' chat:
+  ;;       catch ':migrate_to_chat_id' and don't forget to update its users' ':groups'.
 
   (m-hlr/message-fn
     (fn [{text :text
@@ -840,9 +847,10 @@
             (set-chat-data! chat-id [:amount] input)
             (let [groups (:groups (get-chat-data chat-id))]
               (if (> (count groups) 1)
-                (proceed-and-respond! chat-id {:transition [:private :group-selection]
-                                               :params {:groups groups}})
-                (let [group-chat-id (:id (first groups))]
+                (let [group-refs (map ->group-ref groups)]
+                  (proceed-and-respond! chat-id {:transition [:private :group-selection]
+                                                 :params {:group-refs group-refs}}))
+                (let [group-chat-id (first groups)]
                   (log/debug "Group chat auto-selected:" group-chat-id)
                   (set-group-and-proceed-with-expense-details! chat-id group-chat-id first-name user-id))))
             op-succeed)))))
@@ -869,7 +877,7 @@
     (fn [{msg-id :message_id _date :date _text :text
           {_user-id :id _first-name :first_name _last-name :last_name
            _username :username _is-bot :is_bot _lang :language_code :as _user} :from
-          {_chat-id :id _type :type _title :title _username :username :as chat} :chat
+          {_chat-id :id _type :type _chat-title :title _username :username :as chat} :chat
           _original-msg :reply_to_message ;; for replies
           _new-chat-members :new_chat_members
           _left-chat-member :left_chat_member
