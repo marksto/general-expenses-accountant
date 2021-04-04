@@ -561,8 +561,10 @@
 
 ;; RECIPROCAL ACTIONS
 
-;; NB: Properly wrapped in try-catch and logged to highlight the exact HTTP client error.
+;; TODO: Re-implement it in asynchronous fashion, with logging the feedback.
 (defn- respond!
+  "Uniformly responds to the user action, whether it a message, inline or callback query.
+   NB: Properly wrapped in try-catch and logged to highlight the exact HTTP client error."
   [{:keys [type chat-id text inline-query-id results callback-query-id options]
     :as response}]
   (try
@@ -576,11 +578,43 @@
     (catch Exception e
       (log/error e "Failed to respond with:" response))))
 
+(defn- proceed-and-respond!
+  "Continues the course of transitions between states and sends a message
+   in response to a user (or a group)."
+  [chat-id event]
+  (let [result (handle-state-transition chat-id event)]
+    (respond! (assoc (:message result) :chat-id chat-id))))
+
+;; TODO: Re-implement it in asynchronous fashion (or adding it as option).
 (defn- respond-attentively!
+  "Responds and synchronously awaits for a feedback (Telegram's response)
+   which is then processed by the provided handler function."
   [response tg-response-handler-fn]
   (let [tg-response (respond! response)]
     (if (:ok tg-response)
       (tg-response-handler-fn (:result tg-response)))))
+
+(defn- proceed-and-respond-attentively!
+  "Continues the course of transitions between states, sends a message in
+   response to a user (or a group), and awaits for a feedback (Telegram's
+   response) which is then processed by the provided handler function."
+  [chat-id event tg-response-handler-fn]
+  (let [result (handle-state-transition chat-id event)]
+    (respond-attentively! (assoc (:message result) :chat-id chat-id)
+                          tg-response-handler-fn)))
+
+
+(defn- set-group-and-proceed-with-expense-details!
+  [chat-id group-chat-id first-name user-id]
+  (set-chat-data! chat-id [:group] group-chat-id)
+
+  (let [expense-items (get-group-expense-items group-chat-id)
+        event (if (seq expense-items)
+                {:transition [:private :expense-item-selection]
+                 :params {:expense-items expense-items}}
+                {:transition [:private :expense-manual-description]
+                 :params {:first-name first-name :user-id user-id}})]
+    (proceed-and-respond! chat-id event)))
 
 
 ;; API RESPONSES
@@ -618,10 +652,8 @@
           {chat-id :id :as chat} :chat :as _message}]
       (log/debug "Conversation started in chat:" chat)
       (when (tg-api/is-private? chat)
-        (let [result (handle-state-transition chat-id
-                                              {:transition [:private :amount-input]
-                                               :params {:first-name first-name}})]
-          (respond! (assoc (:message result) :chat-id chat-id)))
+        (proceed-and-respond! chat-id {:transition [:private :amount-input]
+                                       :params {:first-name first-name}})
         op-succeed)))
 
   (m-hlr/command-fn
@@ -640,9 +672,7 @@
       (log/debug "Calculator opened in chat:" chat)
       (when (and (tg-api/is-private? chat)
                  (= :input (get-chat-state chat-id)))
-        (let [result (handle-state-transition chat-id
-                                              {:transition [:private :upd-user-input]})]
-          (respond! (assoc (:message result) :chat-id chat-id)))
+        (proceed-and-respond! chat-id {:transition [:private :upd-user-input]})
         op-succeed)))
 
   ;; TODO: Implement the commands handling (including '/cancel' for private chat).
@@ -675,17 +705,7 @@
                  (str/starts-with? callback-btn-data cd-group-chat-prefix))
         (let [group-chat-id-str (str/replace-first callback-btn-data cd-group-chat-prefix "")
               group-chat-id (nums/parse-int group-chat-id-str)]
-          (set-chat-data! chat-id [:group] group-chat-id)
-          ;; TODO: This pattern '(let [result (handle-state-transition ...)] (respond! ...)'
-          ;;       is repeated quite often. It should be automated with an intermediary fn.
-          (let [expense-items (get-group-expense-items group-chat-id)
-                event (if (seq expense-items)
-                        {:transition [:private :expense-item-selection]
-                         :params {:expense-items expense-items}}
-                        {:transition [:private :expense-manual-description]
-                         :params {:first-name first-name :user-id user-id}})
-                result (handle-state-transition chat-id event)]
-            (respond! (assoc (:message result) :chat-id chat-id)))
+          (set-group-and-proceed-with-expense-details! chat-id group-chat-id first-name user-id)
           op-succeed))))
 
   (m-hlr/callback-fn
@@ -698,11 +718,9 @@
         (let [expense-item (str/replace-first callback-btn-data cd-expense-item-prefix "")]
           (set-chat-data! chat-id [:expense-item] expense-item)
           (let [group-chat-id (:group (get-chat-data chat-id))
-                accounts (get-group-accounts group-chat-id user-id)
-                result (handle-state-transition chat-id
-                                                {:transition [:private :accounts-selection]
-                                                 :params {:accounts accounts}})]
-            (respond! (assoc (:message result) :chat-id chat-id)))
+                accounts (get-group-accounts group-chat-id user-id)]
+            (proceed-and-respond! chat-id {:transition [:private :accounts-selection]
+                                           :params {:accounts accounts}}))
           op-succeed))))
 
   (m-hlr/callback-fn
@@ -719,8 +737,8 @@
                                                             account-name
                                                             (:expense-item chat-data))]
           (respond! (assoc group-notification-msg :chat-id group-chat-id)))
-        (let [result (handle-state-transition chat-id {:transition [:private :successful-input]})]
-          (respond! (assoc (:message result) :chat-id chat-id)))
+
+        (proceed-and-respond! chat-id {:transition [:private :successful-input]})
         op-succeed)))
 
   ;; TODO: Implement the callback queries handling.
@@ -803,9 +821,8 @@
                       {:transition [:group :ready]
                        :params {:bot-username (get @*bot-user :username)}}
                       {:transition [:group :waiting-for-user]
-                       :params {:uncreated-count uncreated-count}})
-              result (handle-state-transition chat-id event)]
-          (respond! (assoc (:message result) :chat-id chat-id)))
+                       :params {:uncreated-count uncreated-count}})]
+          (proceed-and-respond! chat-id event))
         op-succeed)))
 
   ;; TODO: Implement scenario for migration from a 'group' chat to a 'supergroup' chat (catch ':migrate_to_chat_id').
@@ -821,24 +838,13 @@
           (when (number? input)
             (log/debug "User input:" input)
             (set-chat-data! chat-id [:amount] input)
-            (let [groups (:groups (get-chat-data chat-id))
-                  result (if (> (count groups) 1)
-                           (handle-state-transition chat-id
-                                                    {:transition [:private :group-selection]
-                                                     :params {:groups groups}})
-                           (let [group-chat-id (:id (first groups))]
-                             (log/debug "Group chat auto-selected:" group-chat-id)
-                             (set-chat-data! chat-id [:group] group-chat-id)
-
-                             ;; TODO: Code duplication. Extract the logic into a dedicated fn.
-                             (let [expense-items (get-group-expense-items group-chat-id)
-                                   event (if (seq expense-items)
-                                           {:transition [:private :expense-item-selection]
-                                            :params {:expense-items expense-items}}
-                                           {:transition [:private :expense-manual-description]
-                                            :params {:first-name first-name :user-id user-id}})]
-                               (handle-state-transition chat-id event))))]
-              (respond! (assoc (:message result) :chat-id chat-id)))
+            (let [groups (:groups (get-chat-data chat-id))]
+              (if (> (count groups) 1)
+                (proceed-and-respond! chat-id {:transition [:private :group-selection]
+                                               :params {:groups groups}})
+                (let [group-chat-id (:id (first groups))]
+                  (log/debug "Group chat auto-selected:" group-chat-id)
+                  (set-group-and-proceed-with-expense-details! chat-id group-chat-id first-name user-id))))
             op-succeed)))))
 
   (m-hlr/message-fn
@@ -851,11 +857,9 @@
         (log/debug "Expense description:" text)
         (set-chat-data! chat-id [:expense-item] text)
         (let [group-chat-id (:group (get-chat-data chat-id))
-              accounts (get-group-accounts group-chat-id user-id)
-              result (handle-state-transition chat-id
-                                              {:transition [:private :accounts-selection]
-                                               :params {:accounts accounts}})]
-          (respond! (assoc (:message result) :chat-id chat-id)))
+              accounts (get-group-accounts group-chat-id user-id)]
+          (proceed-and-respond! chat-id {:transition [:private :accounts-selection]
+                                         :params {:accounts accounts}}))
         op-succeed)))
 
   ;; TODO: Implement the messages handling.
