@@ -274,12 +274,16 @@
     (get-in @*bot-data [real-chat-id])))
 
 (defn- set-chat-data!
-  [chat-id [key & ks] value]
-  (let [real-chat-id (get-real-chat-id chat-id)
-        full-path (concat [real-chat-id key] ks)]
-    (if (nil? value)
-      (swap! *bot-data update-in (butlast full-path) dissoc (last full-path))
-      (swap! *bot-data assoc-in full-path value))))
+  ([chat-id value]
+   (if (nil? value)
+     (swap! *bot-data dissoc chat-id)
+     (swap! *bot-data assoc chat-id value)))
+  ([chat-id [key & ks] value]
+   (let [real-chat-id (get-real-chat-id chat-id)
+         full-path (concat [real-chat-id key] ks)]
+     (if (nil? value)
+       (swap! *bot-data update-in (butlast full-path) dissoc (last full-path))
+       (swap! *bot-data assoc-in full-path value)))))
 
 (defn- get-chat-state
   "Returns the state of the given chat.
@@ -479,9 +483,13 @@
   (tg-api/is-reply-to? (get-bot-msg-id chat-id bot-msg-key) message))
 
 (defn- update-private-chat-groups!
-  [chat-id new-group-chat-id]
-  (let [real-chat-id (get-real-chat-id chat-id)] ;; petty RC
-    (swap! *bot-data update-in [real-chat-id :groups] conj new-group-chat-id)))
+  ([chat-id new-group-chat-id]
+   (let [real-chat-id (get-real-chat-id chat-id)] ;; petty RC
+     (swap! *bot-data update-in [real-chat-id :groups] conj new-group-chat-id)))
+  ([chat-id old-group-chat-id new-group-chat-id]
+   (let [real-chat-id (get-real-chat-id chat-id)] ;; petty RC
+     (swap! *bot-data update-in [real-chat-id :groups]
+            (comp set (partial replace {old-group-chat-id new-group-chat-id}))))))
 
 (defn- ->group-ref
   [group-chat-id]
@@ -831,8 +839,20 @@
         (set-chat-data! chat-id [:title] new-chat-title)
         op-succeed)))
 
-  ;; TODO: Implement scenario for migration from a 'group' chat to a 'supergroup' chat:
-  ;;       catch ':migrate_to_chat_id' and don't forget to update its users' ':groups'.
+  (m-hlr/message-fn
+    (fn [{{chat-id :id :as chat} :chat
+          migrate-to-chat-id :migrate_to_chat_id
+          :as _message}]
+      (when (and (tg-api/is-group? chat)
+                 (some? migrate-to-chat-id))
+        (log/debugf "Group %s has been migrated to a supergroup %s" chat-id migrate-to-chat-id)
+        (set-chat-data! migrate-to-chat-id chat-id)
+        (let [group-users (-> (get-chat-data chat-id)
+                              (get :user-account-mapping)
+                              keys)]
+          (doseq [user-id group-users]
+            (update-private-chat-groups! user-id chat-id migrate-to-chat-id)))
+        op-succeed)))
 
   (m-hlr/message-fn
     (fn [{text :text
