@@ -762,6 +762,18 @@
                  :params {:first-name first-name :user-id user-id}})]
     (proceed-and-respond! chat-id event)))
 
+(defn- proceed-with-group!
+  [chat-id first-name user-id]
+  (let [groups (:groups (get-chat-data chat-id))]
+    (if (> (count groups) 1)
+      (let [group-refs (map ->group-ref groups)]
+        (proceed-and-respond! chat-id {:transition [:private :group-selection]
+                                       :params {:group-refs group-refs}}))
+      (let [group-chat-id (first groups)]
+        (log/debug "Group chat auto-selected:" group-chat-id)
+        (set-chat-data! chat-id [:group] group-chat-id)
+        (proceed-with-expense-details! chat-id group-chat-id first-name user-id)))))
+
 
 ;; API RESPONSES
 
@@ -945,16 +957,7 @@
               (replace-response! (assoc (get-calculation-success-msg parsed-val)
                                    :chat-id chat-id :msg-id msg-id))
 
-              ;; TODO: Code duplication. Extract into a separate fn.
-              (let [groups (:groups (get-chat-data chat-id))]
-                (if (> (count groups) 1)
-                  (let [group-refs (map ->group-ref groups)]
-                    (proceed-and-respond! chat-id {:transition [:private :group-selection]
-                                                   :params {:group-refs group-refs}}))
-                  (let [group-chat-id (first groups)]
-                    (log/debug "Group chat auto-selected:" group-chat-id)
-                    (set-chat-data! chat-id [:group] group-chat-id)
-                    (proceed-with-expense-details! chat-id group-chat-id first-name user-id)))))
+              (proceed-with-group! chat-id first-name user-id))
             (do
               (log/debug "Invalid user input:" parsed-val)
               (when-not (is-user-input-error? chat-id)
@@ -1083,15 +1086,7 @@
           (when (number? input)
             (log/debug "User input:" input)
             (set-chat-data! chat-id [:amount] input)
-            (let [groups (:groups (get-chat-data chat-id))]
-              (if (> (count groups) 1)
-                (let [group-refs (map ->group-ref groups)]
-                  (proceed-and-respond! chat-id {:transition [:private :group-selection]
-                                                 :params {:group-refs group-refs}}))
-                (let [group-chat-id (first groups)]
-                  (log/debug "Group chat auto-selected:" group-chat-id)
-                  (set-chat-data! chat-id [:group] group-chat-id)
-                  (proceed-with-expense-details! chat-id group-chat-id first-name user-id))))
+            (proceed-with-group! chat-id first-name user-id)
             op-succeed)))))
 
   (m-hlr/message-fn
