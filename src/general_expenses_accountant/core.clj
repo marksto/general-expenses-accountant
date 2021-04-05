@@ -20,13 +20,18 @@
     ;; private chat-id -> user-specific
     {280000000 {:groups #{-560000000 -1001000000000}
 
-                ;; for data input
                 :state :input
+
+                ;; direct numeric input
                 :amount 100
                 :group -560000000
                 :expense-item "food"
                 ;; or
-                :expense-desc "other"}}
+                :expense-desc "other"
+
+                ;; interactive input
+                :user-input "50,89 + 171"
+                :user-error false}}
 
     ;; group chat-id -> group-level settings
     {-560000000 {:state :initial
@@ -60,8 +65,7 @@
                                           :name "Alice"
                                           :created 426300760
                                           :msg-id 3
-                                          :user-id 1400000000
-                                          :user-input "100"}
+                                          :user-id 1400000000}
                                        2 {:id 2
                                           :type :personal
                                           :name "Bob"
@@ -120,12 +124,24 @@
 (def ^:private cd-accounts "<accounts>")
 (def ^:private cd-expense-items "<expense_items>")
 (def ^:private cd-data-store "<data_store>")
+
 (def ^:private cd-expense-item-prefix "ei::")
 (def ^:private cd-group-chat-prefix "gc::")
 (def ^:private cd-account-prefix "ac::")
 
+(def ^:private cd-digits-set #{"1" "2" "3" "4" "5" "6" "7" "8" "9" "0" ","})
+(def ^:private cd-ar-ops-set #{"+" "–"})
+(def ^:private cd-cancel "C")
+(def ^:private cd-clear "<-")
+(def ^:private cd-enter "OK")
+
 ;; TODO: Proper localization (with fn).
 (def ^:private default-general-acc-name "общие")
+
+(defn- escape-markdown-v2
+  "A minor part of the Markdown V2 escaping features that is absolutely necessary."
+  [markdown-str]
+  (str/replace markdown-str #"[\[\]()`>#+\-=|{}.!]" #(str "\\" %)))
 
 ;; TODO: Make messages texts localizable:
 ;;       - take the ':language_code' of the chat initiator (no personal settings)
@@ -170,6 +186,55 @@
   [first-name]
   {:type :text
    :text (str "Привет, " first-name "! Чтобы добавить новый расход просто напиши мне сумму.")})
+
+(def ^:private inline-calculator-options
+  (tg-api/build-message-options
+    {:parse-mode "MarkdownV2"
+     :reply-markup (tg-api/build-reply-markup
+                     :inline-keyboard
+                     [[(tg-api/build-inline-kbd-btn "7" :callback_data "7")
+                       (tg-api/build-inline-kbd-btn "8" :callback_data "8")
+                       (tg-api/build-inline-kbd-btn "9" :callback_data "9")
+                       (tg-api/build-inline-kbd-btn "C" :callback_data cd-cancel)]
+                      [(tg-api/build-inline-kbd-btn "4" :callback_data "4")
+                       (tg-api/build-inline-kbd-btn "5" :callback_data "5")
+                       (tg-api/build-inline-kbd-btn "6" :callback_data "6")
+                       (tg-api/build-inline-kbd-btn "+" :callback_data "+")]
+                      [(tg-api/build-inline-kbd-btn "1" :callback_data "1")
+                       (tg-api/build-inline-kbd-btn "2" :callback_data "2")
+                       (tg-api/build-inline-kbd-btn "3" :callback_data "3")
+                       (tg-api/build-inline-kbd-btn "–" :callback_data "–")]
+                      [(tg-api/build-inline-kbd-btn "0" :callback_data "0")
+                       (tg-api/build-inline-kbd-btn "," :callback_data ",")
+                       (tg-api/build-inline-kbd-btn "←" :callback_data cd-clear)
+                       (tg-api/build-inline-kbd-btn "OK" :callback_data cd-enter)]])}))
+
+;; TODO: Make it pass the ':parse-mode' by default.
+(defn- new-expense-msg
+  [text]
+  {:type :text
+   :text (-> (str "Новый расход:\n= " text)
+             escape-markdown-v2)})
+
+(defn- get-interactive-input-msg
+  [user-input]
+  (-> (if (empty? user-input) "\\_" user-input)
+      new-expense-msg
+      (assoc :options inline-calculator-options)))
+
+(defn- get-calculation-success-msg
+  [amount]
+  (-> amount
+      (new-expense-msg)
+      (assoc :options (tg-api/build-message-options
+                        {:parse-mode "MarkdownV2"}))))
+
+(defn- get-calculation-failure-msg
+  [amount]
+  (-> (str amount "\n_Ошибка в выражении! Вычисление невозможно._\n
+Введите /cancel, чтобы выйти из режима калькуляции и ввести данные вручную.")
+      new-expense-msg
+      (assoc :options inline-calculator-options)))
 
 (defn- get-added-to-new-group-msg
   [chat-title]
@@ -444,6 +509,48 @@
         pers-acc-num (count (get-personal-account-ids chat-data))]
     (- chat-members-count pers-acc-num 1)))
 
+(defn- get-user-input
+  [chat-id]
+  (get (get-chat-data chat-id) :user-input))
+
+(defn- update-user-input!
+  [chat-id {:keys [type data] :as _operation}]
+  (let [update-fn (case type
+                    :append-digit (fn [old-val]
+                                    (if (or (nil? old-val)
+                                            (empty? old-val))
+                                      (if (not= "0" data) data)
+                                      (str (or old-val "") data)))
+                    :append-ar-op (fn [old-val]
+                                    (if (or (nil? old-val)
+                                            (empty? old-val))
+                                      old-val ;; do not allow
+                                      (let [last-char (-> old-val
+                                                          str/trim
+                                                          last
+                                                          str)]
+                                        (if (contains? cd-ar-ops-set
+                                                       last-char)
+                                          old-val ;; do not allow
+                                          (str (or old-val "")
+                                               " " data " ")))))
+                    :cancel (fn [old-val]
+                              (let [trimmed (str/trim old-val)]
+                                (-> trimmed
+                                    (subs 0 (- (count trimmed) 1))
+                                    str/trim)))
+                    :clear (constantly nil))]
+    (swap! *bot-data update-in [chat-id :user-input] update-fn))
+  (get-user-input chat-id))
+
+(defn- is-user-input-error?
+  [chat-id]
+  (true? (get (get-chat-data chat-id) :user-error)))
+
+(defn- update-user-input-error-status!
+  [chat-id val]
+  (set-chat-data! chat-id [:user-error] (boolean val)))
+
 (defn- get-group-expense-items
   [chat-id]
   (let [chat-data (get-chat-data chat-id)]
@@ -519,9 +626,10 @@
 
 (def ^:private private-chat-states
   {:initial #{:input}
-   :input {:to #{:select-group :detail-expense :input}
+   :input {:to #{:select-group :detail-expense :interactive-input :input}
            :init-fn (fn [chat-data]
                       (select-keys chat-data [:groups]))}
+   :interactive-input #{:select-group :detail-expense :input}
    :select-group #{:detail-expense :input}
    :detail-expense #{:select-account :input}
    :select-account #{:input}})
@@ -544,6 +652,9 @@
    :private {:amount-input {:to-state :input
                             :message-fn get-private-introduction-msg
                             :message-params [:first-name]}
+             :interactive-input {:to-state :interactive-input
+                                 :message-fn get-interactive-input-msg
+                                 :message-params [:user-input]}
              :group-selection {:to-state :select-group
                                :message-fn get-group-selection-msg
                                :message-params [:group-refs]}
@@ -618,6 +729,30 @@
     (respond-attentively! (assoc (:message result) :chat-id chat-id)
                           tg-response-handler-fn)))
 
+(defn- replace-response!
+  "Uniformly replaces the existing response to the user, either by update or delete+send.
+   NB: Properly wrapped in try-catch and logged to highlight the exact HTTP client error."
+  [{:keys [chat-id msg-id text options via-delete?]
+    :as response-update}]
+  (try
+    (let [token (config/get-prop :bot-api-token)
+          tg-response (if (true? via-delete?)
+                        (do
+                          (m-api/delete-text token chat-id msg-id)
+                          (m-api/send-text token chat-id options text))
+                        (m-api/edit-text token chat-id msg-id options text))]
+      (log/debug "Telegram returned:" tg-response)
+      tg-response)
+    (catch Exception e
+      (log/error e "Failed to replace response with:" response-update))))
+
+(defn- proceed-and-replace-response!
+  "Continues the course of transitions between states and replaces some
+   existing response to a user (or a group)."
+  [chat-id event msg-id]
+  (let [result (handle-state-transition chat-id event)]
+    (replace-response! (assoc (:message result) :chat-id chat-id
+                                                :msg-id msg-id))))
 
 
 (defn- proceed-with-expense-details!
@@ -686,7 +821,7 @@
       (log/debug "Calculator opened in chat:" chat)
       (when (and (tg-api/is-private? chat)
                  (= :input (get-chat-state chat-id)))
-        (proceed-and-respond! chat-id {:transition [:private :upd-user-input]})
+        (proceed-and-respond! chat-id {:transition [:private :interactive-input]})
         op-succeed)))
 
   ;; TODO: Implement the commands handling (including '/cancel' for private chat).
@@ -762,6 +897,64 @@
           (respond! (assoc group-notification-msg :chat-id group-chat-id)))
 
         (proceed-and-respond! chat-id {:transition [:private :successful-input]})
+        op-succeed)))
+
+  (m-hlr/callback-fn
+    (fn [{{msg-id :message_id {chat-id :id :as chat} :chat :as _msg} :message
+          callback-btn-data :data :as _callback-query}]
+      (when (and (tg-api/is-private? chat)
+                 (= :interactive-input (get-chat-state chat-id)))
+        (when-let [non-terminal-operation (condp apply [callback-btn-data]
+                                            cd-digits-set {:type :append-digit
+                                                           :data callback-btn-data}
+                                            cd-ar-ops-set {:type :append-ar-op
+                                                           :data callback-btn-data}
+                                            (partial = cd-clear) {:type :cancel}
+                                            (partial = cd-cancel) {:type :clear}
+                                            nil)]
+          (update-user-input-error-status! chat-id false)
+          (let [old-user-input (get-user-input chat-id)
+                new-user-input (update-user-input! chat-id non-terminal-operation)]
+            (if (not= old-user-input new-user-input)
+              (proceed-and-replace-response! chat-id
+                                             {:transition [:private :interactive-input]
+                                              :params {:user-input new-user-input}}
+                                             msg-id)))
+          op-succeed))))
+
+  (m-hlr/callback-fn
+    (fn [{{user-id :id first-name :first_name :as _user} :from
+          {msg-id :message_id {chat-id :id :as chat} :chat :as _msg} :message
+          callback-btn-data :data :as _callback-query}]
+      (when (and (tg-api/is-private? chat)
+                 (= :interactive-input (get-chat-state chat-id))
+                 (= cd-enter callback-btn-data))
+        (let [user-input (get-user-input chat-id)
+              parsed-val (nums/parse-arithmetic-expression user-input)]
+          (if (and (some? parsed-val) (number? parsed-val))
+            (do
+              (log/debug "User input:" parsed-val)
+              (set-chat-data! chat-id [:amount] parsed-val)
+
+              (update-user-input-error-status! chat-id false)
+              (replace-response! (assoc (get-calculation-success-msg parsed-val)
+                                   :chat-id chat-id :msg-id msg-id))
+
+              ;; TODO: Code duplication. Extract into a separate fn.
+              (let [groups (:groups (get-chat-data chat-id))]
+                (if (> (count groups) 1)
+                  (let [group-refs (map ->group-ref groups)]
+                    (proceed-and-respond! chat-id {:transition [:private :group-selection]
+                                                   :params {:group-refs group-refs}}))
+                  (let [group-chat-id (first groups)]
+                    (log/debug "Group chat auto-selected:" group-chat-id)
+                    (set-chat-data! chat-id [:group] group-chat-id)
+                    (proceed-with-expense-details! chat-id group-chat-id first-name user-id)))))
+            (do
+              (when-not (is-user-input-error? chat-id)
+                (update-user-input-error-status! chat-id true)
+                (replace-response! (assoc (get-calculation-failure-msg parsed-val)
+                                     :chat-id chat-id :msg-id msg-id))))))
         op-succeed)))
 
   ;; TODO: Implement the callback queries handling.
