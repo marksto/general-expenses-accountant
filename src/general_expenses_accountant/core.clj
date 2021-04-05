@@ -124,6 +124,7 @@
 (def ^:private cd-accounts "<accounts>")
 (def ^:private cd-expense-items "<expense_items>")
 (def ^:private cd-data-store "<data_store>")
+;; TODO: What about <language_and_currency>?
 
 (def ^:private cd-expense-item-prefix "ei::")
 (def ^:private cd-group-chat-prefix "gc::")
@@ -841,8 +842,6 @@
         (handle-state-transition chat-id {:transition [:private :canceled-input]})
         op-succeed)))
 
-  ;; TODO: Implement the commands handling.
-
   ;; INLINE QUERIES
 
   (m-hlr/inline-fn
@@ -965,8 +964,6 @@
                 (replace-response! (assoc (get-calculation-failure-msg parsed-val)
                                      :chat-id chat-id :msg-id msg-id))))))
         op-succeed)))
-
-  ;; TODO: Implement the callback queries handling.
 
   (m-hlr/callback-fn
     (fn [{callback-query-id :id _user :from _msg :message _msg-id :inline_message_id
@@ -1103,8 +1100,6 @@
           (proceed-and-respond! chat-id {:transition [:private :accounts-selection]
                                          :params {:accounts accounts}}))
         op-succeed)))
-
-  ;; TODO: Implement the messages handling.
 
   ; A "match-all catch-through" case.
   (m-hlr/message-fn
