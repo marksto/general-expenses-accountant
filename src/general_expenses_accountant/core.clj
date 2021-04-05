@@ -662,8 +662,10 @@
              :accounts-selection {:to-state :select-account
                                   :message-fn get-account-selection-msg
                                   :message-params [:accounts]}
+
              :successful-input {:to-state :input
-                                :message expense-added-successfully-msg}}})
+                                :message expense-added-successfully-msg}
+             :canceled-input {:to-state :input}}})
 
 (defn- handle-state-transition
   [chat-id event]
@@ -813,13 +815,21 @@
   (m-hlr/command-fn
     "calc"
     (fn [{{chat-id :id :as chat} :chat :as _message}]
-      (log/debug "Calculator opened in chat:" chat)
       (when (and (tg-api/is-private? chat)
                  (= :input (get-chat-state chat-id)))
+        (log/debug "Calculator opened in chat:" chat)
         (proceed-and-respond! chat-id {:transition [:private :interactive-input]})
         op-succeed)))
 
-  ;; TODO: Implement the commands handling (including '/cancel' for private chat).
+  (m-hlr/command-fn
+    "cancel"
+    (fn [{{chat-id :id :as chat} :chat :as _message}]
+      (when (tg-api/is-private? chat)
+        (log/debug "The operation is canceled in chat:" chat)
+        (handle-state-transition chat-id {:transition [:private :canceled-input]})
+        op-succeed)))
+
+  ;; TODO: Implement the commands handling.
 
   ;; INLINE QUERIES
 
@@ -946,6 +956,7 @@
                     (set-chat-data! chat-id [:group] group-chat-id)
                     (proceed-with-expense-details! chat-id group-chat-id first-name user-id)))))
             (do
+              (log/debug "Invalid user input:" parsed-val)
               (when-not (is-user-input-error? chat-id)
                 (update-user-input-error-status! chat-id true)
                 (replace-response! (assoc (get-calculation-failure-msg parsed-val)
