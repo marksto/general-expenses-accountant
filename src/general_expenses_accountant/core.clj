@@ -9,7 +9,8 @@
             [general-expenses-accountant.nums :as nums]
             [general-expenses-accountant.tg-bot-api :as tg-api]
             [general-expenses-accountant.tg-client :as tg-client]
-            [clojure.string :as str]))
+            [clojure.string :as str])
+  (:import [java.util Locale]))
 
 ;; STATE
 
@@ -274,13 +275,15 @@
    :text "Выберите статью расходов:"
    :options (expense-items->options expense-items)})
 
+;; TODO: Implement a handy fn for mentioning users.
+;; (str "[" user-name "](tg://user?id=" user-id ")")
+
 (defn- get-expense-manual-description-msg
-  [user-name user-id]
+  [user-name]
   {:type :text
-   :text (str "[" user-name "](tg://user?id=" user-id "), опишите расход в двух словах:")
+   :text (str user-name ", опишите расход в двух словах:")
    :options (tg-api/build-message-options
-              {:parse-mode "MarkdownV2"
-               :reply-markup (tg-api/build-reply-markup :force-reply {:selective true})})})
+              {:reply-markup (tg-api/build-reply-markup :force-reply {:selective true})})})
 
 (defn- accounts->options
   [accounts]
@@ -298,13 +301,17 @@
 
 (defn- get-group-expense-msg
   [payer-acc-name amount debtor-acc-name expense-details]
-  {:type :text
-   :text (str "*" payer-acc-name "*\n"
-              (str/join " " [(str (format "%.2f" amount) "₽")
-                             "/" debtor-acc-name
-                             "/" expense-details]))
-   :options (tg-api/build-message-options
-              {:parse-mode "MarkdownV2"})})
+  (let [formatted-amount (String/format (Locale/forLanguageTag "ru")
+                                        "%.2f" (to-array [amount]))]
+    {:type :text
+     :text (str "*" payer-acc-name "*\n"
+                (->> [(str formatted-amount "₽")
+                      "/" debtor-acc-name
+                      "/" expense-details]
+                     (str/join " ")
+                     escape-markdown-v2))
+     :options (tg-api/build-message-options
+                {:parse-mode "MarkdownV2"})}))
 
 (def ^:private expense-added-successfully-msg
   {:type :text
@@ -655,7 +662,7 @@
                                       :message-params [:expense-items]}
              :manual-expense-description {:to-state :detail-expense
                                           :message-fn get-expense-manual-description-msg
-                                          :message-params [:first-name :user-id]}
+                                          :message-params [:first-name]}
              :accounts-selection {:to-state :select-account
                                   :message-fn get-account-selection-msg
                                   :message-params [:accounts]}
@@ -767,17 +774,17 @@
   (proceed-and-respond! chat-id {:transition [:private :successful-input]}))
 
 (defn- proceed-with-expense-details!
-  [chat-id group-chat-id first-name user-id]
+  [chat-id group-chat-id first-name]
   (let [expense-items (get-group-chat-expense-items group-chat-id)
         event (if (seq expense-items)
                 {:transition [:private :expense-item-selection]
                  :params {:expense-items expense-items}}
                 {:transition [:private :manual-expense-description]
-                 :params {:first-name first-name :user-id user-id}})]
+                 :params {:first-name first-name}})]
     (proceed-and-respond! chat-id event)))
 
 (defn- proceed-with-group!
-  [chat-id first-name user-id]
+  [chat-id first-name]
   (let [groups (:groups (get-chat-data chat-id))]
     (if (> (count groups) 1)
       (let [group-refs (map ->group-ref groups)]
@@ -786,7 +793,7 @@
       (let [group-chat-id (first groups)]
         (log/debug "Group chat auto-selected:" group-chat-id)
         (set-chat-data! chat-id [:group] group-chat-id)
-        (proceed-with-expense-details! chat-id group-chat-id first-name user-id)))))
+        (proceed-with-expense-details! chat-id group-chat-id first-name)))))
 
 (defn- proceed-with-account!
   [chat-id user-id]
@@ -888,7 +895,7 @@
   ;; #{cd-accounts cd-expense-items cd-data-store} ...
 
   (m-hlr/callback-fn
-    (fn [{{user-id :id first-name :first_name :as _user} :from
+    (fn [{{first-name :first_name :as _user} :from
           {{chat-id :id :as chat} :chat :as _msg} :message
           callback-btn-data :data :as _callback-query}]
       (when (and (tg-api/is-private? chat)
@@ -897,7 +904,7 @@
         (let [group-chat-id-str (str/replace-first callback-btn-data cd-group-chat-prefix "")
               group-chat-id (nums/parse-int group-chat-id-str)]
           (set-chat-data! chat-id [:group] group-chat-id)
-          (proceed-with-expense-details! chat-id group-chat-id first-name user-id))
+          (proceed-with-expense-details! chat-id group-chat-id first-name))
         op-succeed)))
 
   (m-hlr/callback-fn
@@ -949,7 +956,7 @@
           op-succeed))))
 
   (m-hlr/callback-fn
-    (fn [{{user-id :id first-name :first_name :as _user} :from
+    (fn [{{first-name :first_name :as _user} :from
           {msg-id :message_id {chat-id :id :as chat} :chat :as _msg} :message
           callback-btn-data :data :as _callback-query}]
       (when (and (tg-api/is-private? chat)
@@ -966,7 +973,7 @@
               (replace-response! (assoc (get-calculation-success-msg parsed-val)
                                    :chat-id chat-id :msg-id msg-id))
 
-              (proceed-with-group! chat-id first-name user-id))
+              (proceed-with-group! chat-id first-name))
             (do
               (log/debug "Invalid user input:" parsed-val)
               (when-not (is-user-input-error? chat-id)
@@ -1084,7 +1091,7 @@
 
   (m-hlr/message-fn
     (fn [{text :text
-          {user-id :id first-name :first_name :as _user} :from
+          {first-name :first_name :as _user} :from
           {chat-id :id :as chat} :chat
           :as _message}]
       (when (and (tg-api/is-private? chat)
@@ -1093,7 +1100,7 @@
           (when (number? input)
             (log/debug "User input:" input)
             (set-chat-data! chat-id [:amount] input)
-            (proceed-with-group! chat-id first-name user-id)
+            (proceed-with-group! chat-id first-name)
             op-succeed)))))
 
   (m-hlr/message-fn
