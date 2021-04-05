@@ -510,18 +510,19 @@
 ;; STATES & STATE TRANSITIONS
 
 ;; TODO: Re-write with State Machines.
+;; TODO: Switch to Event-Driven.
 
 (def ^:private group-chat-states
-  {:initial #{:waiting :ready}
+  {:initial #{:waiting}
    :waiting #{:waiting :ready}
-   :ready #{:initial :waiting}})
+   :ready #{:waiting}})
 
 (def ^:private private-chat-states
   {:initial #{:input}
-   :input {:to #{:select-group :detail-expense :select-account :input}
+   :input {:to #{:select-group :detail-expense :input}
            :init-fn (fn [chat-data]
                       (select-keys chat-data [:groups]))}
-   :select-group #{:detail-expense :select-account :input}
+   :select-group #{:detail-expense :input}
    :detail-expense #{:select-account :input}
    :select-account #{:input}})
 
