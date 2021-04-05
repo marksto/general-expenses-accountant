@@ -143,7 +143,12 @@
 (defn- escape-markdown-v2
   "A minor part of the Markdown V2 escaping features that is absolutely necessary."
   [markdown-str]
-  (str/replace markdown-str #"[\[\]()`>#+\-=|{}.!]" #(str "\\" %)))
+  (str/replace markdown-str #"[_*\[\]()~`>#+\-=|{}.!]" #(str "\\" %)))
+
+(defn- format-currency
+  [amount lang]
+  (String/format (Locale/forLanguageTag lang)
+                 "%.2f" (to-array [amount])))
 
 ;; TODO: Make messages texts localizable:
 ;;       - take the ':language_code' of the chat initiator (no personal settings)
@@ -214,23 +219,25 @@
    (new-expense-msg text nil))
   ([text extra-opts]
    {:type :text
-    :text (escape-markdown-v2 (str "Новый расход:\n= " text))
+    :text (str (escape-markdown-v2 "Новый расход:\n= ") text)
     :options (tg-api/build-message-options
                (merge {:parse-mode "MarkdownV2"} extra-opts))}))
 
 (defn- get-interactive-input-msg
   [user-input]
-  (-> (if (empty? user-input) "\\_" user-input)
+  (-> (escape-markdown-v2 (if (empty? user-input) "_" user-input))
       (new-expense-msg {:reply-markup inline-calculator-markup})))
 
 (defn- get-calculation-success-msg
   [amount]
-  (new-expense-msg amount))
+  (new-expense-msg (escape-markdown-v2 (format-currency amount "ru"))))
 
 (defn- get-calculation-failure-msg
   [amount]
-  (-> (str amount "\n_Ошибка в выражении! Вычисление невозможно._\n
-Введите /cancel, чтобы выйти из режима калькуляции и ввести данные вручную.")
+  (-> (->> [amount
+            (str "_" (escape-markdown-v2 "Ошибка в выражении! Вычисление невозможно.") "_\n") ;; italic
+            (escape-markdown-v2 "Введите /cancel, чтобы выйти из режима калькуляции и ввести данные вручную.")]
+           (str/join "\n"))
       (new-expense-msg {:reply-markup inline-calculator-markup})))
 
 (defn- get-added-to-new-group-msg
@@ -301,8 +308,7 @@
 
 (defn- get-group-expense-msg
   [payer-acc-name amount debtor-acc-name expense-details]
-  (let [formatted-amount (String/format (Locale/forLanguageTag "ru")
-                                        "%.2f" (to-array [amount]))]
+  (let [formatted-amount (format-currency amount "ru")]
     {:type :text
      :text (str "*" payer-acc-name "*\n"
                 (->> [(str formatted-amount "₽")
