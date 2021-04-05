@@ -547,41 +547,37 @@
   [chat-id val]
   (set-chat-data! chat-id [:user-error] (boolean val)))
 
-(defn- get-group-expense-items
+(defn- get-group-chat-expense-items
   [chat-id]
   (let [chat-data (get-chat-data chat-id)]
     ;; TODO: Sort them according popularity.
     (get-in chat-data [:expenses :items])))
 
-(defn- get-group-accounts
-  [chat-id user-id]
-  (let [chat-data (get-chat-data chat-id)]
-    (if (empty? (-> chat-data :accounts :general))
-      (let [pers-accs (as-> (get-in chat-data [:accounts :personal]) $
-                            (map val $))]
-        (assert (= (count pers-accs) 1))
-        pers-accs)
-      (let [general-acc (get-current-general-account chat-data)
-            group-accs (->> (get-in chat-data [:accounts :group])
-                            (map val))
-            user-pers-acc-id (get-personal-account-id chat-data user-id)
-            pers-accs (as-> (get-in chat-data [:accounts :personal]) $
-                            (dissoc $ user-pers-acc-id)
-                            (map val $))]
-        ;; TODO: Sort them according popularity.
-        (into [general-acc] (concat group-accs pers-accs))))))
+(defn- get-group-chat-accounts
+  ([chat-id]
+   ;; TODO: Sort them according popularity.
+   (->> [:general :group :personal]
+        (map (partial get-group-chat-accounts chat-id))
+        (reduce concat)))
+  ([chat-id acc-type]
+   (let [chat-data (get-chat-data chat-id)]
+     (if (= acc-type :general)
+       (when-let [gen-acc (get-current-general-account chat-data)]
+         [gen-acc])
+       (->> (get-in chat-data [:accounts acc-type])
+            (map val))))))
 
-(defn- get-account-name
+(defn- get-group-chat-account
   [group-chat-data acc-type acc-id]
-  (:name (get-in group-chat-data [:accounts acc-type acc-id])))
+  (get-in group-chat-data [:accounts acc-type acc-id]))
 
-(defn- data->account-name
+(defn- data->account
   [callback-btn-data group-chat-data]
   (let [account (str/replace-first callback-btn-data cd-account-prefix "")
         account-path (str/split account #"-")]
-    (get-account-name group-chat-data
-                      (keyword (nth account-path 0))
-                      (.intValue (biginteger (nth account-path 1))))))
+    (get-group-chat-account group-chat-data
+                            (keyword (nth account-path 0))
+                            (.intValue (biginteger (nth account-path 1))))))
 
 (defn- get-bot-msg-id
   [chat-id msg-key]
@@ -753,9 +749,26 @@
                                                 :msg-id msg-id))))
 
 
+(defn- proceed-with-notification!
+  [chat-id user-id debtor-acc]
+  (let [chat-data (get-chat-data chat-id)
+        group-chat-id (:group chat-data)
+        group-chat-data (get-chat-data group-chat-id)
+        payer-acc-id (get-personal-account-id group-chat-data user-id)
+        payer-acc (get-group-chat-account group-chat-data
+                                          :personal payer-acc-id)
+        expense-details (or (:expense-item chat-data)
+                            (:expense-desc chat-data))
+        group-notification-msg (get-group-expense-msg (:name payer-acc)
+                                                      (:amount chat-data)
+                                                      (:name debtor-acc)
+                                                      expense-details)]
+    (respond! (assoc group-notification-msg :chat-id group-chat-id)))
+  (proceed-and-respond! chat-id {:transition [:private :successful-input]}))
+
 (defn- proceed-with-expense-details!
   [chat-id group-chat-id first-name user-id]
-  (let [expense-items (get-group-expense-items group-chat-id)
+  (let [expense-items (get-group-chat-expense-items group-chat-id)
         event (if (seq expense-items)
                 {:transition [:private :expense-item-selection]
                  :params {:expense-items expense-items}}
@@ -774,6 +787,19 @@
         (log/debug "Group chat auto-selected:" group-chat-id)
         (set-chat-data! chat-id [:group] group-chat-id)
         (proceed-with-expense-details! chat-id group-chat-id first-name user-id)))))
+
+(defn- proceed-with-account!
+  [chat-id user-id]
+  (let [group-chat-id (:group (get-chat-data chat-id))
+        accounts (get-group-chat-accounts group-chat-id)]
+    (log/debug "accounts =" accounts)
+    (if (> (count accounts) 1)
+      (let [other-accounts (filter #(= (:user-id %) user-id) accounts)]
+        (proceed-and-respond! chat-id {:transition [:private :accounts-selection]
+                                       :params {:accounts other-accounts}}))
+      (let [debtor-acc (first accounts)]
+        (log/debug "Debtor account auto-selected:" debtor-acc)
+        (proceed-with-notification! chat-id user-id debtor-acc)))))
 
 
 ;; API RESPONSES
@@ -883,10 +909,7 @@
                  (str/starts-with? callback-btn-data cd-expense-item-prefix))
         (let [expense-item (str/replace-first callback-btn-data cd-expense-item-prefix "")]
           (set-chat-data! chat-id [:expense-item] expense-item)
-          (let [group-chat-id (:group (get-chat-data chat-id))
-                accounts (get-group-accounts group-chat-id user-id)]
-            (proceed-and-respond! chat-id {:transition [:private :accounts-selection]
-                                           :params {:accounts accounts}})))
+          (proceed-with-account! chat-id user-id))
         op-succeed)))
 
   (m-hlr/callback-fn
@@ -896,23 +919,10 @@
       (when (and (tg-api/is-private? chat)
                  (= :select-account (get-chat-state chat-id))
                  (str/starts-with? callback-btn-data cd-account-prefix))
-        (let [chat-data (get-chat-data chat-id)
-              group-chat-id (:group chat-data)
+        (let [group-chat-id (:group (get-chat-data chat-id))
               group-chat-data (get-chat-data group-chat-id)
-              payer-acc-id (get-personal-account-id group-chat-data user-id)
-              payer-acc-name (get-account-name group-chat-data
-                                               :personal payer-acc-id)
-              debtor-acc-name (data->account-name callback-btn-data
-                                                  group-chat-data)
-              expense-details (or (:expense-item chat-data)
-                                  (:expense-desc chat-data))
-              group-notification-msg (get-group-expense-msg payer-acc-name
-                                                            (:amount chat-data)
-                                                            debtor-acc-name
-                                                            expense-details)]
-          (respond! (assoc group-notification-msg :chat-id group-chat-id)))
-
-        (proceed-and-respond! chat-id {:transition [:private :successful-input]})
+              debtor-acc (data->account callback-btn-data group-chat-data)]
+          (proceed-with-notification! chat-id user-id debtor-acc))
         op-succeed)))
 
   (m-hlr/callback-fn
@@ -1095,10 +1105,7 @@
                  (= :detail-expense (get-chat-state chat-id)))
         (log/debug "Expense description:" text)
         (set-chat-data! chat-id [:expense-desc] text)
-        (let [group-chat-id (:group (get-chat-data chat-id))
-              accounts (get-group-accounts group-chat-id user-id)]
-          (proceed-and-respond! chat-id {:transition [:private :accounts-selection]
-                                         :params {:accounts accounts}}))
+        (proceed-with-account! chat-id user-id)
         op-succeed)))
 
   ; A "match-all catch-through" case.
