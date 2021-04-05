@@ -187,54 +187,49 @@
   {:type :text
    :text (str "Привет, " first-name "! Чтобы добавить новый расход просто напиши мне сумму.")})
 
-(def ^:private inline-calculator-options
-  (tg-api/build-message-options
-    {:parse-mode "MarkdownV2"
-     :reply-markup (tg-api/build-reply-markup
-                     :inline-keyboard
-                     [[(tg-api/build-inline-kbd-btn "7" :callback_data "7")
-                       (tg-api/build-inline-kbd-btn "8" :callback_data "8")
-                       (tg-api/build-inline-kbd-btn "9" :callback_data "9")
-                       (tg-api/build-inline-kbd-btn "C" :callback_data cd-cancel)]
-                      [(tg-api/build-inline-kbd-btn "4" :callback_data "4")
-                       (tg-api/build-inline-kbd-btn "5" :callback_data "5")
-                       (tg-api/build-inline-kbd-btn "6" :callback_data "6")
-                       (tg-api/build-inline-kbd-btn "+" :callback_data "+")]
-                      [(tg-api/build-inline-kbd-btn "1" :callback_data "1")
-                       (tg-api/build-inline-kbd-btn "2" :callback_data "2")
-                       (tg-api/build-inline-kbd-btn "3" :callback_data "3")
-                       (tg-api/build-inline-kbd-btn "–" :callback_data "–")]
-                      [(tg-api/build-inline-kbd-btn "0" :callback_data "0")
-                       (tg-api/build-inline-kbd-btn "," :callback_data ",")
-                       (tg-api/build-inline-kbd-btn "←" :callback_data cd-clear)
-                       (tg-api/build-inline-kbd-btn "OK" :callback_data cd-enter)]])}))
+(def ^:private inline-calculator-markup
+  (tg-api/build-reply-markup
+    :inline-keyboard
+    [[(tg-api/build-inline-kbd-btn "7" :callback_data "7")
+      (tg-api/build-inline-kbd-btn "8" :callback_data "8")
+      (tg-api/build-inline-kbd-btn "9" :callback_data "9")
+      (tg-api/build-inline-kbd-btn "C" :callback_data cd-cancel)]
+     [(tg-api/build-inline-kbd-btn "4" :callback_data "4")
+      (tg-api/build-inline-kbd-btn "5" :callback_data "5")
+      (tg-api/build-inline-kbd-btn "6" :callback_data "6")
+      (tg-api/build-inline-kbd-btn "+" :callback_data "+")]
+     [(tg-api/build-inline-kbd-btn "1" :callback_data "1")
+      (tg-api/build-inline-kbd-btn "2" :callback_data "2")
+      (tg-api/build-inline-kbd-btn "3" :callback_data "3")
+      (tg-api/build-inline-kbd-btn "–" :callback_data "–")]
+     [(tg-api/build-inline-kbd-btn "0" :callback_data "0")
+      (tg-api/build-inline-kbd-btn "," :callback_data ",")
+      (tg-api/build-inline-kbd-btn "←" :callback_data cd-clear)
+      (tg-api/build-inline-kbd-btn "OK" :callback_data cd-enter)]]))
 
-;; TODO: Make it pass the ':parse-mode' by default.
 (defn- new-expense-msg
-  [text]
-  {:type :text
-   :text (-> (str "Новый расход:\n= " text)
-             escape-markdown-v2)})
+  ([text]
+   (new-expense-msg text nil))
+  ([text extra-opts]
+   {:type :text
+    :text (escape-markdown-v2 (str "Новый расход:\n= " text))
+    :options (tg-api/build-message-options
+               (merge {:parse-mode "MarkdownV2"} extra-opts))}))
 
 (defn- get-interactive-input-msg
   [user-input]
   (-> (if (empty? user-input) "\\_" user-input)
-      new-expense-msg
-      (assoc :options inline-calculator-options)))
+      (new-expense-msg {:reply-markup inline-calculator-markup})))
 
 (defn- get-calculation-success-msg
   [amount]
-  (-> amount
-      (new-expense-msg)
-      (assoc :options (tg-api/build-message-options
-                        {:parse-mode "MarkdownV2"}))))
+  (new-expense-msg amount))
 
 (defn- get-calculation-failure-msg
   [amount]
   (-> (str amount "\n_Ошибка в выражении! Вычисление невозможно._\n
 Введите /cancel, чтобы выйти из режима калькуляции и ввести данные вручную.")
-      new-expense-msg
-      (assoc :options inline-calculator-options)))
+      (new-expense-msg {:reply-markup inline-calculator-markup})))
 
 (defn- get-added-to-new-group-msg
   [chat-title]
