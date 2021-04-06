@@ -805,9 +805,8 @@
   [chat-id user-id]
   (let [group-chat-id (:group (get-chat-data chat-id))
         accounts (get-group-chat-accounts group-chat-id)]
-    (log/debug "accounts =" accounts)
     (if (> (count accounts) 1)
-      (let [other-accounts (filter #(= (:user-id %) user-id) accounts)]
+      (let [other-accounts (filter #(not= (:user-id %) user-id) accounts)]
         (proceed-and-respond! chat-id {:transition [:private :accounts-selection]
                                        :params {:accounts other-accounts}}))
       (let [debtor-acc (first accounts)]
