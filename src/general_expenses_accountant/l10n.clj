@@ -3,6 +3,7 @@
 
 (def dicts
   {:en {:init-fine "Initialized successfully..."
+        :finishing "The app is going to sleep..."
         :processed "Bot API request processed"
         :not-found "No such API endpoint"}
    :tongue/fallback :en})

@@ -48,6 +48,7 @@
 
 (defn finalize
   []
+  (log/info (l10n/tr :en :finishing))
   (if (config/in-dev?)
     (tg-client/stop-long-polling!)))
 
