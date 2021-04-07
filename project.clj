@@ -35,7 +35,7 @@
   :plugins [[lein-ring "0.12.5"] ;; to run an app locally with 'lein ring server(-headless)'
             [nrepl/drawbridge "0.2.1"]]
   :ring {:handler general-expenses-accountant.web/app
-         :init general-expenses-accountant.main/init}
+         :init general-expenses-accountant.main/initialize}
 
   :profiles {:dev {:global-vars {*warn-on-reflection* true}
                    :jvm-opts ["-Dclojure.spec.check-asserts=true"]}
