@@ -54,8 +54,8 @@
 
 (defn -main [& args]
   (apply initialize args)
+  (doto (Runtime/getRuntime)
+    (.addShutdownHook (Thread. ^Runnable finalize)))
   (run-jetty (prepare-handler-for-jetty)
              {:port (config/get-prop :port)
-              :join? false})
-  (doto (Runtime/getRuntime)
-    (.addShutdownHook (Thread. ^Runnable finalize))))
+              :join? false}))

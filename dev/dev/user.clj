@@ -1,7 +1,7 @@
 (ns dev.user)
 
 (load "../../src/general_expenses_accountant/main")
-(general-expenses-accountant.main/-main)
+(def server (general-expenses-accountant.main/-main))
 
 (in-ns 'general-expenses-accountant.core)
 
