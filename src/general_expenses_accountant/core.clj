@@ -1,6 +1,8 @@
 (ns general-expenses-accountant.core
   "Bot API and business logic (core functionality)"
-  (:require [morse
+  (:require [clojure.string :as str]
+
+            [morse
              [api :as m-api]
              [handlers :as m-hlr]]
             [taoensso.timbre :as log]
@@ -8,8 +10,7 @@
             [general-expenses-accountant.config :as config]
             [general-expenses-accountant.nums :as nums]
             [general-expenses-accountant.tg-bot-api :as tg-api]
-            [general-expenses-accountant.tg-client :as tg-client]
-            [clojure.string :as str])
+            [general-expenses-accountant.tg-client :as tg-client])
   (:import [java.util Locale]))
 
 ;; STATE
@@ -418,7 +419,7 @@
 (defn- get-current-general-account
   [chat-data]
   (let [gen-accs (get-in chat-data [:accounts :general])]
-    (if (some? gen-accs)
+    (when (some? gen-accs)
       (->> (get-in chat-data [:accounts :general])
            (apply max-key key)
            second))))
@@ -540,7 +541,7 @@
                       :append-digit (fn [old-val]
                                       (if (or (nil? old-val)
                                               (empty? old-val))
-                                        (if (not= "0" data) data)
+                                        (when (not= "0" data) data)
                                         (str (or old-val "") data)))
                       :append-ar-op (fn [old-val]
                                       (if (or (nil? old-val)
@@ -736,7 +737,7 @@
    which is then processed by the provided handler function."
   [response tg-response-handler-fn]
   (let [tg-response (respond! response)]
-    (if (:ok tg-response)
+    (when (:ok tg-response)
       (tg-response-handler-fn (:result tg-response)))))
 
 (defn- proceed-and-respond-attentively!
@@ -965,7 +966,7 @@
           (update-user-input-error-status! chat-id false)
           (let [old-user-input (get-user-input chat-id)
                 new-user-input (update-user-input! chat-id non-terminal-operation)]
-            (if (not= old-user-input new-user-input)
+            (when (not= old-user-input new-user-input)
               (proceed-and-replace-response! chat-id
                                              {:transition [:private :interactive-input]
                                               :params {:user-input new-user-input}}
@@ -1063,11 +1064,11 @@
                  (= :waiting (get-chat-state chat-id))
                  (is-reply-to-bot? chat-id :name-request-msg-id message))
         (let [group-chat-id (get-real-chat-id chat-id)]
-          (if-not (setup-new-private-chat! user-id group-chat-id)
+          (when-not (setup-new-private-chat! user-id group-chat-id)
             (update-private-chat-groups! user-id group-chat-id)))
 
         (if (create-personal-account! chat-id user-id text date msg-id)
-          (if (not= :initial (get-chat-state user-id))
+          (when (not= :initial (get-chat-state user-id))
             (respond! (assoc (get-added-to-new-group-msg chat-title) :chat-id user-id)))
           (update-personal-account! chat-id user-id text))
 

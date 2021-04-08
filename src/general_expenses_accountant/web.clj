@@ -52,7 +52,7 @@
   (cmpj/context api-path []
     (POST "/:token" {{token :token} :route-params
                      body :body}
-      (if (= token (config/get-prop :bot-api-token))
+      (when (= token (config/get-prop :bot-api-token))
         (bot-api body))
       {:status 200
        :headers {"Content-Type" "text/plain"}
