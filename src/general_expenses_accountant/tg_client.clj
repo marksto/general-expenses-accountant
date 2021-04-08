@@ -107,7 +107,7 @@
          resp (http/post url {:content-type :json
                               :as :json
                               :form-params body})]
-     (-> resp :body))))
+     (get resp :body))))
 
 
 ;; Handlers

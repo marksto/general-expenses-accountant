@@ -225,20 +225,23 @@
 
 (defn- get-interactive-input-msg
   [user-input]
-  (-> (escape-markdown-v2 (if (empty? user-input) "_" user-input))
-      (new-expense-msg {:reply-markup inline-calculator-markup})))
+  (new-expense-msg
+    (escape-markdown-v2 (if (empty? user-input) "_" user-input))
+    {:reply-markup inline-calculator-markup}))
 
 (defn- get-calculation-success-msg
   [amount]
-  (new-expense-msg (escape-markdown-v2 (format-currency amount "ru"))))
+  (new-expense-msg
+    (escape-markdown-v2 (format-currency amount "ru"))))
 
 (defn- get-calculation-failure-msg
   [amount]
-  (-> (->> [amount
-            (str "_" (escape-markdown-v2 "Ошибка в выражении! Вычисление невозможно.") "_\n") ;; italic
-            (escape-markdown-v2 "Введите /cancel, чтобы выйти из режима калькуляции и ввести данные вручную.")]
-           (str/join "\n"))
-      (new-expense-msg {:reply-markup inline-calculator-markup})))
+  (new-expense-msg
+    (str/join "\n"
+              [amount
+               (str "_" (escape-markdown-v2 "Ошибка в выражении! Вычисление невозможно.") "_\n") ;; italic
+               (escape-markdown-v2 "Введите /cancel, чтобы выйти из режима калькуляции и ввести данные вручную.")])
+    {:reply-markup inline-calculator-markup}))
 
 (defn- get-added-to-new-group-msg
   [chat-title]
@@ -426,8 +429,7 @@
 
 (defn- get-personal-account-ids
   [chat-data]
-  (->> (get-in chat-data [:accounts :personal])
-       (map (comp :id val))))
+  (map (comp :id val) (get-in chat-data [:accounts :personal])))
 
 (defn- create-general-account!
   [chat-id created-dt]
@@ -556,7 +558,7 @@
                       :cancel (fn [old-val]
                                 (let [trimmed (str/trim old-val)]
                                   (-> trimmed
-                                      (subs 0 (- (count trimmed) 1))
+                                      (subs 0 (dec (count trimmed)))
                                       str/trim)))
                       :clear (constantly nil))]
       (swap! *bot-data update-in [chat-id :user-input] update-fn))
@@ -588,8 +590,7 @@
      (if (= acc-type :general)
        (when-let [gen-acc (get-current-general-account chat-data)]
          [gen-acc])
-       (->> (get-in chat-data [:accounts acc-type])
-            (map val))))))
+       (map val (get-in chat-data [:accounts acc-type]))))))
 
 (defn- get-group-chat-account
   [group-chat-data acc-type acc-id]
