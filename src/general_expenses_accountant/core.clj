@@ -267,7 +267,7 @@
 
 (defn- get-group-selection-msg
   [group-refs]
-  (assert (seq group-refs))
+  {:pre [(seq group-refs)]}
   {:type :text
    :text "Выберите, к какой группе отнести расход:"
    :options (group-refs->options group-refs)})
@@ -281,7 +281,7 @@
 
 (defn- get-expense-item-selection-msg
   [expense-items]
-  (assert (seq expense-items))
+  {:pre [(seq expense-items)]}
   {:type :text
    :text "Выберите статью расходов:"
    :options (expense-items->options expense-items)})
@@ -305,7 +305,7 @@
 
 (defn- get-account-selection-msg
   [accounts]
-  (assert (seq accounts))
+  {:pre [(seq accounts)]}
   {:type :text
    :text "Выберите тех, кто понёс расход:"
    :options (accounts->options accounts)})

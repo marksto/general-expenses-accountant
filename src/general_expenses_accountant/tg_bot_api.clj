@@ -187,8 +187,8 @@
 ;; TODO: Finalize. Check 'type-specific-key' validity. Switch all '-' to '_' in the keyword name.
 (defn build-inline-kbd-btn
   [text type-specific-key type-specific-val]
-  (assert (keyword? type-specific-key))
-  (assert (string? type-specific-val))
+  {:pre [(keyword? type-specific-key)
+         (string? type-specific-val)]}
   {:text text
    type-specific-key type-specific-val})
 
