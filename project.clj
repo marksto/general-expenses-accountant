@@ -10,10 +10,14 @@
   :dependencies [[org.clojure/clojure "1.10.3"]
                  [org.clojure/core.async "1.3.610"]
 
+                 [org.postgresql/postgresql "42.2.19"]
+                 [toucan "1.15.4"]
+
                  [com.grammarly/omniconf "0.2.2"]
                  [com.taoensso/timbre "5.1.2"]
 
                  [fipp "0.6.23"]
+                 [metosin/jsonista "0.2.6"]
 
                  [compojure "1.6.2"]
 

@@ -7,6 +7,7 @@
 
             [general-expenses-accountant.core :refer [bot-api]]
             [general-expenses-accountant.config :as config]
+            [general-expenses-accountant.db :as db]
             [general-expenses-accountant.l10n :as l10n]
             [general-expenses-accountant.tg-client :as tg-client]
             [general-expenses-accountant.web :as web :refer [api-path]]))
@@ -25,7 +26,9 @@
   "Extracted to be used also as a 'lein-ring' init target,
    for a case when the app's JAR is not executed directly."
   [& args]
-  (config/load-and-validate! args "dev-config.edn")
+  (config/load-and-validate! args "dev/config.edn")
+  (db/init! (config/get-prop :database-url)
+            (config/get-prop :database-user))
   (let [token (config/get-prop :bot-api-token)]
     (if (config/in-dev?)
       (tg-client/setup-long-polling! token bot-api)
