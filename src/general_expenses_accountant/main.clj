@@ -12,7 +12,9 @@
             [general-expenses-accountant.web :as web :refer [api-path]]))
 
 ; logger configuration
-(log/set-level! :debug)
+;; TODO: Add DB queries logging in DEV environment.
+(log/set-level! [["general-expenses-accountant.*" :debug]
+                 ["*" :info]])
 
 (defn- get-bot-url
   []
