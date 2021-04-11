@@ -16,6 +16,8 @@
                              :type :string}
              :bot-url {:description "The bot URL (for a webhook)"
                        :type :string}
+             :bot-username {:description "The bot Telegram username"
+                            :type :string}
 
              :heroku-app-name {:description "Heroku app name"
                                :type :string}

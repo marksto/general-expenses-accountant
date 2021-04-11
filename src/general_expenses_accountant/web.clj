@@ -47,7 +47,7 @@
 (cmpj/defroutes
   app-routes
   (GET "/" []
-    html/landing)
+    (html/landing (config/get-prop :bot-username)))
 
   (cmpj/context api-path []
     (POST "/:token" {{token :token} :route-params

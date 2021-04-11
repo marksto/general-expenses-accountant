@@ -14,7 +14,8 @@
      (h-page/include-css "/style.css")]
     [:body content]))
 
-(def landing
+(defn landing
+  [bot-username]
   (page
     [:div#landing-outer.ui.container
      [:div.ui.vertical.masthead.center.aligned.segment
@@ -23,6 +24,6 @@
        ;; TODO: Add instruction on how to use this bot (create chat, add it there, set Google Sheets ID and API token).
        [:h3 "Telegram bot that helps you to account for general expenses!"]
        [:a.ui.huge.button
-        {:href "tg://resolve?domain=gen_exp_acc_bot"}
+        {:href (str "tg://resolve?domain=" bot-username)}
         "Start Conversation"
         [:i.icon.right.arrow]]]]]))
