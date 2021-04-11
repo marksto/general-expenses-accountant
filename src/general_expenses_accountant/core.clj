@@ -847,6 +847,14 @@
      (log/debugf (str "Ignored: " ~msg) ~@args)
      op-succeed))
 
+;; TODO: Implement an immediate response. Telegram is able to handle the following form:
+;; {
+;;   "method": "sendMessage",
+;;   "chat_id": body.message.chat.id,
+;;   "reply_to_message_id": body.message.message_id,
+;;   "text": "..."
+;; };
+
 
 ;; BOT API
 
