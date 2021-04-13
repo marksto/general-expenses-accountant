@@ -12,8 +12,10 @@
 
              :database-url {:description "The Heroku's standard 'DATABASE_URL' var"
                             :type :string}
-             :database-user {:description "The database user name for bot"
-                             :type :string}
+             :db-user {:description "The database user name for bot"
+                       :type :string}
+             :db-password {:description "The database user password"
+                           :type :string}
 
              :bot-api-token {:description "Telegram Bot API token"
                              :verifier #(= (count %2) 46)

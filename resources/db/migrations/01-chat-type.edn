@@ -1,0 +1,6 @@
+{:up   ["CREATE TYPE chat_type AS ENUM (
+           'private',
+           'group',
+           'supergroup'
+         );"]
+ :down ["DROP TABLE chat_type;"]}

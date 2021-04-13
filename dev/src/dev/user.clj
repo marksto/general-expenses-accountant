@@ -9,33 +9,37 @@
 
 (def database-url
   (System/getenv "DATABASE_URL"))
-(def user-name
-  (System/getenv "DATABASE_USER"))
+(def db-user
+  (System/getenv "DB_USER"))
+(def db-password
+  (System/getenv "DB_PASSWORD"))
 (def db-schema
   (clojure.core/slurp "dev/resources/db/init-db-schema.sql"))
 
 (defn db-does-not-exist?
-  [db-name]
+  [db db-name]
   (let [query-str (str "SELECT 1 FROM pg_database WHERE datname='" db-name "'")]
-    (empty? (sql/query database-url [query-str]))))
+    (empty? (sql/query db [query-str]))))
 
 (defn create-db-schema
-  [db-name]
+  [db db-name]
   (as-> db-schema $
-        (str/replace $ #"user_name" user-name)
+        (str/replace $ #"user_name" db-user)
+        (str/replace $ #"password" db-password)
         (str/replace $ #"database_name" db-name)
         (try
-          (sql/execute! database-url [$] {:transaction? false})
+          (sql/execute! db [$] {:transaction? false})
           (println "Successfully created the DB\n")
           (catch Exception e
             (println (str "Failed to create the DB schema. Exception:\n" e))
             (System/exit 1)))))
 
-(let [db-name (last (str/split database-url #"/"))]
-  (if (db-does-not-exist? db-name)
+(let [db-name (last (str/split database-url #"/"))
+      db (str/replace database-url db-name "")]
+  (if (db-does-not-exist? db db-name)
     (do
       (println (str "Creating the DB '" db-name "'..."))
-      (create-db-schema db-name))
+      (create-db-schema db db-name))
     (println (str "The DB '" db-name "' already exists\n"))))
 
 
@@ -51,7 +55,13 @@
     (System/exit 2)))
 
 
-;; 3. Preparing for REPL-driven development
+;; 3. Running the DB migrations
+
+(load "../../src/general_expenses_accountant/db")
+(general-expenses-accountant.db/migrate-db)
+
+
+;; 4. Preparing for REPL-driven development
 
 (in-ns 'general-expenses-accountant.core)
 

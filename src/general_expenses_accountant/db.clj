@@ -1,40 +1,102 @@
 (ns general-expenses-accountant.db
-  (:require [clojure.string :as str]
-
-            [honeysql.core :as sql]
+  (:require [honeysql.core :as sql]
             [jsonista.core :as json]
+            [ragtime
+             [jdbc :as rt-jdbc]
+             [repl :as rt-repl]]
+            [taoensso
+             [encore :as encore]
+             [timbre :as log]]
             [toucan
              [db :as db]
-             [models :as models]])
+             [models :as models]]
+
+            [general-expenses-accountant.config :as config])
   (:import [java.sql Timestamp]))
 
 ;; SETTING-UP
 
-(db/set-default-automatically-convert-dashes-and-underscores! true)
-
-(models/set-root-namespace! 'general-expenses-accountant.domain)
-
-;; TODO: Pool DB connections with HikariCP.
-(defn- init!*
-  [db-name user-name]
-  (db/set-default-db-connection!
+(defn- db-spec
+  []
+  (let [db-url (config/get-prop :database-url)
+        jdbc-url-parts (re-find (re-matcher #"(jdbc:)?([^:]+):(.+)" db-url))
+        [subprotocol subname] (encore/get-subvector jdbc-url-parts -2 2)]
     {:classname "org.postgresql.Driver"
-     :subprotocol "postgresql"
-     :subname (str "//localhost:5432/" db-name)
-     :user user-name
+     :subprotocol subprotocol
+     :subname subname
+     :user (config/get-prop :db-user)
+     :password (config/get-prop :db-password)
 
      ;; PostgreSQL-specific
      :reWriteBatchedInserts true}))
 
+;; TODO: Pool DB connections with HikariCP.
 (defn init!
-  [database-url user-name]
-  (let [db-name (last (str/split database-url #"/"))]
-    (init!* db-name user-name)))
+  []
+  (db/set-default-db-connection! (db-spec))
+  (db/set-default-automatically-convert-dashes-and-underscores! true))
+
+
+(models/set-root-namespace! 'general-expenses-accountant.domain)
 
 
 ;; MIGRATIONS
 
-;; TODO: Implement DB schema migrations — with 'ragtime'?
+(defn- load-ragtime-config
+  []
+  {:datastore (rt-jdbc/sql-database (db-spec) {:migrations-table "migrations"})
+   :migrations (rt-jdbc/load-resources "db/migrations")})
+
+
+(defn migrate-db
+  "Uses 'ragtime' to apply DB migration scripts."
+  []
+  (try
+    (log/info "Applying DB migrations...")
+    (let [output (-> (load-ragtime-config)
+                     rt-repl/migrate
+                     with-out-str)]
+      (log/info {:event ::migration-succeed
+                 :ragtime-output output}))
+    (catch Exception e
+      (log/error e {:event ::migration-failed})
+      (System/exit 1))))
+
+(defn rollback-db
+  "Uses 'ragtime' to apply DB migration rollback scripts."
+  []
+  (try
+    (log/info "Rolling back DB migrations...")
+    (let [output (-> (load-ragtime-config)
+                     rt-repl/rollback
+                     with-out-str)]
+      (log/info {:event ::migration-rollback-succeed
+                 :ragtime-output output}))
+    (catch Exception e
+      (log/error e {:event ::migration-rollback-failed})
+      (System/exit 1))))
+
+(defn reinit-db
+  "Clears DB and recreates it using 'ragtime'."
+  []
+  (rollback-db)
+  (migrate-db))
+
+
+(defn lein-migrate-db
+  "Called by the `lein migrate-db` via alias."
+  []
+  (migrate-db))
+
+(defn lein-rollback-db
+  "Called by the `lein rollback-db` via alias."
+  []
+  (rollback-db))
+
+(defn lein-reinit-db
+  "Called by the `lein reinit-db` via alias."
+  []
+  (reinit-db))
 
 
 ;; CUSTOM TYPES

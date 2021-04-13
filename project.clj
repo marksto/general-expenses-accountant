@@ -11,6 +11,7 @@
                  [org.clojure/core.async "1.3.610"]
 
                  [org.postgresql/postgresql "42.2.19"]
+                 [ragtime "0.8.1"]
                  [toucan "1.15.4"]
 
                  [com.grammarly/omniconf "0.2.2"]
@@ -40,6 +41,10 @@
             [nrepl/drawbridge "0.2.1"]]
   :ring {:handler general-expenses-accountant.web/app
          :init general-expenses-accountant.main/initialize}
+
+  :aliases {"migrate-db" ["run" "-m" "general-expenses-accountant.db/lein-migrate-db"]
+            "rollback-db" ["run" "-m" "general-expenses-accountant.db/lein-rollback-db"]
+            "reinit-db" ["run" "-m" "general-expenses-accountant.db/lein-reinit-db"]}
 
   :profiles {:dev {:global-vars {*warn-on-reflection* true}
                    :jvm-opts ["-Dclojure.spec.check-asserts=true"]}
