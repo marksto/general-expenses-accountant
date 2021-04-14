@@ -1,5 +1,8 @@
 (ns general-expenses-accountant.db
-  (:require [honeysql.core :as sql]
+  (:require [clojure.string :as str]
+            [clojure.java.jdbc :refer [IResultSetReadColumn ISQLValue]]
+
+            [honeysql.core :as sql]
             [jsonista.core :as json]
             [ragtime
              [jdbc :as rt-jdbc]
@@ -12,7 +15,9 @@
              [models :as models]]
 
             [general-expenses-accountant.config :as config])
-  (:import [java.sql Timestamp]))
+  (:import [clojure.lang Keyword]
+           [java.sql Timestamp ResultSetMetaData]
+           [org.postgresql.util PGobject]))
 
 ;; SETTING-UP
 
@@ -101,16 +106,83 @@
 
 ;; CUSTOM TYPES
 
+;; - ENUMS
+
+(def ^:private enum-types
+  "A set of all PostgreSQL ENUM types in DB schema migrations.
+   Used to convert enum values back into Clojure keywords."
+  ;; TODO: Add other ENUMs here manually OR by extraction.
+  #{"chat_type"})
+
+(defn- ^PGobject kwd->pg-enum
+  [kwd]
+  {:pre [(some? (namespace kwd))]}
+  (let [type (-> (namespace kwd)
+                 (str/replace "-" "_"))
+        value (name kwd)]
+    (doto (PGobject.)
+      (.setType type)
+      (.setValue value))))
+
+;; NB: This way of using custom datatype is ignored by HoneySQL,
+;;     but for `clojure.java.jdbc` this is an idiomatic approach
+;;     to its implementation, thus we leave it for completeness.
+(extend-protocol ISQLValue
+  Keyword
+  (sql-value [kwd]
+    (let [pg-obj (kwd->pg-enum kwd)
+          type (.getType pg-obj)]
+      (if (contains? enum-types type)
+        pg-obj
+        kwd))))
+
+(defn- pg-enum->kwd
+  ([^PGobject pg-obj]
+   (prn pg-obj)
+   (pg-enum->kwd (.getType pg-obj)
+                 (.getValue pg-obj)))
+  ([type val]
+   {:pre [(not (str/blank? type))
+          (not (str/blank? val))]}
+   (keyword (str/replace type "_" "-") val)))
+
+(extend-protocol IResultSetReadColumn
+  String
+  (result-set-read-column [val ^ResultSetMetaData rsmeta idx]
+    (let [type (.getColumnTypeName rsmeta idx)]
+      (if (contains? enum-types type)
+        (pg-enum->kwd type val)
+        val)))
+
+  PGobject
+  (result-set-read-column [val _ _]
+    (if (contains? enum-types (.getType val))
+      (pg-enum->kwd val)
+      val)))
+
+;; NB: This one is different from the plain ':keyword' by the fact
+;;     that an additional DB ENUM type values check is carried out.
+(models/add-type!
+  :enum
+  :in kwd->pg-enum
+  :out identity)
+
+;; - JSONB
+
 (def ^:private default-json-object-mapper
   (json/object-mapper {:decode-key-fn true
                        :bigdecimals true}))
-(def ^:private ->json
-  #(json/write-value-as-string % default-json-object-mapper))
-(def ^:private <-json
-  #(json/read-value % default-json-object-mapper))
 
-(defn ->jsonb [obj]
+(defn- ->json
+  [obj]
+  (json/write-value-as-string obj default-json-object-mapper))
+(defn- ->jsonb
+  [obj]
   (sql/call :cast (->json obj) :jsonb))
+
+(defn- <-json
+  [^PGobject pg-obj]
+  (json/read-value (.getValue pg-obj) default-json-object-mapper))
 
 (models/add-type!
   :jsonb
