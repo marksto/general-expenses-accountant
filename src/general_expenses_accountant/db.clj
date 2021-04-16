@@ -14,7 +14,8 @@
              [db :as db]
              [models :as models]]
 
-            [general-expenses-accountant.config :as config])
+            [general-expenses-accountant.config :as config]
+            [general-expenses-accountant.nums :as nums])
   (:import [clojure.lang Keyword]
            [java.sql Timestamp ResultSetMetaData]
            [org.postgresql.util PGobject]))
@@ -188,6 +189,68 @@
   :jsonb
   :in ->jsonb
   :out <-json)
+
+
+(defn transform-json
+  "Recursively transforms the JSON object (a map) according to a predefined mapping.
+   To be called within `post-select`, e.g. with an `update-in` on a JSONB attribute."
+  [json-obj mapping-rules]
+  (letfn [(reducer [m [k v]]
+            (if (= :* k)
+              ;; "transform for every key in a map" scenario
+              ;; {M, [:* FN]} -> (recur {M,  [k_1 FN]}) = M'
+              ;;                  ...
+              ;;                 (recur {M', [k_N FN]})
+              (reduce (fn [m' k']
+                        (reducer m' [k' v]))
+                      m (keys m))
+
+              (let [mkv (get m k)]
+                (if (some? mkv)
+                  (if (map? v)
+                    ;; "internal (map attributes) transformations" scenario
+                    ;; {M, [:x {k_1 FN_1       (recur {(:x M), [k_1 FN_1]})
+                    ;;          ...         ->  ...
+                    ;;          k_N FN_N}]}    (recur {(:x M), [k_N FN_N]})
+                    (let [kvs (seq v)
+                          res (reduce (fn [m' [k' v']]
+                                        (reducer m' [k' v']))
+                                      mkv kvs)]
+                      (assoc m k res))
+
+                    (if (vector? v)
+                      ;; "series of transformations" scenario (order matters!)
+                      ;; {M, [:x [EXPR_1       (recur {M,  [:x EXPR_1]}) = M'
+                      ;;          ...       ->  ...
+                      ;;          EXPR_N]]}    (recur {M', [:x EXPR_N]})
+                      (reduce (fn [m' v']
+                                (reducer m' [k v']))
+                              m v)
+
+                      ;; "direct transformation" scenario
+                      ;; {M, [:x FN]} -> (FN (:x M)) = M'
+                      (assoc m k (v mkv))))
+                  m))))]
+    (if (map? json-obj)
+      (reduce reducer json-obj mapping-rules)
+      json-obj)))
+
+(defn- restore-keys
+  [map restore-fn]
+  (apply hash-map
+         (mapcat (fn [[k v]]
+                   [(restore-fn k) v])
+                 map)))
+
+(defn restore-string-keys
+  "Changes the type of keys in the 'map' from Keyword to a String."
+  [map]
+  (restore-keys map name))
+
+(defn restore-numeric-keys
+  "Changes the type of keys in the 'map' from Keyword to an Integer."
+  [map]
+  (restore-keys map (comp nums/parse-int name)))
 
 
 ;; CUSTOM PROPS
