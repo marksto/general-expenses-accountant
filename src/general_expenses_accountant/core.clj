@@ -634,8 +634,7 @@
 
 ;; STATES & STATE TRANSITIONS
 
-;; TODO: Re-write with State Machines.
-;; TODO: Switch to Event-Driven.
+;; TODO: Re-write with an existing state machine (FSM) library.
 
 (def ^:private group-chat-states
   {:initial #{:waiting}
@@ -706,6 +705,11 @@
 
 
 ;; RECIPROCAL ACTIONS
+
+;; TODO: Switch to Event-Driven model. Simplifies?
+;; HTTP requests should be transformed into events
+;; that are handled by appropriate listeners (fns)
+;; that, in turn, may result in emitting events.
 
 ;; TODO: Re-implement it in asynchronous fashion, with logging the feedback.
 (defn- respond!
