@@ -17,8 +17,9 @@
             [general-expenses-accountant.config :as config]
             [general-expenses-accountant.nums :as nums])
   (:import [clojure.lang Keyword]
-           [java.sql Timestamp ResultSetMetaData]
-           [org.postgresql.util PGobject]))
+           [java.sql ResultSetMetaData]
+           [java.util Calendar]
+           [org.postgresql.util PGobject PGTimestamp]))
 
 ;; SETTING-UP
 
@@ -256,8 +257,10 @@
 ;; CUSTOM PROPS
 
 (defn- sql-now
+  "Results in a correct `timestamptz` object."
   []
-  (Timestamp. (System/currentTimeMillis)))
+  (PGTimestamp. (System/currentTimeMillis)
+                (Calendar/getInstance)))
 
 (models/add-property!
   :timestamped?
