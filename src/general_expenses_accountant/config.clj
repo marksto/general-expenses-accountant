@@ -16,6 +16,9 @@
                        :type :string}
              :db-password {:description "The database user password"
                            :type :string}
+             :max-db-conn {:description "Max # of simultaneous DB connections"
+                           :default 10
+                           :type :number}
 
              :bot-api-token {:description "Telegram Bot API token"
                              :verifier #(= (count %2) 46)

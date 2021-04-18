@@ -18,6 +18,7 @@
   (:import [clojure.lang Keyword]
            [java.sql ResultSetMetaData]
            [java.util Calendar]
+           [java.util.concurrent TimeUnit]
            [org.postgresql.util PGobject PGTimestamp]))
 
 ;; SETTING-UP
@@ -29,12 +30,12 @@
         db-name (last jdbc-url-parts)]
     {:auto-commit true
      :read-only false
-     :connection-timeout 30000
-     :validation-timeout 5000
-     :idle-timeout 600000
-     :max-lifetime 1800000
+     :connection-timeout (.toMillis TimeUnit/SECONDS 30)
+     :validation-timeout (.toMillis TimeUnit/SECONDS 5)
+     :idle-timeout (.toMillis TimeUnit/MINUTES 10)
+     :max-lifetime (.toMillis TimeUnit/MINUTES 30)
      :minimum-idle 1
-     :maximum-pool-size 3
+     :maximum-pool-size (config/get-prop :max-db-conn)
      :pool-name "db-pool"
      :jdbc-url jdbc-url
      :username (config/get-prop :db-user)
