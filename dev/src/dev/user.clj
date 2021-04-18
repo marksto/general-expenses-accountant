@@ -1,18 +1,16 @@
 (ns dev.user
   (:require [clojure.java.jdbc :as sql]
-            [clojure.string :as str]))
+            [clojure.string :as str]
+
+            [general-expenses-accountant.config :as config]))
 
 (println (str "Working in " (System/getProperty "user.dir") "\n"))
+
+(config/load-and-validate! [] "dev/config.edn")
 
 
 ;; 1. Initializing the DB
 
-(def database-url
-  (System/getenv "DATABASE_URL"))
-(def db-user
-  (System/getenv "DB_USER"))
-(def db-password
-  (System/getenv "DB_PASSWORD"))
 (def db-schema
   (clojure.core/slurp "dev/resources/db/init-db-schema.sql"))
 
@@ -24,8 +22,8 @@
 (defn create-db-schema
   [db db-name]
   (as-> db-schema $
-        (str/replace $ #"user_name" db-user)
-        (str/replace $ #"password" db-password)
+        (str/replace $ #"user_name" (config/get-prop :db-user))
+        (str/replace $ #"password" (config/get-prop :db-password))
         (str/replace $ #"database_name" db-name)
         (try
           (sql/execute! db [$] {:transaction? false})
@@ -34,8 +32,9 @@
             (println (str "Failed to create the DB schema. Exception:\n" e))
             (System/exit 1)))))
 
-(let [db-name (last (str/split database-url #"/"))
-      db (str/replace database-url db-name "")]
+(let [db-url (config/get-prop :database-url)
+      db-name (last (str/split db-url #"/"))
+      db (str/replace db-url db-name "")]
   (if (db-does-not-exist? db db-name)
     (do
       (println (str "Creating the DB '" db-name "'..."))

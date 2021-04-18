@@ -11,6 +11,7 @@
                  [org.clojure/core.async "1.3.610"]
 
                  [org.postgresql/postgresql "42.2.19"]
+                 [hikari-cp "2.13.0"]
                  [ragtime "0.8.1"]
                  [toucan "1.15.4"]
 

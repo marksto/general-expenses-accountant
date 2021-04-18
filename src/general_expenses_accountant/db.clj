@@ -2,14 +2,13 @@
   (:require [clojure.string :as str]
             [clojure.java.jdbc :refer [IResultSetReadColumn ISQLValue]]
 
+            [hikari-cp.core :as cp]
             [honeysql.core :as sql]
             [jsonista.core :as json]
             [ragtime
              [jdbc :as rt-jdbc]
              [repl :as rt-repl]]
-            [taoensso
-             [encore :as encore]
-             [timbre :as log]]
+            [taoensso.timbre :as log]
             [toucan
              [db :as db]
              [models :as models]]
@@ -23,25 +22,42 @@
 
 ;; SETTING-UP
 
-(defn- db-spec
+(defn- get-datasource-options
   []
-  (let [db-url (config/get-prop :database-url)
-        jdbc-url-parts (re-find (re-matcher #"(jdbc:)?([^:]+):(.+)" db-url))
-        [subprotocol subname] (encore/get-subvector jdbc-url-parts -2 2)]
-    {:classname "org.postgresql.Driver"
-     :subprotocol subprotocol
-     :subname subname
-     :user (config/get-prop :db-user)
+  (let [jdbc-url (config/get-prop :database-url)
+        jdbc-url-parts (re-find (re-matcher #"(jdbc:)?(.+)://([^/]+/(.+))" jdbc-url))
+        db-name (last jdbc-url-parts)]
+    {:auto-commit true
+     :read-only false
+     :connection-timeout 30000
+     :validation-timeout 5000
+     :idle-timeout 600000
+     :max-lifetime 1800000
+     :minimum-idle 1
+     :maximum-pool-size 3
+     :pool-name "db-pool"
+     :jdbc-url jdbc-url
+     :username (config/get-prop :db-user)
      :password (config/get-prop :db-password)
+     :database-name db-name}))
 
-     ;; PostgreSQL-specific
-     :reWriteBatchedInserts true}))
+(defonce datasource
+         (delay (cp/make-datasource (get-datasource-options))))
 
-;; TODO: Pool DB connections with HikariCP.
+(defn- get-db-spec
+  []
+  {:datasource @datasource
+   ;; PostgreSQL-specific
+   :reWriteBatchedInserts true})
+
 (defn init!
   []
-  (db/set-default-db-connection! (db-spec))
+  (db/set-default-db-connection! (get-db-spec))
   (db/set-default-automatically-convert-dashes-and-underscores! true))
+
+(defn close!
+  []
+  (cp/close-datasource @datasource))
 
 
 (models/set-root-namespace! 'general-expenses-accountant.domain)
@@ -51,7 +67,8 @@
 
 (defn- load-ragtime-config
   []
-  {:datastore (rt-jdbc/sql-database (db-spec) {:migrations-table "migrations"})
+  {:datastore (rt-jdbc/sql-database (get-db-spec)
+                                    {:migrations-table "migrations"})
    :migrations (rt-jdbc/load-resources "db/migrations")})
 
 
