@@ -1,93 +1,99 @@
 {
  ;; private chat-id -> user-specific
- 280000000 {:groups #{-560000000 -1001000000000}
+ 280000000 {:id 280000000
+            :type :chat-type/private
+            :data {:groups #{-560000000 -1001000000000}
 
-            :state :input
+                   :state :input
 
-            ;; direct numeric input
-            :amount 100
-            :group -560000000
-            :expense-item "food"
-            ;; or
-            :expense-desc "other"
+                   ;; direct numeric input
+                   :amount 100
+                   :group -560000000
+                   :expense-item "food"
+                   ;; or
+                   :expense-desc "other"
 
-            ;; interactive input
-            :user-input "50,89 + 171"
-            :user-error false}
+                   ;; interactive input
+                   :user-input "50,89 + 171"
+                   :user-error false}}
 
  ;; group chat-id -> group-level settings
- -560000000 {:state :initial
-             :title "Family expenses"
-             :members-count 3
+ -560000000 {:id -560000000
+             :type :chat-type/group
+             :data {:state :initial
+                    :title "Family expenses"
+                    :members-count 3
 
-             ;; messages to delete/check replies to
-             :bot-messages {:intro-msg-id 1
-                            :name-request-msg-id 2}
+                    ;; messages to delete/check replies to
+                    :bot-messages {:intro-msg-id 1
+                                   :name-request-msg-id 2}
 
-             ;; configured by users
-             :accounts {:general {0 {:id 0
-                                     :type :general
-                                     :name "Common"
-                                     :created 426300760
-                                     :revoked 426320300
-                                     :members #{1 2}}
-                                  5 {:id 5
-                                     :type :general
-                                     :name "Common"
-                                     :created 426320300
-                                     :revoked 432500000
-                                     :members #{1 2 3}}
-                                  6 {:id 6
-                                     :type :general
-                                     :name "Common"
-                                     :created 432500000
-                                     :members #{1 2}}}
-                        :personal {1 {:id 1
-                                      :type :personal
-                                      :name "Alice"
-                                      :created 426300760
-                                      :msg-id 3
-                                      :user-id 1400000000}
-                                   2 {:id 2
-                                      :type :personal
-                                      :name "Bob"
-                                      :created 426301230
-                                      :msg-id 4
-                                      :user-id 1200000000}
-                                   3 {:id 3
-                                      :type :personal
-                                      :name "Carl"
-                                      :created 426320300
-                                      :revoked 432500000
-                                      :msg-id 5
-                                      :user-id 2000000000}}
-                        :group {4 {:id 4
-                                   :type :group
-                                   :name "Alice & Bob"
-                                   :created 426307670
-                                   :revoked 432500000
-                                   :members #{1 2}}}
-                        :last-id 6}
-             ;; TODO: Re-implement ':items' with another data structure.
-             :expenses {:items [{:code "food"
-                                 :desc "foodstuffs & manufactured goods"}
-                                {:code "out"
-                                 :desc "cafes and coffee (eating out)"}
-                                {:code "gas"
-                                 :desc "gasoline & car expenses"}]
-                        ;; TODO: Implement smart sorting of items.
-                        :popularity {"food" 5
-                                     "out" 2
-                                     "gas" 1}}
-             :data-store {:type :google-sheets
-                          :url "..."
-                          :api-key "..."}
+                    ;; configured by users
+                    :accounts {:general {0 {:id 0
+                                            :type :general
+                                            :name "Common"
+                                            :created 426300760
+                                            :revoked 426320300
+                                            :members #{1 2}}
+                                         5 {:id 5
+                                            :type :general
+                                            :name "Common"
+                                            :created 426320300
+                                            :revoked 432500000
+                                            :members #{1 2 3}}
+                                         6 {:id 6
+                                            :type :general
+                                            :name "Common"
+                                            :created 432500000
+                                            :members #{1 2}}}
+                               :personal {1 {:id 1
+                                             :type :personal
+                                             :name "Alice"
+                                             :created 426300760
+                                             :msg-id 3
+                                             :user-id 1400000000}
+                                          2 {:id 2
+                                             :type :personal
+                                             :name "Bob"
+                                             :created 426301230
+                                             :msg-id 4
+                                             :user-id 1200000000}
+                                          3 {:id 3
+                                             :type :personal
+                                             :name "Carl"
+                                             :created 426320300
+                                             :revoked 432500000
+                                             :msg-id 5
+                                             :user-id 2000000000}}
+                               :group {4 {:id 4
+                                          :type :group
+                                          :name "Alice & Bob"
+                                          :created 426307670
+                                          :revoked 432500000
+                                          :members #{1 2}}}
+                               :last-id 6}
+                    ;; TODO: Re-implement ':items' with another data structure.
+                    :expenses {:items [{:code "food"
+                                        :desc "foodstuffs & manufactured goods"}
+                                       {:code "out"
+                                        :desc "cafes and coffee (eating out)"}
+                                       {:code "gas"
+                                        :desc "gasoline & car expenses"}]
+                               ;; TODO: Implement smart sorting of items.
+                               :popularity {"food" 5
+                                            "out" 2
+                                            "gas" 1}}
+                    :data-store {:type :google-sheets
+                                 :url "..."
+                                 :api-key "..."}
 
-             ;; precomputed values
-             :user-account-mapping {1400000000 1
-                                    1200000000 2
-                                    2000000000 3}}
+                    ;; precomputed values
+                    :user-account-mapping {1400000000 1
+                                           1200000000 2
+                                           2000000000 3}}}
 
- ;; supergroup chat-id -> group chat-id (special case for 'admin' bots)
- -1001000000000 -560000000
+ ;; supergroup chat-id -> group chat-id (special case e.g. for 'admin' bots)
+ -1001000000000 {:id -1001000000000
+                 :type :chat-type/supergroup
+                 :data -560000000}
  }
