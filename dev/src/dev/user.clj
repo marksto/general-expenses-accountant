@@ -72,4 +72,8 @@
 
 (comment
   ;; in case it had stopped
-  (restart-long-polling))
+  (restart-long-polling)
+
+  (do ;; to talk to the DB about 'chats'
+    (load "../../src/general_expenses_accountant/domain/chat")
+    (in-ns 'general-expenses-accountant.domain.chat)))
