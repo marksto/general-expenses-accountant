@@ -6,6 +6,7 @@
              [api :as m-api]
              [handlers :as m-hlr]]
             [taoensso.timbre :as log]
+            [toucan.db :as db]
 
             [general-expenses-accountant.config :as config]
             [general-expenses-accountant.domain.chat :refer [Chat]]
@@ -304,10 +305,14 @@
   (contains? (get-bot-data) chat-id))
 
 (defn- setup-new-chat!
-  [chat-id init-chat-data]
+  [chat-id new-chat]
   (when-not (does-chat-exist? chat-id) ;; petty RC
-    (update-bot-data! assoc chat-id init-chat-data)
-    init-chat-data))
+    (as-> new-chat $
+          (assoc $ :id chat-id)
+          ;; TODO: Move insert to the model's namespace?
+          (db/insert! Chat $)
+          (update-bot-data! assoc chat-id $)
+          (get $ chat-id))))
 
 (defn- setup-new-group-chat!
   [chat-id chat-title chat-members-count]
@@ -346,21 +351,30 @@
    (when-let [real-chat-id (get-real-chat-id bot-data chat-id)]
      (get-in bot-data [real-chat-id :data]))))
 
+;; TODO: Have to check the chat for existence as a precondition.
 (defn- update-chat-data!
   [chat-id upd-fn & upd-fn-args]
   (let [real-chat-id (get-real-chat-id chat-id)
         bot-data (apply update-bot-data!
-                        update-in [real-chat-id :data] upd-fn upd-fn-args)]
-    (get-chat-data bot-data chat-id)))
+                        update-in [real-chat-id :data] upd-fn upd-fn-args)
+        upd-chat (get bot-data real-chat-id)]
+    ;; TODO: Move update to the model's namespace?
+    (db/update! Chat (:id upd-chat) upd-chat)
+    (:data upd-chat)))
 
+;; TODO: Come up with a better name for this function.
 (defn- set-chat-data!
   ([chat-id [key & ks] value]
    (when-let [real-chat-id (get-real-chat-id chat-id)]
      (let [full-path (concat [real-chat-id :data key] ks)
            bot-data (if (nil? value)
-                      (update-bot-data! update-in (butlast full-path) dissoc (last full-path))
-                      (update-bot-data! assoc-in full-path value))]
-       (get-chat-data bot-data chat-id)))))
+                      (update-bot-data! update-in (butlast full-path)
+                                        dissoc (last full-path))
+                      (update-bot-data! assoc-in full-path value))
+           upd-chat (get bot-data real-chat-id)]
+       ;; TODO: Move update to the model's namespace?
+       (db/update! Chat (:id upd-chat) upd-chat)
+       (:data upd-chat)))))
 
 (defn- get-chat-state
   "Returns the state of the given chat.
@@ -373,20 +387,25 @@
   "Returns the new state of the chat if it was set, or 'nil' otherwise."
   [chat-states chat-id new-state]
   (when (does-chat-exist? chat-id)
-    (update-bot-data!
-      (fn [bot-data]
-        (let [curr-state (get-chat-state chat-id)
-              possible-new-states (or (-> chat-states curr-state :to)
-                                      (-> chat-states curr-state))]
-          (if (contains? possible-new-states new-state)
-            (let [state-init-fn (-> chat-states new-state :init-fn)]
-              (as-> bot-data $
-                    (if (some? state-init-fn)
-                      (update-in $ [chat-id :data] state-init-fn)
-                      $)
-                    (assoc-in $ [chat-id :data :state] new-state)))
-            bot-data))))
-    new-state))
+    (let [real-chat-id (get-real-chat-id chat-id)
+          bot-data (update-bot-data!
+                     (fn [bot-data]
+                       (let [curr-state (get-chat-state chat-id)
+                             possible-new-states (or (-> chat-states curr-state :to)
+                                                     (-> chat-states curr-state))]
+                         (if (contains? possible-new-states new-state)
+                           (let [state-init-fn (-> chat-states new-state :init-fn)]
+                             ;; TODO: Have to use 'real-chat-id' instead of 'chat-id'.
+                             (as-> bot-data $
+                                   (if (some? state-init-fn)
+                                     (update-in $ [chat-id :data] state-init-fn)
+                                     $)
+                                   (assoc-in $ [chat-id :data :state] new-state)))
+                           bot-data))))
+          upd-chat (get bot-data real-chat-id)]
+      ;; TODO: Move update to the model's namespace?
+      (db/update! Chat (:id upd-chat) upd-chat)
+      new-state)))
 
 ;; - ACCOUNTS
 
@@ -1060,8 +1079,8 @@
         (do
           (let [token (config/get-prop :bot-api-token)
                 chat-members-count (tg-client/get-chat-members-count token chat-id)
-                chat-data (setup-new-group-chat! chat-id chat-title chat-members-count)]
-            (when (is-chat-for-group-accounting? chat-data)
+                new-chat (setup-new-group-chat! chat-id chat-title chat-members-count)]
+            (when (is-chat-for-group-accounting? (:data new-chat))
               (create-general-account! chat-id date)))
 
           (respond-attentively! (assoc introduction-msg :chat-id chat-id)
@@ -1103,8 +1122,9 @@
       (when (and (tg-api/is-group? chat)
                  (= :waiting (get-chat-state chat-id))
                  (is-reply-to-bot? chat-id :name-request-msg-id message))
-        (let [group-chat-id (get-real-chat-id chat-id)]
-          (when-not (setup-new-private-chat! user-id group-chat-id)
+        (let [group-chat-id (get-real-chat-id chat-id)
+              new-chat (setup-new-private-chat! user-id group-chat-id)]
+          (when (nil? new-chat)
             (update-private-chat-groups! user-id group-chat-id)))
 
         (if (create-personal-account! chat-id user-id text date msg-id)
@@ -1141,8 +1161,9 @@
       (when (and (tg-api/is-group? chat)
                  (some? migrate-to-chat-id))
         (log/debugf "Group %s has been migrated to a supergroup %s" chat-id migrate-to-chat-id)
-        (setup-new-supergroup-chat! migrate-to-chat-id chat-id)
-        (let [group-users (-> (get-chat-data chat-id)
+
+        (let [new-chat (setup-new-supergroup-chat! migrate-to-chat-id chat-id)
+              group-users (-> (:data new-chat)
                               (get :user-account-mapping)
                               keys)]
           (doseq [user-id group-users]
