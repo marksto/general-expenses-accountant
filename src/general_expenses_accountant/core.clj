@@ -42,12 +42,38 @@
   ([upd-fn & upd-fn-args]
    (apply swap! *bot-data upd-fn upd-fn-args)))
 
-(def ^:private min-members-for-general-account
-  "The number of users in a group chat (including the bot)
-   required to create a general account."
+;; TODO: Implement transactions log. Each group chat is to keep a list of all inbound expenses (as data, with IDs).
+
+
+;; ACCOUNTING TYPES
+
+;; From the business logic perspective there are 2 main use cases for the bot:
+;;   1. personal accounting — when a user creates a group chat for himself
+;;                            and the bot;
+;;   2. group accounting    — when multiple users create a group chat and add
+;;                            the bot there to track their general expenses.
+;; The only difference between the two is that an account of a ':general' type
+;; is automatically created for a group accounting and what format is used for
+;; notification messages.
+
+(def ^:private min-chat-members-for-group-accounting
+  "The number of users in a group chat (including the bot itself)
+   required for it to be used for the general expenses accounting."
   3)
 
-;; TODO: Implement transactions log. Each group chat is to keep a list of all inbound expenses (as data, with IDs).
+(defn- is-chat-for-group-accounting?
+  "Determines the use case for a chat by the number of its members."
+  [chat-data]
+  (let [chat-members-count (:members-count chat-data)]
+    (>= chat-members-count min-chat-members-for-group-accounting)))
+
+(defn- get-number-of-missing-personal-accounts
+  "Returns the number of missing personal accounts in a group chat,
+   which have to be created before the group chat is ready for the
+   general expenses accounting."
+  [chat-data number-of-existing-personal-accounts]
+  (let [chat-members-count (:members-count chat-data)]
+    (- chat-members-count number-of-existing-personal-accounts 1)))
 
 
 ;; MESSAGE TEMPLATES & CALLBACK DATA
@@ -240,17 +266,21 @@
    :options (accounts->options accounts)})
 
 (defn- get-group-expense-msg
-  [payer-acc-name amount debtor-acc-name expense-details]
-  (let [formatted-amount (format-currency amount "ru")]
-    {:type :text
-     :text (str "*" payer-acc-name "*\n"
-                (->> [(str formatted-amount "₽")
-                      "/" debtor-acc-name
-                      "/" expense-details]
-                     (str/join " ")
-                     escape-markdown-v2))
-     :options (tg-api/build-message-options
-                {:parse-mode "MarkdownV2"})}))
+  ([amount expense-details]
+   (get-group-expense-msg amount expense-details nil nil))
+  ([amount expense-details payer-acc-name debtor-acc-name]
+   (let [formatted-amount (format-currency amount "ru")]
+     {:type :text
+      :text (str (when (some? payer-acc-name)
+                   (str "*" payer-acc-name "*\n"))
+                 (->> [(str formatted-amount "₽")
+                       debtor-acc-name
+                       expense-details]
+                      (filter some?)
+                      (str/join " / ")
+                      escape-markdown-v2))
+      :options (tg-api/build-message-options
+                 {:parse-mode "MarkdownV2"})})))
 
 (def ^:private expense-added-successfully-msg
   {:type :text
@@ -483,13 +513,7 @@
                   (upd-acc-name-fn chat-data))))]
         (get-personal-account updated-chat-data user-id)))))
 
-(defn- get-missing-personal-accounts
-  "Returns the number of missing personal accounts in a chat
-   (which need to be created for the group to be ready)."
-  [chat-id chat-members-count]
-  (let [chat-data (get-chat-data chat-id)
-        pers-acc-num (count (get-personal-account-ids chat-data))]
-    (- chat-members-count pers-acc-num 1)))
+;; USER INPUT
 
 (defn- get-user-input
   [chat-data]
@@ -782,10 +806,14 @@
                                           :personal payer-acc-id)
         expense-details (or (:expense-item chat-data)
                             (:expense-desc chat-data))
-        group-notification-msg (get-group-expense-msg (:name payer-acc)
-                                                      (:amount chat-data)
-                                                      (:name debtor-acc)
-                                                      expense-details)]
+        is-gen-exp-chat? (is-chat-for-group-accounting? chat-data)
+        group-notification-msg (if-not (is-gen-exp-chat?)
+                                 (get-group-expense-msg (:amount chat-data)
+                                                        expense-details)
+                                 (get-group-expense-msg (:amount chat-data)
+                                                        expense-details
+                                                        (:name payer-acc)
+                                                        (:name debtor-acc)))]
     (respond! (assoc group-notification-msg :chat-id group-chat-id)))
   (proceed-and-respond! chat-id {:transition [:private :successful-input]}))
 
@@ -1024,9 +1052,9 @@
       (if (tg-api/has-joined? my-chat-member-updated)
         (do
           (let [token (config/get-prop :bot-api-token)
-                chat-members-count (tg-client/get-chat-members-count token chat-id)]
-            (setup-new-group-chat! chat-id chat-title chat-members-count)
-            (when (>= chat-members-count min-members-for-general-account)
+                chat-members-count (tg-client/get-chat-members-count token chat-id)
+                chat-data (setup-new-group-chat! chat-id chat-title chat-members-count)]
+            (when (is-chat-for-group-accounting? chat-data)
               (create-general-account! chat-id date)))
 
           (respond-attentively! (assoc introduction-msg :chat-id chat-id)
@@ -1077,8 +1105,10 @@
             (respond! (assoc (get-added-to-new-group-msg chat-title) :chat-id user-id)))
           (update-personal-account! chat-id user-id text))
 
-        (let [chat-members-count (:members-count (get-chat-data chat-id))
-              uncreated-count (get-missing-personal-accounts chat-id chat-members-count)
+        (let [chat-data (get-chat-data chat-id)
+              pers-accs-count (count (get-personal-account-ids chat-data))
+              uncreated-count (get-number-of-missing-personal-accounts
+                                chat-data pers-accs-count)
               event (if (zero? uncreated-count)
                       {:transition [:group :ready]
                        :params {:bot-username (get @*bot-user :username)}}
