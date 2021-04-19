@@ -66,7 +66,8 @@
   "Determines the use case for a chat by the number of its members."
   [chat-data]
   (let [chat-members-count (:members-count chat-data)]
-    (>= chat-members-count min-chat-members-for-group-accounting)))
+    (or (nil? chat-members-count) ;; a private chat with the bot
+        (>= chat-members-count min-chat-members-for-group-accounting))))
 
 (defn- get-number-of-missing-personal-accounts
   "Returns the number of missing personal accounts in a group chat,
