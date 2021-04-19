@@ -265,22 +265,30 @@
    :text "Выберите тех, кто понёс расход:"
    :options (accounts->options accounts)})
 
+(defn- get-expense-notification-msg
+  [amount expense-details payer-acc-name debtor-acc-name]
+  (let [formatted-amount (format-currency amount "ru")
+        title-txt (when (some? payer-acc-name)
+                    (str "*" (escape-markdown-v2 payer-acc-name) "*\n"))
+        details-txt (->> [(str formatted-amount "₽")
+                          debtor-acc-name
+                          expense-details]
+                         (filter some?)
+                         (str/join " / ")
+                         escape-markdown-v2)]
+    {:type :text
+     :text (str title-txt details-txt)
+     :options (tg-api/build-message-options
+                {:parse-mode "MarkdownV2"})}))
+
+(defn- get-personal-expense-msg
+  [amount expense-details]
+  (get-expense-notification-msg amount expense-details nil nil))
+
 (defn- get-group-expense-msg
-  ([amount expense-details]
-   (get-group-expense-msg amount expense-details nil nil))
-  ([amount expense-details payer-acc-name debtor-acc-name]
-   (let [formatted-amount (format-currency amount "ru")]
-     {:type :text
-      :text (str (when (some? payer-acc-name)
-                   (str "*" payer-acc-name "*\n"))
-                 (->> [(str formatted-amount "₽")
-                       debtor-acc-name
-                       expense-details]
-                      (filter some?)
-                      (str/join " / ")
-                      escape-markdown-v2))
-      :options (tg-api/build-message-options
-                 {:parse-mode "MarkdownV2"})})))
+  [payer-acc-name amount debtor-acc-name expense-details]
+  (get-expense-notification-msg amount expense-details
+                                payer-acc-name debtor-acc-name))
 
 (def ^:private expense-added-successfully-msg
   {:type :text
@@ -806,15 +814,14 @@
                                           :personal payer-acc-id)
         expense-details (or (:expense-item chat-data)
                             (:expense-desc chat-data))
-        is-gen-exp-chat? (is-chat-for-group-accounting? chat-data)
-        group-notification-msg (if-not (is-gen-exp-chat?)
-                                 (get-group-expense-msg (:amount chat-data)
-                                                        expense-details)
-                                 (get-group-expense-msg (:amount chat-data)
-                                                        expense-details
-                                                        (:name payer-acc)
-                                                        (:name debtor-acc)))]
-    (respond! (assoc group-notification-msg :chat-id group-chat-id)))
+        exp-notification-msg (if-not (is-chat-for-group-accounting? chat-data)
+                               (get-personal-expense-msg (:amount chat-data)
+                                                         expense-details)
+                               (get-group-expense-msg (:name payer-acc)
+                                                      (:amount chat-data)
+                                                      (:name debtor-acc)
+                                                      expense-details))]
+    (respond! (assoc exp-notification-msg :chat-id group-chat-id)))
   (proceed-and-respond! chat-id {:transition [:private :successful-input]}))
 
 (defn- proceed-with-expense-details!
