@@ -158,7 +158,6 @@
 
 (defn- pg-enum->kwd
   ([^PGobject pg-obj]
-   (prn pg-obj)
    (pg-enum->kwd (.getType pg-obj)
                  (.getValue pg-obj)))
   ([type val]
