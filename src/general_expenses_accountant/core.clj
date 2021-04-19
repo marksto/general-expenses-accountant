@@ -22,6 +22,18 @@
 
 (defonce ^:private *bot-data (atom {}))
 
+(defn init!
+  []
+  (let [token (config/get-prop :bot-api-token)
+        bot-user (get (tg-client/get-me token) :result)]
+    (log/debug "Identified myself:" bot-user)
+    (reset! *bot-user bot-user))
+
+  (let [chats (Chat)
+        ids (map :id chats)]
+    (log/debug "Total chats uploaded from the DB:" (count chats))
+    (reset! *bot-data (zipmap ids chats))))
+
 (defn- get-bot-data
   []
   @*bot-data)
@@ -1121,16 +1133,3 @@
   [update]
   (log/debug "Received update:" update)
   (handler update))
-
-;; TODO: Move this fn to the "STATE" code block.
-(defn init!
-  []
-  (let [token (config/get-prop :bot-api-token)
-        bot-user (get (tg-client/get-me token) :result)]
-    (log/debug "Identified myself:" bot-user)
-    (reset! *bot-user bot-user))
-
-  (let [chats (Chat)
-        ids (map :id chats)]
-    (log/debug "Total chats uploaded from the DB:" (count chats))
-    (reset! *bot-data (zipmap ids chats))))
