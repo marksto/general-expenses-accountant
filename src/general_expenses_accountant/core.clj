@@ -28,7 +28,7 @@
     (log/debug "Identified myself:" bot-user)
     (reset! *bot-user bot-user))
 
-  (let [chats (Chat)
+  (let [chats (Chat) ;; TODO: Move this to the model's namespace?
         ids (map :id chats)]
     (log/debug "Total chats uploaded from the DB:" (count chats))
     (reset! *bot-data (zipmap ids chats))))
@@ -764,6 +764,7 @@
       (log/debug "Telegram returned:" tg-response)
       tg-response)
     (catch Exception e
+      ;; TODO: Add 'response' a 'failed-responses' queue to be able to manually handle it later?
       (log/error e "Failed to respond with:" response))))
 
 (defn- proceed-and-respond!

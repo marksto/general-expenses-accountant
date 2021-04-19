@@ -1,4 +1,5 @@
 (defproject general-expenses-accountant "0.1.0-SNAPSHOT"
+  ;; TODO: Migrate this project to the 'tools.deps' + clj / Makefile + Polylith architecture.
 
   :description "Leveraging the power of the Telegram Bot API to account for general expenses"
   :url "https://github.com/marksto/general-expenses-accountant"
