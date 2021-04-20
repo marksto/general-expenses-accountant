@@ -125,7 +125,7 @@
                                  (tg-api/build-inline-kbd-btn "статьи" :callback_data cd-expense-items)
                                  (tg-api/build-inline-kbd-btn "хранилище" :callback_data cd-data-store)]])})})
 
-(def ^:private personal-account-name-msg
+(def ^:private personal-account-name-request-msg
   {:type :text
    :text "Как будет называться ваш личный счёт?"
    :options (tg-api/build-message-options
@@ -690,9 +690,11 @@
     (change-chat-state! chat-states chat-id new-state)))
 
 (def ^:private state-transitions
-  {:group {:waiting-for-user {:to-state :waiting
-                              :message-fn get-personal-accounts-left-msg
-                              :message-params [:uncreated-count]}
+  {:group {:request-account-names {:to-state :waiting
+                                   :message personal-account-name-request-msg}
+           :waiting-for-others {:to-state :waiting
+                                :message-fn get-personal-accounts-left-msg
+                                :message-params [:uncreated-count]}
            :ready {:to-state :ready
                    :message-fn get-bot-readiness-msg
                    :message-params [:bot-username]}}
@@ -741,6 +743,10 @@
 ;; HTTP requests should be transformed into events
 ;; that are handled by appropriate listeners (fns)
 ;; that, in turn, may result in emitting events.
+
+;; - ABSTRACT ACTIONS
+;; TODO: Combine them into a single façade fn w/ a set of opts
+;;       (:replace true, :response-handler, :async true, etc.)?
 
 ;; TODO: Re-implement it in asynchronous fashion, with logging the feedback.
 (defn- respond!
@@ -810,6 +816,14 @@
     (replace-response! (assoc (:message result) :chat-id chat-id
                                                 :msg-id msg-id))))
 
+;; - SPECIFIC ACTIONS
+
+(defn- proceed-with-personal-accounts-creation!
+  [chat-id]
+  (proceed-and-respond-attentively!
+    chat-id
+    {:transition [:group :request-account-names]}
+    #(->> % :message_id (set-bot-msg-id! chat-id :name-request-msg-id))))
 
 (defn- proceed-with-notification!
   [chat-id user-id debtor-acc]
@@ -1079,10 +1093,7 @@
           (respond-attentively! (assoc introduction-msg :chat-id chat-id)
                                 #(->> % :message_id (set-bot-msg-id! chat-id :intro-msg-id)))
 
-          (respond-attentively! (assoc personal-account-name-msg :chat-id chat-id)
-                                #(->> % :message_id (set-bot-msg-id! chat-id :name-request-msg-id)))
-
-          (handle-state-transition chat-id {:transition [:group :waiting-for-user]})
+          (proceed-with-personal-accounts-creation! chat-id)
           op-succeed)
         (ignore "bot chat member status update dated %s in chat=%s" date chat-id))))
 
@@ -1132,7 +1143,7 @@
               event (if (zero? uncreated-count)
                       {:transition [:group :ready]
                        :params {:bot-username (get @*bot-user :username)}}
-                      {:transition [:group :waiting-for-user]
+                      {:transition [:group :waiting-for-others]
                        :params {:uncreated-count uncreated-count}})]
           (proceed-and-respond! chat-id event))
         op-succeed)))
