@@ -16,6 +16,11 @@
 
 ;; STATE
 
+;; TODO: Normally, this should be transformed into a 'cloffeine' cache
+;;       which periodically auto-evicts the cast-off chats data. Then,
+;;       the initial data should be truncated, e.g. by an 'updated_at'
+;;       timestamps, and the data for chats from the incoming requests
+;;       should be (re)loaded from the DB on demand.
 (defonce ^:private *bot-user (atom nil))
 
 (defonce ^:private *bot-data (atom {}))
@@ -900,13 +905,20 @@
      (log/debugf (str "Ignored: " ~msg) ~@args)
      op-succeed))
 
-;; TODO: Implement an immediate response. Telegram is able to handle the following form:
+;; TODO: Implement an 'immediate response'.
+;;
+;; Telegram is able to handle the following response form:
 ;; {
 ;;   "method": "sendMessage",
 ;;   "chat_id": body.message.chat.id,
 ;;   "reply_to_message_id": body.message.message_id,
 ;;   "text": "..."
 ;; };
+;;
+;; NB: This have to be combined with an Event-Driven model,
+;;     i.e. in case of long-term request processing the bot
+;;;    should immediately respond with sending the 'typing'
+;;     chat action (see /sendChatAction specs).
 
 
 ;; BOT API
@@ -914,7 +926,7 @@
 (m-hlr/defhandler
   handler
 
-  ;; BOT COMMANDS
+  ;; - BOT COMMANDS
 
   ; Each bot has to handle '/start' and '/help' commands.
   (m-hlr/command-fn
@@ -954,7 +966,7 @@
         (handle-state-transition chat-id {:transition [:private :canceled-input]})
         op-succeed)))
 
-  ;; INLINE QUERIES
+  ;; - INLINE QUERIES
 
   (m-hlr/inline-fn
     (fn [inline-query]
@@ -964,7 +976,7 @@
     (fn [{inline-query-id :id _user :from query-str :query _offset :offset :as _inline-query}]
       (ignore "inline query id=%s, query=%s" inline-query-id query-str)))
 
-  ;; CALLBACK QUERIES
+  ;; - CALLBACK QUERIES
 
   (m-hlr/callback-fn
     (fn [callback-query]
@@ -1066,7 +1078,7 @@
           _chat-instance :chat_instance callback-btn-data :data :as _callback-query}]
       (ignore "callback query id=%s, data=%s" callback-query-id callback-btn-data)))
 
-  ;; CHAT MEMBER STATUS UPDATES
+  ;; - CHAT MEMBER STATUS UPDATES
 
   (tg-client/bot-chat-member-status-fn
     (fn [{{chat-id :id _type :type chat-title :title _username :username :as chat} :chat
@@ -1111,7 +1123,7 @@
       ;; TODO: Create a general account anew (and check its ':members').
       (ignore "chat member status update dated %s in chat=%s" date chat-id)))
 
-  ;; PLAIN MESSAGES
+  ;; - PLAIN MESSAGES
 
   (m-hlr/message-fn
     (fn [{msg-id :message_id group-chat-created :group_chat_created :as _message}]

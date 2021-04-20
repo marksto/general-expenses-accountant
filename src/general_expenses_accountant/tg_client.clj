@@ -1,7 +1,7 @@
 (ns general-expenses-accountant.tg-client
   "The Morse extension that provides:
    1) a conventional way to set up the updates
-   2) some Telegram Bot API operations
+   2) missing Telegram Bot API methods
    3) missing update handlers
 
    NB: As Telegram Bot API documentation states,
@@ -16,9 +16,9 @@
              [polling :as m-poll]]
             [taoensso.timbre :as log]))
 
-;; Updates Setup
+;; UPDATES SETUP
 
-;; WEBHOOK
+;; - WEBHOOK
 
 (defn- construct-webhook-url
   "Constructs webhook URL according to the Telegram Bot API recommendation."
@@ -35,7 +35,7 @@
     (log/info "Bot URL:" bot-url)
     (m-api/set-webhook token webhook-url)))
 
-;; LONG-POLLING
+;; - LONG-POLLING
 
 (defonce ^:private *updates-channel (atom nil))
 
@@ -76,7 +76,7 @@
   (m-poll/stop @*updates-channel))
 
 
-;; Operations
+;; BOT API METHODS
 
 (def ^:private base-url m-api/base-url)
 
@@ -110,7 +110,7 @@
      (get resp :body))))
 
 
-;; Handlers
+;; UPDATE HANDLERS
 
 ;; TODO: Morse improvement. Implement a Compojure 'let-routes'-like 'let-handler' macro.
 
