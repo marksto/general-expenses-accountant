@@ -6,10 +6,9 @@
              [api :as m-api]
              [handlers :as m-hlr]]
             [taoensso.timbre :as log]
-            [toucan.db :as db]
 
             [general-expenses-accountant.config :as config]
-            [general-expenses-accountant.domain.chat :refer [Chat]]
+            [general-expenses-accountant.domain.chat :as chats]
             [general-expenses-accountant.nums :as nums]
             [general-expenses-accountant.tg-bot-api :as tg-api]
             [general-expenses-accountant.tg-client :as tg-client])
@@ -28,7 +27,7 @@
     (log/debug "Identified myself:" bot-user)
     (reset! *bot-user bot-user))
 
-  (let [chats (Chat) ;; TODO: Move this to the model's namespace?
+  (let [chats (chats/select-all)
         ids (map :id chats)]
     (log/debug "Total chats uploaded from the DB:" (count chats))
     (reset! *bot-data (zipmap ids chats))))
@@ -308,12 +307,9 @@
 (defn- setup-new-chat!
   [chat-id new-chat]
   (when-not (does-chat-exist? chat-id) ;; petty RC
-    (as-> new-chat $
-          (assoc $ :id chat-id)
-          ;; TODO: Move insert to the model's namespace?
-          (db/insert! Chat $)
-          (update-bot-data! assoc chat-id $)
-          (get $ chat-id))))
+    (let [new-chat (chats/create! (assoc new-chat :id chat-id))]
+      (update-bot-data! assoc chat-id new-chat)
+      new-chat)))
 
 (defn- setup-new-group-chat!
   [chat-id chat-title chat-members-count]
@@ -359,8 +355,7 @@
         bot-data (apply update-bot-data!
                         update-in [real-chat-id :data] upd-fn upd-fn-args)
         upd-chat (get bot-data real-chat-id)]
-    ;; TODO: Move update to the model's namespace?
-    (db/update! Chat (:id upd-chat) upd-chat)
+    (chats/update! upd-chat) ;; TODO: Check if the update actually happened.
     (:data upd-chat)))
 
 (defn- assoc-in-chat-data!
@@ -373,8 +368,7 @@
                                      dissoc (last full-path))
                    (update-bot-data! assoc-in full-path value))
         upd-chat (get bot-data real-chat-id)]
-    ;; TODO: Move update to the model's namespace?
-    (db/update! Chat (:id upd-chat) upd-chat)
+    (chats/update! upd-chat) ;; TODO: Check if the update actually happened.
     (:data upd-chat)))
 
 (defn- get-chat-state
@@ -403,8 +397,7 @@
                                  (assoc-in $ [real-chat-id :data :state] new-state)))
                          bot-data))))
         upd-chat (get bot-data real-chat-id)]
-    ;; TODO: Move update to the model's namespace?
-    (db/update! Chat (:id upd-chat) upd-chat)
+    (chats/update! upd-chat) ;; TODO: Check if the update actually happened.
     new-state))
 
 ;; - ACCOUNTS

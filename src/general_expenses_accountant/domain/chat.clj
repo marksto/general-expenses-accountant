@@ -36,4 +36,16 @@
   (post-select [chat]
     (update-in chat [:data] #(db/transform-json % chat-mapping-rules))))
 
-;; TODO: Add chat-related DB functions.
+(defn select-all
+  []
+  (Chat))
+
+(defn create!
+  [new-chat]
+  {:pre [(contains? new-chat :id)]}
+  (t-db/insert! Chat new-chat))
+
+(defn update!
+  [chat-to-upd]
+  {:pre [(contains? chat-to-upd :id)]}
+  (t-db/update! Chat (:id chat-to-upd) chat-to-upd))
