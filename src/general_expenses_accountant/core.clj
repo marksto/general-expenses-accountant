@@ -1067,8 +1067,13 @@
         (do
           (let [token (config/get-prop :bot-api-token)
                 chat-members-count (tg-client/get-chat-members-count token chat-id)
-                new-chat (setup-new-group-chat! chat-id chat-title chat-members-count)]
-            (when (is-chat-for-group-accounting? (:data new-chat))
+                new-chat (setup-new-group-chat! chat-id chat-title chat-members-count)
+                chat-data (if (some? new-chat)
+                            (:data new-chat)
+                            (get-chat-data chat-id))]
+            ;; NB: Create a new version of the general account,
+            ;;     even if the group chat already existed.
+            (when (is-chat-for-group-accounting? chat-data)
               (create-general-account! chat-id date)))
 
           (respond-attentively! (assoc introduction-msg :chat-id chat-id)
@@ -1150,7 +1155,10 @@
                  (some? migrate-to-chat-id))
         (log/debugf "Group %s has been migrated to a supergroup %s" chat-id migrate-to-chat-id)
         (let [new-chat (setup-new-supergroup-chat! migrate-to-chat-id chat-id)
-              group-users (-> (:data new-chat)
+              chat-data (if (some? new-chat)
+                          (:data new-chat)
+                          (get-chat-data chat-id))
+              group-users (-> chat-data
                               (get :user-account-mapping)
                               keys)]
           (doseq [user-id group-users]
