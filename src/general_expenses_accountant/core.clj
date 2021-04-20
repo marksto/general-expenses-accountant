@@ -65,8 +65,8 @@
   "Determines the use case for a chat by the number of its members."
   [chat-data]
   (let [chat-members-count (:members-count chat-data)]
-    (or (nil? chat-members-count) ;; a private chat with the bot
-        (>= chat-members-count min-chat-members-for-group-accounting))))
+    (and (some? chat-members-count) ;; a private chat with the bot
+         (>= chat-members-count min-chat-members-for-group-accounting))))
 
 (defn- get-number-of-missing-personal-accounts
   "Returns the number of missing personal accounts in a group chat,
@@ -821,13 +821,13 @@
                                           :personal payer-acc-id)
         expense-details (or (:expense-item chat-data)
                             (:expense-desc chat-data))
-        exp-notification-msg (if-not (is-chat-for-group-accounting? chat-data)
-                               (get-personal-expense-msg (:amount chat-data)
-                                                         expense-details)
+        exp-notification-msg (if (is-chat-for-group-accounting? group-chat-data)
                                (get-group-expense-msg (:name payer-acc)
                                                       (:amount chat-data)
                                                       (:name debtor-acc)
-                                                      expense-details))]
+                                                      expense-details)
+                               (get-personal-expense-msg (:amount chat-data)
+                                                         expense-details))]
     (respond! (assoc exp-notification-msg :chat-id group-chat-id)))
   (proceed-and-respond! chat-id {:transition [:private :successful-input]}))
 
