@@ -37,6 +37,8 @@
 
                  [nrepl/drawbridge "0.2.1"]
 
+                 [slingshot "0.12.2"]
+
                  [tongue "0.2.10"]]
 
   :plugins [[lein-ring "0.12.5"] ;; to run an app locally with 'lein ring server(-headless)'

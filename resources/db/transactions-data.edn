@@ -1,0 +1,13 @@
+{
+ ;; group chat-id -> transactions
+ -560000000 [{:chat-id -560000000
+              :payer-acc-id 2
+              :debtor-acc-id 1
+              :expense-amount 79.99M
+              :expense-details "food"},
+             {:chat-id -560000000
+              :payer-acc-id 3
+              :debtor-acc-id 4
+              :expense-amount 150M
+              :expense-details "out"}]
+ }

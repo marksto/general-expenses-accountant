@@ -279,10 +279,23 @@
   (PGTimestamp. (System/currentTimeMillis)
                 (Calendar/getInstance)))
 
+(def timestamped-options #{:created-at :updated-at :all})
+
+(defn- is-ts-option?
+  [ts-option prop-val]
+  (or (true? prop-val) (= :all prop-val) (= ts-option prop-val)))
+
 (models/add-property!
   :timestamped?
-  :insert (fn [obj _]
+  :insert (fn [obj prop-val]
+            (assert (or (boolean? prop-val)
+                        (contains? timestamped-options prop-val)))
             (let [now (sql-now)]
-              (assoc obj :created-at now, :updated-at now)))
-  :update (fn [obj _]
-            (assoc obj :updated-at (sql-now))))
+              (cond-> obj
+                      (is-ts-option? :created-at prop-val) (assoc :created-at now)
+                      (is-ts-option? :updated-at prop-val) (assoc :updated-at now))))
+  :update (fn [obj prop-val]
+            (assert (or (boolean? prop-val)
+                        (contains? timestamped-options prop-val)))
+            (when (is-ts-option? :updated-at prop-val)
+              (assoc obj :updated-at (sql-now)))))

@@ -5,10 +5,12 @@
             [morse
              [api :as m-api]
              [handlers :as m-hlr]]
+            [slingshot.slingshot :as slingshot]
             [taoensso.timbre :as log]
 
             [general-expenses-accountant.config :as config]
             [general-expenses-accountant.domain.chat :as chats]
+            [general-expenses-accountant.domain.tlog :as tlogs]
             [general-expenses-accountant.nums :as nums]
             [general-expenses-accountant.tg-bot-api :as tg-api]
             [general-expenses-accountant.tg-client :as tg-client])
@@ -47,7 +49,13 @@
   ([upd-fn & upd-fn-args]
    (apply swap! *bot-data upd-fn upd-fn-args)))
 
-;; TODO: Implement transactions log. Each group chat is to keep a list of all inbound expenses (as data, with IDs).
+;; TODO: Get rid of this atom after debugging is complete. This is not needed for the app.
+(defonce ^:private *transactions (atom {}))
+
+(defn- add-transaction!
+  [new-transaction]
+  {:pre [(contains? new-transaction :chat-id)]}
+  (swap! *transactions update (:chat-id new-transaction) conj new-transaction))
 
 
 ;; ACCOUNTING TYPES
@@ -272,8 +280,8 @@
    :options (accounts->options accounts)})
 
 (defn- get-expense-notification-msg
-  [amount expense-details payer-acc-name debtor-acc-name]
-  (let [formatted-amount (format-currency amount "ru")
+  [expense-amount expense-details payer-acc-name debtor-acc-name]
+  (let [formatted-amount (format-currency expense-amount "ru")
         title-txt (when (some? payer-acc-name)
                     (str "*" (escape-markdown-v2 payer-acc-name) "*\n"))
         details-txt (->> [(str formatted-amount "₽")
@@ -288,12 +296,12 @@
                 {:parse-mode "MarkdownV2"})}))
 
 (defn- get-personal-expense-msg
-  [amount expense-details]
-  (get-expense-notification-msg amount expense-details nil nil))
+  [expense-amount expense-details]
+  (get-expense-notification-msg expense-amount expense-details nil nil))
 
 (defn- get-group-expense-msg
-  [payer-acc-name amount debtor-acc-name expense-details]
-  (get-expense-notification-msg amount expense-details
+  [payer-acc-name debtor-acc-name expense-amount expense-details]
+  (get-expense-notification-msg expense-amount expense-details
                                 payer-acc-name debtor-acc-name))
 
 (def ^:private expense-added-successfully-msg
@@ -836,19 +844,31 @@
         group-chat-id (:group chat-data)
         group-chat-data (get-chat-data group-chat-id)
         payer-acc-id (get-personal-account-id group-chat-data user-id)
-        payer-acc (get-group-chat-account group-chat-data
-                                          :personal payer-acc-id)
+        expense-amount (:amount chat-data)
         expense-details (or (:expense-item chat-data)
                             (:expense-desc chat-data))
-        exp-notification-msg (if (is-chat-for-group-accounting? group-chat-data)
-                               (get-group-expense-msg (:name payer-acc)
-                                                      (:amount chat-data)
-                                                      (:name debtor-acc)
-                                                      expense-details)
-                               (get-personal-expense-msg (:amount chat-data)
-                                                         expense-details))]
-    (respond! (assoc exp-notification-msg :chat-id group-chat-id)))
-  (proceed-and-respond! chat-id {:transition [:private :successful-input]}))
+        new-transaction {:chat-id group-chat-id
+                         :payer-acc-id payer-acc-id
+                         :debtor-acc-id (:id debtor-acc)
+                         :expense-amount expense-amount
+                         :expense-details expense-details}]
+    (slingshot/try+
+      (add-transaction! (tlogs/create! new-transaction))
+      (catch Exception e
+        ;; TODO: Retry to log the failed transaction?
+        (log/error e "Failed to log transaction:" new-transaction))
+      (else
+        (let [payer-acc (get-group-chat-account group-chat-data
+                                                :personal payer-acc-id)
+              exp-notification-msg (if (is-chat-for-group-accounting? group-chat-data)
+                                     (get-group-expense-msg (:name payer-acc)
+                                                            (:name debtor-acc)
+                                                            expense-amount
+                                                            expense-details)
+                                     (get-personal-expense-msg expense-amount
+                                                               expense-details))]
+          (respond! (assoc exp-notification-msg :chat-id group-chat-id)))
+        (proceed-and-respond! chat-id {:transition [:private :successful-input]})))))
 
 (defn- proceed-with-expense-details!
   [chat-id group-chat-id first-name]
