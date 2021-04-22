@@ -2,11 +2,11 @@
   (:require [clojure.string :as str]))
 
 (defn parse-int
-  [number-string]
+  [str]
   (try
-    (Integer/parseInt number-string)
-    (catch Exception _
-      nil)))
+    (Integer/parseInt str)
+    (catch NumberFormatException _
+      str)))
 
 (defn parse-number
   [str]
