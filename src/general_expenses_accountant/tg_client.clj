@@ -9,6 +9,8 @@
        - via WEBHOOK (should be set in PROD env)
        - via LONG-POLLING"
   (:require [clojure.core.async.impl.protocols :refer [closed?]]
+            [clojure.string :as str]
+
             [clj-http.client :as http] ;; comes with Morse
             [morse
              [api :as m-api]
@@ -113,6 +115,39 @@
 ;; UPDATE HANDLERS
 
 ;; TODO: Morse improvement. Implement a Compojure 'let-routes'-like 'let-handler' macro.
+
+(defn get-commands
+  "Retrieves a list of bot commands from the update's message text, if any."
+  [update]
+  (letfn [(filter-cmds [entities]
+            (filter #(= "bot_command" (:type %)) entities))
+          (map-to-name [bot-cmds]
+            (let [get-name (fn [txt cmd]
+                             (-> txt
+                                 (subs (inc (:offset cmd)) ;; drop '/'
+                                       (+ (:offset cmd) (:length cmd)))
+                                 (str/split #"@")
+                                 (first)))
+                  txt (-> update :message :text)]
+              (map (partial get-name txt) bot-cmds)))]
+    (some-> update
+            :message
+            :entities
+            filter-cmds
+            map-to-name)))
+
+(defn command-fn
+  "Generate command handler from an update function"
+  [name handler]
+  (fn [update]
+    (when (some #{name} (get-commands update))
+      (handler (:message update)))))
+
+(defmacro command
+  "Generate command handler"
+  [name bindings & body]
+  `(command-fn ~name (fn [~bindings] ~@body)))
+
 
 (defn bot-chat-member-status-fn [handler-fn]
   (m-hlr/update-fn [:my_chat_member] handler-fn))

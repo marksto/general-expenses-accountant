@@ -949,7 +949,7 @@
   ;; - BOT COMMANDS
 
   ; Each bot has to handle '/start' and '/help' commands.
-  (m-hlr/command-fn
+  (tg-client/command-fn
     "start"
     (fn [{{first-name :first_name :as _user} :from
           {chat-id :id :as chat} :chat :as _message}]
@@ -959,7 +959,7 @@
                                        :params {:first-name first-name}})
         op-succeed)))
 
-  (m-hlr/command-fn
+  (tg-client/command-fn
     "help"
     (fn [{{chat-id :id :as chat} :chat :as _message}]
       (log/debug "Help requested in chat:" chat)
@@ -969,7 +969,7 @@
                  :text "Help is on the way!"})
       op-succeed))
 
-  (m-hlr/command-fn
+  (tg-client/command-fn
     "calc"
     (fn [{{chat-id :id :as chat} :chat :as _message}]
       (when (and (tg-api/is-private? chat)
@@ -978,7 +978,7 @@
         (proceed-and-respond! chat-id {:transition [:private :interactive-input]})
         op-succeed)))
 
-  (m-hlr/command-fn
+  (tg-client/command-fn
     "cancel"
     (fn [{{chat-id :id :as chat} :chat :as _message}]
       (when (tg-api/is-private? chat)
