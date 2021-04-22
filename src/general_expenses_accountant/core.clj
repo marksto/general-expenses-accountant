@@ -904,6 +904,46 @@
         (log/debug "Debtor account auto-selected:" debtor-acc)
         (proceed-with-notification! chat-id user-id debtor-acc)))))
 
+;; - COMMANDS ACTIONS
+
+; private chats
+
+(defn- cmd-private-start
+  [{chat-id :id :as chat}
+   {first-name :first_name :as _user}]
+  (log/debug "Conversation started in a private chat:" chat)
+  (proceed-and-respond! chat-id {:transition [:private :amount-input]
+                                 :params {:first-name first-name}}))
+
+;; TODO: Implement proper '/help' message (w/ the list of commands, etc.).
+(defn- cmd-private-help
+  [{chat-id :id :as chat}]
+  (log/debug "Help requested in a private chat:" chat)
+  (respond! {:type :text
+             :chat-id chat-id
+             :text "Help is on the way!"}))
+
+(defn- cmd-private-calc
+  [{chat-id :id :as chat}]
+  (when (= :input (get-chat-state chat-id))
+    (log/debug "Calculator opened in a private chat:" chat)
+    (proceed-and-respond! chat-id {:transition [:private :interactive-input]})))
+
+(defn- cmd-private-cancel
+  [{chat-id :id :as chat}]
+  (log/debug "The operation is canceled in a private chat:" chat)
+  (handle-state-transition chat-id {:transition [:private :canceled-input]}))
+
+; group chats
+
+;; TODO: Implement proper '/help' message (w/ the list of commands, etc.).
+(defn- cmd-group-help
+  [{chat-id :id :as chat}]
+  (log/debug "Help requested in a group chat:" chat)
+  (respond! {:type :text
+             :chat-id chat-id
+             :text "Help is on the way!"}))
+
 
 ;; API RESPONSES
 
@@ -957,39 +997,34 @@
   ; Each bot has to handle '/start' and '/help' commands.
   (tg-client/command-fn
     "start"
-    (fn [{{first-name :first_name :as _user} :from
-          {chat-id :id :as chat} :chat :as _message}]
-      (log/debug "Conversation started in chat:" chat)
+    (fn [{user :from chat :chat :as _message}]
       (when (tg-api/is-private? chat)
-        (proceed-and-respond! chat-id {:transition [:private :amount-input]
-                                       :params {:first-name first-name}})
+        (cmd-private-start chat user)
         op-succeed)))
 
   (tg-client/command-fn
     "help"
-    (fn [{{chat-id :id :as chat} :chat :as _message}]
-      (log/debug "Help requested in chat:" chat)
-      ;; TODO: Implement proper '/help' message (w/ the list of commands, etc.).
-      (respond! {:type :text
-                 :chat-id chat-id
-                 :text "Help is on the way!"})
+    (fn [{chat :chat :as _message}]
+      (cond
+        (tg-api/is-private? chat)
+        (cmd-private-help chat)
+
+        (tg-api/is-group? chat)
+        (cmd-group-help chat))
       op-succeed))
 
   (tg-client/command-fn
     "calc"
-    (fn [{{chat-id :id :as chat} :chat :as _message}]
+    (fn [{chat :chat :as _message}]
       (when (and (tg-api/is-private? chat)
-                 (= :input (get-chat-state chat-id)))
-        (log/debug "Calculator opened in chat:" chat)
-        (proceed-and-respond! chat-id {:transition [:private :interactive-input]})
+                 (cmd-private-calc chat))
         op-succeed)))
 
   (tg-client/command-fn
     "cancel"
-    (fn [{{chat-id :id :as chat} :chat :as _message}]
+    (fn [{chat :chat :as _message}]
       (when (tg-api/is-private? chat)
-        (log/debug "The operation is canceled in chat:" chat)
-        (handle-state-transition chat-id {:transition [:private :canceled-input]})
+        (cmd-private-cancel chat)
         op-succeed)))
 
   ;; - INLINE QUERIES
