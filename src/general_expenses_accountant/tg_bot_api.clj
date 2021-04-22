@@ -1,5 +1,5 @@
 (ns general-expenses-accountant.tg-bot-api
-  "Morse's missing pieces of the Telegram Bot API")
+  "Additional available Telegram Bot API types & methods, as well as some auxiliary checks")
 
 ;; TODO: Define the most used "AVAILABLE TYPES" as CLJC records w/ type hints.
 

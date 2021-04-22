@@ -776,7 +776,7 @@
       (log/debug "Telegram returned:" tg-response)
       tg-response)
     (catch Exception e
-      ;; TODO: Add 'response' a 'failed-responses' queue to be able to manually handle it later?
+      ;; TODO: Add 'response' to a 'failed-responses' queue to be able to manually handle it later?
       (log/error e "Failed to respond with:" response))))
 
 (defn- proceed-and-respond!
@@ -942,6 +942,12 @@
 
 
 ;; BOT API
+
+;; TODO: Add a rate limiter. Use the 'limiter' from Encore? Or some full-featured RPC library?
+; The Bots FAQ on the official Telegram website lists the following limits on server requests:
+; - No more than 1 message per second in a single chat,
+; - No more than 20 messages per minute in one group,
+; - No more than 30 messages per second in total.
 
 (m-hlr/defhandler
   handler

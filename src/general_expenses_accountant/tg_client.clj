@@ -80,6 +80,8 @@
 
 ;; BOT API METHODS
 
+;; TODO: Morse improvement. Check the resp's ':ok' to be 'true' before getting its 'body'.
+
 (def ^:private base-url m-api/base-url)
 
 (defn get-me

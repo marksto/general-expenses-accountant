@@ -15,6 +15,7 @@
     (catch NumberFormatException _
       str)))
 
+;; TODO: Re-implement w/ 'instaparse' library.
 (defn parse-arithmetic-expression
   "Parses the string with an arithmetic expression and calculates its value.
 
