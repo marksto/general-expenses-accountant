@@ -38,14 +38,14 @@
 
 (defn select-all
   []
-  (Chat))
+  (t-db/select 'Chat))
 
 (defn create!
   [new-chat]
   {:pre [(contains? new-chat :id)]}
-  (t-db/insert! Chat new-chat))
+  (t-db/insert! 'Chat new-chat))
 
 (defn update!
   [chat-to-upd]
   {:pre [(contains? chat-to-upd :id)]}
-  (t-db/update! Chat (:id chat-to-upd) chat-to-upd))
+  (t-db/update! 'Chat (:id chat-to-upd) chat-to-upd))

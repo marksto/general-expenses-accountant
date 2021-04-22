@@ -7,7 +7,7 @@
                    :state :input
 
                    ;; direct numeric input
-                   :amount 100
+                   :amount 79.99M
                    :group -560000000
                    :expense-item "food"
                    ;; or

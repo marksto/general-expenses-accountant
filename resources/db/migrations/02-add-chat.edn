@@ -1,8 +1,8 @@
-{:up   ["CREATE TABLE chat (
+{:up   ["CREATE TABLE IF NOT EXISTS chat (
            id bigint NOT NULL PRIMARY KEY,
            created_at timestamptz,
            updated_at timestamptz,
            type chat_type NOT NULL,
            data jsonb NOT NULL
          );"]
- :down ["DROP TABLE chat;"]}
+ :down ["DROP TABLE IF EXISTS chat;"]}
