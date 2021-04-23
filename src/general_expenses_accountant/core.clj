@@ -94,7 +94,7 @@
 
 (def ^:private cd-accounts "<accounts>")
 (def ^:private cd-expense-items "<expense_items>")
-(def ^:private cd-data-store "<data_store>")
+(def ^:private cd-shares "<shares>")
 ;; TODO: What about <language_and_currency>?
 
 (def ^:private cd-expense-item-prefix "ei::")
@@ -136,7 +136,7 @@
                                :inline-keyboard
                                [[(tg-api/build-inline-kbd-btn "счета" :callback_data cd-accounts)
                                  (tg-api/build-inline-kbd-btn "статьи" :callback_data cd-expense-items)
-                                 (tg-api/build-inline-kbd-btn "хранилище" :callback_data cd-data-store)]])})})
+                                 (tg-api/build-inline-kbd-btn "доли" :callback_data cd-shares)]])})})
 
 (def ^:private personal-account-name-request-msg
   {:type :text
@@ -1047,8 +1047,8 @@
     (fn [callback-query]
       (log/debug "Callback query:" callback-query)))
 
-  ;; TODO: Implement chat-wide settings (accounts, expense items, data store).
-  ;; #{cd-accounts cd-expense-items cd-data-store} ...
+  ;; TODO: Implement chat-wide settings (accounts, expense items, shares).
+  ;; #{cd-accounts cd-expense-items cd-shares} ...
 
   (m-hlr/callback-fn
     (fn [{{first-name :first_name :as _user} :from
