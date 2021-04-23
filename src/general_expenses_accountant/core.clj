@@ -120,6 +120,20 @@
   (String/format (Locale/forLanguageTag lang)
                  "%.2f" (to-array [amount])))
 
+;; TODO: Implement a handy fn for mentioning users.
+;; (str "[" user-name "](tg://user?id=" user-id ")")
+
+(defn- build-select-items-options
+  [items name-extr-fn key-extr-fn val-extr-fn]
+  (let [select-items (for [item items]
+                       [(tg-api/build-inline-kbd-btn (name-extr-fn item)
+                                                     (key-extr-fn item)
+                                                     (val-extr-fn item))])]
+    (tg-api/build-message-options
+      {:reply-markup (tg-api/build-reply-markup :inline-keyboard (vec select-items))})))
+
+; group chats
+
 ;; TODO: Make messages texts localizable:
 ;;       - take the ':language_code' of the chat initiator (no personal settings)
 ;;       - externalize texts, keep only their keys (to get them via 'l10n')
@@ -158,6 +172,33 @@
                                :inline-keyboard
                                [[(tg-api/build-inline-kbd-btn "Перейти в чат для ввода расходов"
                                                               :url (str "https://t.me/" bot-username))]])})})
+
+(defn- get-expense-notification-msg
+  [expense-amount expense-details payer-acc-name debtor-acc-name]
+  (let [formatted-amount (format-currency expense-amount "ru")
+        title-txt (when (some? payer-acc-name)
+                    (str "*" (escape-markdown-v2 payer-acc-name) "*\n"))
+        details-txt (->> [(str formatted-amount "₽")
+                          debtor-acc-name
+                          expense-details]
+                         (filter some?)
+                         (str/join " / ")
+                         escape-markdown-v2)]
+    {:type :text
+     :text (str title-txt details-txt)
+     :options (tg-api/build-message-options
+                {:parse-mode "MarkdownV2"})}))
+
+(defn- get-personal-expense-msg
+  [expense-amount expense-details]
+  (get-expense-notification-msg expense-amount expense-details nil nil))
+
+(defn- get-group-expense-msg
+  [payer-acc-name debtor-acc-name expense-amount expense-details]
+  (get-expense-notification-msg expense-amount expense-details
+                                payer-acc-name debtor-acc-name))
+
+; private chats
 
 (defn- get-private-introduction-msg
   [first-name]
@@ -218,15 +259,6 @@
   {:type :text
    :text (str "Вас добавили в группу \"" chat-title "\".")})
 
-(defn- build-select-items-options
-  [items name-extr-fn key-extr-fn val-extr-fn]
-  (let [select-items (for [item items]
-                       [(tg-api/build-inline-kbd-btn (name-extr-fn item)
-                                                     (key-extr-fn item)
-                                                     (val-extr-fn item))])]
-    (tg-api/build-message-options
-      {:reply-markup (tg-api/build-reply-markup :inline-keyboard (vec select-items))})))
-
 (defn- group-refs->options
   [group-refs]
   (build-select-items-options group-refs
@@ -255,9 +287,6 @@
    :text "Выберите статью расходов:"
    :options (expense-items->options expense-items)})
 
-;; TODO: Implement a handy fn for mentioning users.
-;; (str "[" user-name "](tg://user?id=" user-id ")")
-
 (defn- get-expense-manual-description-msg
   [user-name]
   {:type :text
@@ -278,31 +307,6 @@
   {:type :text
    :text "Выберите тех, кто понёс расход:"
    :options (accounts->options accounts)})
-
-(defn- get-expense-notification-msg
-  [expense-amount expense-details payer-acc-name debtor-acc-name]
-  (let [formatted-amount (format-currency expense-amount "ru")
-        title-txt (when (some? payer-acc-name)
-                    (str "*" (escape-markdown-v2 payer-acc-name) "*\n"))
-        details-txt (->> [(str formatted-amount "₽")
-                          debtor-acc-name
-                          expense-details]
-                         (filter some?)
-                         (str/join " / ")
-                         escape-markdown-v2)]
-    {:type :text
-     :text (str title-txt details-txt)
-     :options (tg-api/build-message-options
-                {:parse-mode "MarkdownV2"})}))
-
-(defn- get-personal-expense-msg
-  [expense-amount expense-details]
-  (get-expense-notification-msg expense-amount expense-details nil nil))
-
-(defn- get-group-expense-msg
-  [payer-acc-name debtor-acc-name expense-amount expense-details]
-  (get-expense-notification-msg expense-amount expense-details
-                                payer-acc-name debtor-acc-name))
 
 (def ^:private expense-added-successfully-msg
   {:type :text
