@@ -880,6 +880,7 @@
                  :params {:first-name first-name}})]
     (proceed-and-respond! chat-id event)))
 
+;; TODO: Abstract this away — "selecting 1 of N, with a special case for N=1".
 (defn- proceed-with-group!
   [chat-id first-name]
   (let [groups (get-private-chat-groups (get-chat-data chat-id))]
@@ -892,6 +893,7 @@
         (assoc-in-chat-data! chat-id [:group] group-chat-id)
         (proceed-with-expense-details! chat-id group-chat-id first-name)))))
 
+;; TODO: Abstract this away — "selecting 1 of N, with a special case for N=1".
 (defn- proceed-with-account!
   [chat-id user-id]
   (let [group-chat-id (:group (get-chat-data chat-id))
@@ -903,6 +905,8 @@
       (let [debtor-acc (first accounts)]
         (log/debug "Debtor account auto-selected:" debtor-acc)
         (proceed-with-notification! chat-id user-id debtor-acc)))))
+
+;; TODO: Abstract away the "selecting N of {M; optional ALL}, M>=N>0" scenario.
 
 ;; - COMMANDS ACTIONS
 
