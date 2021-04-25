@@ -99,11 +99,17 @@
                             :query-params query})]
     (get-in resp [:body :result])))
 
-;; NB: Morse does not support optional parameters (e.g. 'url') in 'answer-callback'.
+;; NB: Morse does not support all available optional parameters, e.g. 'url'
+;;     and 'cache_time', in callback query answers. Thus, this fn interface
+;;     was generalized.
 (defn answer-callback-query
-  "Sends an answer to an callback query"
+  "Sends an answer to a callback query.
+   NB: After the user presses a callback button, Telegram clients will display
+       a progress bar until you call 'answer-callback-query'. It is, therefore,
+       necessary to react by calling 'answer-callback-query', even if there is
+       no need to notify the user."
   ([token callback-query-id]
-   ;; NB: Notification 'text' is not specified => nothing will be shown to the user.
+   ;; NB: The 'text' is not specified => nothing will be shown to the user.
    (answer-callback-query token callback-query-id {}))
   ([token callback-query-id options]
    (let [url (str base-url token "/answerCallbackQuery")
