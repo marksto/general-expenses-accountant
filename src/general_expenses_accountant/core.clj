@@ -123,6 +123,8 @@
 (def ^:private back-button-text "<< назад")
 (def ^:private select-account-txt "Выберите аккаунт:")
 (def ^:private select-payer-account-txt "Выберите тех, кто понёс расход:")
+;;                                    "Error while saving data. Please, try again later." (en)
+(def ^:private data-persistence-error "Ошибка при сохранении данных. Пожалуйста, повторите попытку позже.")
 (def ^:private no-debtor-account-error "Нет возможности выбрать счёт для данного расхода.")
 (def ^:private no-group-to-record-error "Нет возможности выбрать группу для записи расходов.")
 
@@ -1042,7 +1044,9 @@
       (add-transaction! (tlogs/create! new-transaction))
       (catch Exception e
         ;; TODO: Retry to log the failed transaction?
-        (log/error e "Failed to log transaction:" new-transaction))
+        (log/error e "Failed to log transaction:" new-transaction)
+        (proceed-and-respond! chat-id {:transition [:private :failed-input]
+                                       :params {:reason data-persistence-error}}))
       (else
         (let [payer-acc (get-group-chat-account group-chat-data
                                                 :personal payer-acc-id)
