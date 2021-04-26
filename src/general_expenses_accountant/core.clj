@@ -101,11 +101,13 @@
 (def ^:private cd-accounts-reinstate "<accounts/reinstate>")
 
 (def ^:private cd-expense-items "<expense_items>")
+
 (def ^:private cd-shares "<shares>")
+
 ;; TODO: What about <language_and_currency>?
 
-(def ^:private cd-expense-item-prefix "ei::")
 (def ^:private cd-group-chat-prefix "gc::")
+(def ^:private cd-expense-item-prefix "ei::")
 (def ^:private cd-account-prefix "ac::")
 
 (def ^:private cd-digits-set #{"1" "2" "3" "4" "5" "6" "7" "8" "9" "0" ","})
@@ -251,6 +253,7 @@
                                [[(tg-api/build-inline-kbd-btn "Перейти в чат для ввода расходов"
                                                               :url (str "https://t.me/" bot-username))]])})})
 
+;; TODO: Rename to 'get-new-expense-msg'.
 (defn- get-expense-notification-msg
   [expense-amount expense-details payer-acc-name debtor-acc-name]
   (let [formatted-amount (format-currency expense-amount "ru")
@@ -267,10 +270,12 @@
      :options (tg-api/build-message-options
                 {:parse-mode "MarkdownV2"})}))
 
+;; TODO: Rename to 'get-new-personal-expense-msg'.
 (defn- get-personal-expense-msg
   [expense-amount expense-details]
   (get-expense-notification-msg expense-amount expense-details nil nil))
 
+;; TODO: Rename to 'get-new-group-expense-msg'.
 (defn- get-group-expense-msg
   [payer-acc-name debtor-acc-name expense-amount expense-details]
   (get-expense-notification-msg expense-amount expense-details
@@ -329,6 +334,7 @@
     (str/join "\n"
               [amount
                (str "_" (escape-markdown-v2 "Ошибка в выражении! Вычисление невозможно.") "_\n") ;; italic
+               ;; TODO: Make this disclaimer permanent, i.e. always show it in the 'interactive input' mode.
                (escape-markdown-v2 "Введите /cancel, чтобы выйти из режима калькуляции и ввести данные вручную.")])
     {:reply-markup inline-calculator-markup}))
 
@@ -471,7 +477,10 @@
                                    (update-in $ [real-chat-id :data] state-init-fn)
                                    $)
                                  (assoc-in $ [real-chat-id :data :state] new-state)))
-                         bot-data))))
+                         (do
+                           (log/errorf "Failed to change state to '%s' for chat %s with current state '%s'"
+                                       new-state chat-id curr-state)
+                           bot-data)))))
         upd-chat (get bot-data real-chat-id)]
     (chats/update! upd-chat) ;; TODO: Check if the update actually happened.
     new-state))
@@ -644,7 +653,11 @@
                       upd-general-acc-members-fn))))]
         (get-personal-account updated-chat-data user-id)))))
 
-;; USER INPUT
+(defn- can-write-to-user?
+  [user-id]
+  (not= :initial (get-chat-state user-id)))
+
+;; - USER INPUT
 
 (defn- get-user-input
   [chat-data]
@@ -717,8 +730,7 @@
   ([chat-id]
    ;; TODO: Sort them according popularity.
    (->> [:general :group :personal]
-        (map (partial get-group-chat-accounts chat-id))
-        (reduce concat)))
+        (mapcat (partial get-group-chat-accounts chat-id))))
   ([chat-id acc-type]
    (when-let [chat-data (get-chat-data chat-id)]
      (if (= acc-type :general)
@@ -836,6 +848,7 @@
                       :private private-chat-states)]
     (change-chat-state! chat-states chat-id new-state)))
 
+;; TODO: The names of transitions and states are confused. Fix this!
 (def ^:private state-transitions
   {:group {:show-intro {:to-state :waiting
                         :message introduction-msg}
@@ -995,6 +1008,7 @@
 
 ; private chats
 
+;; TODO: Rename to 'proceed-with-adding-new-expense!'.
 (defn- proceed-with-notification!
   [chat-id user-id debtor-acc]
   (let [chat-data (get-chat-data chat-id)
@@ -1017,6 +1031,7 @@
       (else
         (let [payer-acc (get-group-chat-account group-chat-data
                                                 :personal payer-acc-id)
+              ;; TODO: Rename to 'new-expense-msg'.
               exp-notification-msg (if (is-chat-for-group-accounting? group-chat-data)
                                      (get-group-expense-msg (:name payer-acc)
                                                             (:name debtor-acc)
@@ -1067,6 +1082,7 @@
         (assoc-in-chat-data! chat-id [:group] group-chat-id)
         (proceed-with-expense-details! chat-id group-chat-id first-name)))))
 
+;; TODO: Move up to be over the 'proceed-with-expense-details!' function.
 ;; TODO: Abstract this away — "selecting 1 of N, with a special case for N=1".
 (defn- proceed-with-account!
   [chat-id user-id]
@@ -1142,6 +1158,8 @@
        (respond! (get-no-eligible-accounts-notification callback-query-id))))))
 
 ;; - COMMANDS ACTIONS
+
+;; TODO: Rename properly, with '!' in the end (they modify state).
 
 ; private chats
 
@@ -1226,6 +1244,7 @@
 ; - No more than 20 messages per minute in one group,
 ; - No more than 30 messages per second in total.
 
+;; TODO: Add a common context for handlers, which includes e.g. a 'chat state'.
 (m-hlr/defhandler
   handler
 
@@ -1269,6 +1288,8 @@
   (m-hlr/inline-fn
     (fn [inline-query]
       (log/debug "Inline query:" inline-query)))
+
+  ;; TODO: Try to implement an inline query answered w/ 'switch_pm_text' parameter?
 
   (m-hlr/inline-fn
     (fn [{inline-query-id :id _user :from query-str :query _offset :offset :as _inline-query}]
@@ -1485,12 +1506,15 @@
 
               (proceed-with-group! chat-id first-name))
             (do
-              (log/debug "Invalid user input:" parsed-val)
+              (log/debugf "Invalid user input: \"%s\"" parsed-val)
+              ;; TODO: Send a notification if the input is invalid.
               (when-not (is-user-input-error? chat-id)
                 (update-user-input-error-status! chat-id true)
                 (replace-response! (assoc (get-calculation-failure-msg parsed-val)
                                      :chat-id chat-id :msg-id msg-id))))))
         op-succeed)))
+
+  ;; TODO: Add universal callback for ignored queries ("Запрос не может быть обработан").
 
   (m-hlr/callback-fn
     (fn [{callback-query-id :id _user :from _msg :message _msg-id :inline_message_id
@@ -1567,7 +1591,7 @@
             (update-private-chat-groups! user-id group-chat-id)))
 
         (if (create-personal-account! chat-id user-id text date msg-id)
-          (when (not= :initial (get-chat-state user-id))
+          (when (can-write-to-user? user-id)
             (respond! (assoc (get-added-to-new-group-msg chat-title) :chat-id user-id)))
           (update-personal-account! chat-id user-id {:acc-name text}))
 
@@ -1640,6 +1664,7 @@
       (when (and (tg-api/is-private? chat)
                  (= :input (get-chat-state chat-id)))
         (let [input (nums/parse-number text)]
+          ;; TODO: Send a notification if the input is invalid.
           (when (number? input)
             (log/debug "User input:" input)
             (assoc-in-chat-data! chat-id [:amount] input)
@@ -1653,7 +1678,7 @@
           :as _message}]
       (when (and (tg-api/is-private? chat)
                  (= :detail-expense (get-chat-state chat-id)))
-        (log/debug "Expense description:" text)
+        (log/debugf "Expense description: \"%s\"" text)
         (assoc-in-chat-data! chat-id [:expense-desc] text)
         (proceed-with-account! chat-id user-id)
         op-succeed)))
