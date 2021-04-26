@@ -270,8 +270,7 @@
                                [[(tg-api/build-inline-kbd-btn "Перейти в чат для ввода расходов"
                                                               :url (str "https://t.me/" bot-username))]])})})
 
-;; TODO: Rename to 'get-new-expense-msg'.
-(defn- get-expense-notification-msg
+(defn- get-new-expense-msg
   [expense-amount expense-details payer-acc-name debtor-acc-name]
   (let [formatted-amount (format-currency expense-amount "ru")
         title-txt (when (some? payer-acc-name)
@@ -287,16 +286,14 @@
      :options (tg-api/build-message-options
                 {:parse-mode "MarkdownV2"})}))
 
-;; TODO: Rename to 'get-new-personal-expense-msg'.
-(defn- get-personal-expense-msg
+(defn- get-new-personal-expense-msg
   [expense-amount expense-details]
-  (get-expense-notification-msg expense-amount expense-details nil nil))
+  (get-new-expense-msg expense-amount expense-details nil nil))
 
-;; TODO: Rename to 'get-new-group-expense-msg'.
-(defn- get-group-expense-msg
+(defn- get-new-group-expense-msg
   [payer-acc-name debtor-acc-name expense-amount expense-details]
-  (get-expense-notification-msg expense-amount expense-details
-                                payer-acc-name debtor-acc-name))
+  (get-new-expense-msg expense-amount expense-details
+                       payer-acc-name debtor-acc-name))
 
 ; private chats
 
@@ -1025,8 +1022,7 @@
 
 ; private chats
 
-;; TODO: Rename to 'proceed-with-adding-new-expense!'.
-(defn- proceed-with-notification!
+(defn- proceed-with-adding-new-expense!
   [chat-id user-id debtor-acc]
   (let [chat-data (get-chat-data chat-id)
         group-chat-id (:group chat-data)
@@ -1050,16 +1046,36 @@
       (else
         (let [payer-acc (get-group-chat-account group-chat-data
                                                 :personal payer-acc-id)
-              ;; TODO: Rename to 'new-expense-msg'.
-              exp-notification-msg (if (is-chat-for-group-accounting? group-chat-data)
-                                     (get-group-expense-msg (:name payer-acc)
-                                                            (:name debtor-acc)
-                                                            expense-amount
-                                                            expense-details)
-                                     (get-personal-expense-msg expense-amount
-                                                               expense-details))]
-          (respond! (assoc exp-notification-msg :chat-id group-chat-id)))
+              new-expense-msg (if (is-chat-for-group-accounting? group-chat-data)
+                                (get-new-group-expense-msg (:name payer-acc)
+                                                           (:name debtor-acc)
+                                                           expense-amount
+                                                           expense-details)
+                                (get-new-personal-expense-msg expense-amount
+                                                              expense-details))]
+          (respond! (assoc new-expense-msg :chat-id group-chat-id)))
         (proceed-and-respond! chat-id {:transition [:private :successful-input]})))))
+
+;; TODO: Abstract this away — "selecting 1 of N, with a special case for N=1".
+(defn- proceed-with-account!
+  [chat-id user-id]
+  (let [group-chat-id (:group (get-chat-data chat-id))
+        accounts (get-active-group-chat-accounts group-chat-id)]
+    (cond
+      (< 1 (count accounts))
+      (let [other-accounts (filter #(not= (:user-id %) user-id) accounts)]
+        (proceed-and-respond! chat-id {:transition [:private :accounts-selection]
+                                       :params {:accounts other-accounts
+                                                :txt select-payer-account-txt}}))
+      (empty? accounts)
+      (do
+        (log/error "No eligible accounts to select a debtor account from")
+        (proceed-and-respond! chat-id {:transition [:private :failed-input]
+                                       :params {:reason no-debtor-account-error}}))
+      :else
+      (let [debtor-acc (first accounts)]
+        (log/debug "Debtor account auto-selected:" debtor-acc)
+        (proceed-with-adding-new-expense! chat-id user-id debtor-acc)))))
 
 (defn- proceed-with-expense-details!
   [chat-id group-chat-id first-name]
@@ -1100,28 +1116,6 @@
         (log/debug "Group chat auto-selected:" group-chat-id)
         (assoc-in-chat-data! chat-id [:group] group-chat-id)
         (proceed-with-expense-details! chat-id group-chat-id first-name)))))
-
-;; TODO: Move up to be over the 'proceed-with-expense-details!' function.
-;; TODO: Abstract this away — "selecting 1 of N, with a special case for N=1".
-(defn- proceed-with-account!
-  [chat-id user-id]
-  (let [group-chat-id (:group (get-chat-data chat-id))
-        accounts (get-active-group-chat-accounts group-chat-id)]
-    (cond
-      (< 1 (count accounts))
-      (let [other-accounts (filter #(not= (:user-id %) user-id) accounts)]
-        (proceed-and-respond! chat-id {:transition [:private :accounts-selection]
-                                       :params {:accounts other-accounts
-                                                :txt select-payer-account-txt}}))
-      (empty? accounts)
-      (do
-        (log/error "No eligible accounts to select a debtor account from")
-        (proceed-and-respond! chat-id {:transition [:private :failed-input]
-                                       :params {:reason no-debtor-account-error}}))
-      :else
-      (let [debtor-acc (first accounts)]
-        (log/debug "Debtor account auto-selected:" debtor-acc)
-        (proceed-with-notification! chat-id user-id debtor-acc)))))
 
 ;; TODO: Abstract away the "selecting N of {M; optional ALL}, M>=N>0" scenario.
 
@@ -1495,7 +1489,7 @@
         (let [group-chat-id (:group (get-chat-data chat-id))
               group-chat-data (get-chat-data group-chat-id)
               debtor-acc (data->account callback-btn-data group-chat-data)]
-          (proceed-with-notification! chat-id user-id debtor-acc))
+          (proceed-with-adding-new-expense! chat-id user-id debtor-acc))
         op-succeed)))
 
   (m-hlr/callback-fn
