@@ -94,6 +94,8 @@
 
 ;; MESSAGE TEMPLATES & CALLBACK DATA
 
+(def ^:private cd-back "<back>")
+
 (def ^:private cd-accounts "<accounts>")
 (def ^:private cd-accounts-create "<accounts/create>")
 (def ^:private cd-accounts-rename "<accounts/rename>")
@@ -118,6 +120,7 @@
 
 ;; TODO: Proper localization (with fn).
 (def ^:private default-general-acc-name "общие")
+(def ^:private back-button-text "<< назад")
 (def ^:private select-account-txt "Выберите аккаунт:")
 (def ^:private select-payer-account-txt "Выберите тех, кто понёс расход:")
 (def ^:private no-debtor-account-error "Нет возможности выбрать счёт для данного расхода.")
@@ -140,13 +143,17 @@
   (str "[" user-name "](tg://user?id=" user-id ")"))
 
 (defn- build-select-items-options
-  [items name-extr-fn key-extr-fn val-extr-fn]
+  [items name-extr-fn key-extr-fn val-extr-fn & extra-buttons]
   (let [select-items (for [item items]
                        [(tg-api/build-inline-kbd-btn (name-extr-fn item)
                                                      (key-extr-fn item)
-                                                     (val-extr-fn item))])]
+                                                     (val-extr-fn item))])
+        extra-items (for [extra-button extra-buttons]
+                      [extra-button])]
     (tg-api/build-message-options
-      {:reply-markup (tg-api/build-reply-markup :inline-keyboard (vec select-items))})))
+      {:reply-markup (tg-api/build-reply-markup
+                       :inline-keyboard
+                       (into [] (concat select-items extra-items)))})))
 
 (defn- group-refs->options
   [group-refs]
@@ -163,11 +170,16 @@
                               #(str cd-expense-item-prefix (:code %))))
 
 (defn- accounts->options
-  [accounts]
-  (build-select-items-options accounts
-                              :name
-                              (constantly :callback_data)
-                              #(str cd-account-prefix (name (:type %)) "-" (:id %))))
+  [accounts & extra-buttons]
+  (apply build-select-items-options
+         accounts
+         :name
+         (constantly :callback_data)
+         #(str cd-account-prefix (name (:type %)) "-" (:id %))
+         extra-buttons))
+
+(def ^:private back-button
+  (tg-api/build-inline-kbd-btn back-button-text :callback_data cd-back))
 
 ; group chats
 
@@ -198,16 +210,19 @@
                                [[(tg-api/build-inline-kbd-btn "Создать новый" :callback_data cd-accounts-create)]
                                 [(tg-api/build-inline-kbd-btn "Переименовать" :callback_data cd-accounts-rename)]
                                 [(tg-api/build-inline-kbd-btn "Упразднить" :callback_data cd-accounts-revoke)]
-                                [(tg-api/build-inline-kbd-btn "Восстановить" :callback_data cd-accounts-reinstate)]])})})
+                                [(tg-api/build-inline-kbd-btn "Восстановить" :callback_data cd-accounts-reinstate)]
+                                [back-button]])})})
 
 ;; TODO: Add 'create account' functionality here.
 
 (defn- get-account-selection-msg
-  [accounts txt]
-  {:pre [(seq accounts)]}
-  {:type :text
-   :text txt
-   :options (apply accounts->options accounts)})
+  ([accounts txt]
+   (get-account-selection-msg accounts txt nil))
+  ([accounts txt extra-buttons]
+   {:pre [(seq accounts)]}
+   {:type :text
+    :text txt
+    :options (apply accounts->options accounts extra-buttons)}))
 
 (defn- get-account-rename-request-msg
   [user-id user-name acc-name]
@@ -865,16 +880,16 @@
                            :message accounts-mgmt-options-msg}
            :account-renaming {:to-state :rename-account
                               :message-fn get-account-selection-msg
-                              :message-params [:accounts :txt]}
+                              :message-params [:accounts :txt :extra-buttons]}
            :request-new-name {:to-state :request-new-account-name
                               :message-fn get-account-rename-request-msg
                               :message-params [:user-id :user-name :acc-name]}
            :account-revocation {:to-state :revoke-account
                                 :message-fn get-account-selection-msg
-                                :message-params [:accounts :txt]}
+                                :message-params [:accounts :txt :extra-buttons]}
            :account-reinstatement {:to-state :reinstate-account
                                    :message-fn get-account-selection-msg
-                                   :message-params [:accounts :txt]}
+                                   :message-params [:accounts :txt :extra-buttons]}
 
            :expense-items-mgmt {:to-state :manage-expense-items}
            :shares-mgmt {:to-state :manage-shares}
@@ -1153,7 +1168,8 @@
        (proceed-and-replace-response! chat-id
                                       {:transition [:group state-transition-name]
                                        :params {:accounts eligible-accounts
-                                                :txt select-account-txt}}
+                                                :txt select-account-txt
+                                                :extra-buttons [back-button]}}
                                       msg-id)
        (respond! (get-no-eligible-accounts-notification callback-query-id))))))
 
@@ -1424,6 +1440,21 @@
         op-succeed)))
 
   ;; TODO: Implement handlers for ':manage-shares'.
+
+  (m-hlr/callback-fn
+    (fn [{{msg-id :message_id {chat-id :id :as chat} :chat :as _msg} :message
+          callback-btn-data :data :as _callback-query}]
+      (when (and (tg-api/is-group? chat)
+                 (= cd-back callback-btn-data))
+        (when-let [state-transition-name
+                   (condp contains? (get-chat-state chat-id)
+                     #{:manage-accounts :manage-expense-items :manage-shares} :restore-intro
+                     #{:rename-account :revoke-account :reinstate-account} :accounts-mgmt
+                     nil)]
+          (proceed-and-replace-response! chat-id
+                                         {:transition [:group state-transition-name]}
+                                         msg-id)
+          op-succeed))))
 
   (m-hlr/callback-fn
     (fn [{{first-name :first_name :as _user} :from
