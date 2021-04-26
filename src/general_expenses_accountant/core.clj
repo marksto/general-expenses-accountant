@@ -120,8 +120,11 @@
   (String/format (Locale/forLanguageTag lang)
                  "%.2f" (to-array [amount])))
 
-;; TODO: Implement a handy fn for mentioning users.
-;; (str "[" user-name "](tg://user?id=" user-id ")")
+(defn- get-user-mention-text
+  "Handy fn for mentioning users in a message text.
+   NB: Must be used with the formatting/parse mode."
+  [user-id user-name]
+  (str "[" user-name "](tg://user?id=" user-id ")"))
 
 (defn- build-select-items-options
   [items name-extr-fn key-extr-fn val-extr-fn]
