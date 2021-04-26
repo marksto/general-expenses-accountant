@@ -14,6 +14,8 @@
    :groups set
 
    ;; group chat-specific
+   :bot-messages {:to-user db/restore-numeric-keys}
+   :input db/restore-numeric-keys
    :accounts {:general [db/restore-numeric-keys
                         {:* {:type keyword
                              :members set}}]
@@ -23,7 +25,6 @@
                       {:* {:type keyword
                            :members set}}]}
    :expenses {:popularity db/restore-string-keys}
-   :data-store {:type keyword}
    :user-account-mapping db/restore-numeric-keys})
 
 (t-m/defmodel Chat :chat

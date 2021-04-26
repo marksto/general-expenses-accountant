@@ -26,7 +26,14 @@
 
                     ;; messages to delete/check replies to
                     :bot-messages {:intro-msg-id 1
-                                   :name-request-msg-id 2}
+                                   :name-request-msg-id 2
+
+                                   ;; user-specific
+                                   :to-user {1200000000 {:request-new-name-msg-id 10}}}
+
+                    ;; user input/temporary values
+                    :input {1200000000 {:rename-account {:account-type :personal
+                                                         :account-id 2}}}
 
                     ;; configured by users
                     :accounts {:general {0 {:id 0
@@ -83,9 +90,8 @@
                                :popularity {"food" 5
                                             "out" 2
                                             "gas" 1}}
-                    :data-store {:type :google-sheets
-                                 :url "..."
-                                 :api-key "..."}
+                    ;; TODO: Implement together w/ the 'shares' functionality.
+                    :shares {}
 
                     ;; precomputed values
                     :user-account-mapping {1400000000 1
