@@ -5,6 +5,28 @@
 
 ;; AUXILIARY CHECKS
 
+; User
+
+(def mention-types #{:by-name :by-full-name :by-username})
+
+(defn get-user-mention-text
+  "Handy fn for mentioning users in a message text.
+   NB: Must be used with the formatting/parse mode."
+  ([user]
+   ;; NB: This is the default option since the User always have a 'first_name' and an 'id'.
+   (get-user-mention-text user :by-name))
+  ([{user-id :id first-name :first_name ?last-name :last_name ?username :username :as user}
+    mention-type]
+   {:pre [(contains? mention-types mention-type)]}
+   (case mention-type
+     :by-name (str "[" first-name "](tg://user?id=" user-id ")")
+     :by-full-name (if (some? ?last-name)
+                     (str "[" first-name " " ?last-name "](tg://user?id=" user-id ")")
+                     (get-user-mention-text user))
+     :by-username (if (some? ?username)
+                    (str "@" ?username)
+                    (get-user-mention-text user)))))
+
 ; Chat
 
 (defn is-private?

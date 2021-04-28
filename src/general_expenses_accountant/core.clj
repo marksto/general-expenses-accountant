@@ -147,12 +147,6 @@
   (String/format (Locale/forLanguageTag lang)
                  "%.2f" (to-array [amount])))
 
-(defn- get-user-mention-text
-  "Handy fn for mentioning users in a message text.
-   NB: Must be used with the formatting/parse mode."
-  [user-id user-name]
-  (str "[" user-name "](tg://user?id=" user-id ")"))
-
 (defn- build-select-items-options
   [items name-extr-fn key-extr-fn val-extr-fn]
   (let [select-items (for [item items]
@@ -252,9 +246,9 @@
    :options (apply account-types->options account-types extra-buttons)})
 
 (defn- get-new-account-name-request-msg
-  [user-id user-name]
+  [user]
   {:type :text
-   :text (str (get-user-mention-text user-id user-name)
+   :text (str (tg-api/get-user-mention-text user)
               ", как бы вы хотели назвать новый счёт?")
    :options (tg-api/build-message-options
               {:reply-markup (tg-api/build-reply-markup :force-reply {:selective true})
@@ -269,9 +263,9 @@
      (tg-api/build-inline-kbd-btn done-button-text :callback_data cd-done)]))
 
 (defn- get-account-rename-request-msg
-  [user-id user-name acc-name]
+  [user acc-name]
   {:type :text
-   :text (str (get-user-mention-text user-id user-name)
+   :text (str (tg-api/get-user-mention-text user)
               ", как бы вы хотели переименовать счёт \"" (escape-markdown-v2 acc-name) "\"?")
    :options (tg-api/build-message-options
               {:reply-markup (tg-api/build-reply-markup :force-reply {:selective true})
@@ -1018,7 +1012,7 @@
                                     :message-params [:account-types :extra-buttons]}
            :request-acc-name {:to-state :request-new-account-name
                               :message-fn get-new-account-name-request-msg
-                              :message-params [:user-id :user-name]}
+                              :message-params [:user]}
            :request-group-members {:to-state :select-group-members
                                    :message-fn get-new-member-selection-msg
                                    :message-params [:accounts]}
@@ -1027,7 +1021,7 @@
                               :message-params [:accounts :txt :extra-buttons]}
            :request-acc-rename {:to-state :request-account-rename
                                 :message-fn get-account-rename-request-msg
-                                :message-params [:user-id :user-name :acc-name]}
+                                :message-params [:user :acc-name]}
            :account-revocation {:to-state :revoke-account
                                 :message-fn get-account-selection-msg
                                 :message-params [:accounts :txt :extra-buttons]}
@@ -1290,24 +1284,23 @@
                                  msg-id))
 
 (defn- proceed-with-account-naming!
-  [chat-id user-id first-name]
+  [chat-id {user-id :id :as user}]
   (proceed-and-respond-attentively!
     chat-id
     {:transition [:group :request-acc-name]
-     :params {:user-id user-id
-              :user-name first-name}}
+     :params {:user user}}
     #(->> % :message_id
           (set-bot-msg-id! chat-id [:to-user user-id :request-acc-name-msg-id]))))
 
 (defn- proceed-with-account-creation!
-  [chat-id user-id first-name acc-type]
+  [chat-id acc-type {user-id :id :as user}]
   (let [input-data {:account-type acc-type}]
     ;; TODO: Extract into a generalized fn for assoc/dissoc-ing the input data.
     (update-chat-data! chat-id
                        assoc-in [:input user-id :create-account] input-data))
   (case acc-type
     :personal
-    (proceed-with-account-naming! chat-id user-id first-name)
+    (proceed-with-account-naming! chat-id user)
     :group
     (let [personal-accs (get-accounts-of-type :personal (get-chat-data chat-id))]
       (proceed-and-respond! chat-id {:transition [:group :request-group-members]
@@ -1346,7 +1339,7 @@
        (respond! (get-no-eligible-accounts-notification callback-query-id))))))
 
 (defn- proceed-with-account-renaming!
-  [chat-id user-id first-name acc-to-rename]
+  [chat-id {user-id :id :as user} acc-to-rename]
   (let [input-data {:account-type (:type acc-to-rename)
                     :account-id (:id acc-to-rename)}]
     ;; TODO: Extract into a generalized fn for assoc/dissoc-ing the input data.
@@ -1355,8 +1348,7 @@
   (proceed-and-respond-attentively!
     chat-id
     {:transition [:group :request-acc-rename]
-     :params {:user-id user-id
-              :user-name first-name
+     :params {:user user
               :acc-name (:name acc-to-rename)}}
     #(->> % :message_id
           (set-bot-msg-id! chat-id [:to-user user-id :request-rename-msg-id]))))
@@ -1552,7 +1544,7 @@
           op-succeed))))
 
   (m-hlr/callback-fn
-    (fn [{{user-id :id first-name :first_name :as _user} :from
+    (fn [{user :from
           {msg-id :message_id {chat-id :id :as chat} :chat :as _msg} :message
           callback-btn-data :data :as _callback-query}]
       (when (and (tg-api/is-group? chat)
@@ -1564,11 +1556,11 @@
         (let [acc-type-name (str/replace-first callback-btn-data
                                                cd-account-type-prefix "")
               acc-type (keyword acc-type-name)]
-          (proceed-with-account-creation! chat-id user-id first-name acc-type))
+          (proceed-with-account-creation! chat-id acc-type user))
         op-succeed)))
 
   (m-hlr/callback-fn
-    (fn [{{user-id :id first-name :first_name :as _user} :from
+    (fn [{{user-id :id :as user} :from
           {msg-id :message_id {chat-id :id :as chat} :chat :as _msg} :message
           callback-btn-data :data :as _callback-query}]
       (when (and (tg-api/is-group? chat)
@@ -1584,24 +1576,24 @@
                              assoc-in [:input user-id :create-account] input-data)
           (when-not
             (proceed-with-account-member-selection! chat-id msg-id acc-members)
-            (proceed-with-account-naming! chat-id user-id first-name)))
+            (proceed-with-account-naming! chat-id user)))
         op-succeed)))
 
   ;; TODO: Implement an 'undo' button processing: remove the last added member.
 
   (m-hlr/callback-fn
-    (fn [{{user-id :id first-name :first_name :as _user} :from
+    (fn [{user :from
           {msg-id :message_id {chat-id :id :as chat} :chat :as _msg} :message
           callback-btn-data :data :as _callback-query}]
       (when (and (tg-api/is-group? chat)
                  (= :select-group-members (get-chat-state chat-id))
                  (= cd-done callback-btn-data))
         ;; TODO: Replace the 'msg-id' w/ a text listing all selected members.
-        (proceed-with-account-naming! chat-id user-id first-name)
+        (proceed-with-account-naming! chat-id user)
         op-succeed)))
 
   (m-hlr/callback-fn
-    (fn [{{user-id :id first-name :first_name :as _user} :from
+    (fn [{user :from
           {msg-id :message_id {chat-id :id :as chat} :chat :as _msg} :message
           callback-btn-data :data :as _callback-query}]
       (when (and (tg-api/is-group? chat)
@@ -1612,8 +1604,7 @@
                                        msg-id)
         (let [chat-data (get-chat-data chat-id)
               account-to-rename (data->account callback-btn-data chat-data)]
-          (proceed-with-account-renaming! chat-id user-id first-name
-                                          account-to-rename))
+          (proceed-with-account-renaming! chat-id user account-to-rename))
         op-succeed)))
 
   (m-hlr/callback-fn
