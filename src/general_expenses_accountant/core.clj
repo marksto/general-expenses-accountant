@@ -541,6 +541,10 @@
     (chats/update! upd-chat) ;; TODO: Check if the update actually happened.
     new-state))
 
+(defn- can-write-to-user?
+  [user-id]
+  (not= :initial (get-chat-state user-id)))
+
 ;; - ACCOUNTS
 
 (defn- ->general-account
@@ -755,10 +759,6 @@
         (get-personal-account updated-chat-data {:user-id ?user-id
                                                  :name (or new-name ?acc-name)})))))
 
-(defn- can-write-to-user?
-  [user-id]
-  (not= :initial (get-chat-state user-id)))
-
 ;; - ACCOUNTS > GROUP
 
 (defn- find-group-accounts
@@ -887,6 +887,15 @@
   [group-chat-data acc-type acc-id]
   (get-in group-chat-data [:accounts acc-type acc-id]))
 
+(defn- data->account
+  "Retrieves a group chat's account by parsing the callback button data."
+  [callback-btn-data group-chat-data]
+  (let [account (str/replace-first callback-btn-data cd-account-prefix "")
+        account-path (str/split account #"-")]
+    (get-group-chat-account group-chat-data
+                            (keyword (nth account-path 0))
+                            (.intValue (biginteger (nth account-path 1))))))
+
 (defn- get-bot-msg-id
   [chat-id msg-keys]
   (let [ensured-msg-keys (if (coll? msg-keys) msg-keys [msg-keys])]
@@ -903,15 +912,6 @@
   (tg-api/is-reply-to? (get-bot-msg-id chat-id bot-msg-keys) message))
 
 ;; - CHATS > PRIVATE CHAT
-
-(defn- data->account
-  "Retrieves a group chat's account by parsing the callback button data."
-  [callback-btn-data group-chat-data]
-  (let [account (str/replace-first callback-btn-data cd-account-prefix "")
-        account-path (str/split account #"-")]
-    (get-group-chat-account group-chat-data
-                            (keyword (nth account-path 0))
-                            (.intValue (biginteger (nth account-path 1))))))
 
 (defn- get-private-chat-groups
   [chat-data]
@@ -1281,22 +1281,6 @@
     {:transition [:group :request-account-names]}
     #(->> % :message_id (set-bot-msg-id! chat-id :name-request-msg-id))))
 
-(defn- proceed-with-account-renaming!
-  [chat-id user-id first-name account-to-rename]
-  (let [input-data {:account-type (:type account-to-rename)
-                    :account-id (:id account-to-rename)}]
-    ;; TODO: Extract into a generalized fn for assoc/dissoc-ing the input data.
-    (update-chat-data! chat-id
-                       assoc-in [:input user-id :rename-account] input-data))
-  (proceed-and-respond-attentively!
-    chat-id
-    {:transition [:group :request-acc-rename]
-     :params {:user-id user-id
-              :user-name first-name
-              :acc-name (:name account-to-rename)}}
-    #(->> % :message_id
-          (set-bot-msg-id! chat-id [:to-user user-id :request-rename-msg-id]))))
-
 (defn- proceed-with-account-type-selection!
   [chat-id msg-id state-transition-name]
   (proceed-and-replace-response! chat-id
@@ -1360,6 +1344,22 @@
                                                 :extra-buttons [back-button]}}
                                       msg-id)
        (respond! (get-no-eligible-accounts-notification callback-query-id))))))
+
+(defn- proceed-with-account-renaming!
+  [chat-id user-id first-name acc-to-rename]
+  (let [input-data {:account-type (:type acc-to-rename)
+                    :account-id (:id acc-to-rename)}]
+    ;; TODO: Extract into a generalized fn for assoc/dissoc-ing the input data.
+    (update-chat-data! chat-id
+                       assoc-in [:input user-id :rename-account] input-data))
+  (proceed-and-respond-attentively!
+    chat-id
+    {:transition [:group :request-acc-rename]
+     :params {:user-id user-id
+              :user-name first-name
+              :acc-name (:name acc-to-rename)}}
+    #(->> % :message_id
+          (set-bot-msg-id! chat-id [:to-user user-id :request-rename-msg-id]))))
 
 ;; - COMMANDS ACTIONS
 
