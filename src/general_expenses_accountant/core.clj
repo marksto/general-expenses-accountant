@@ -1680,6 +1680,7 @@
                  (= cd-back callback-btn-data))
         (when-let [state-transition-name
                    (condp contains? (get-chat-state chat-id)
+                     #{:ready} :restore-intro ;; for when something went wrong
                      #{:manage-accounts :manage-expense-items :manage-shares} :restore-intro
                      #{:select-acc-type :rename-account :revoke-account :reinstate-account} :accounts-mgmt
                      nil)]
