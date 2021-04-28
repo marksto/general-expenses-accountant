@@ -1162,12 +1162,12 @@
 ; private chats
 
 (defn- proceed-with-adding-new-expense!
-  [chat-id user-id debtor-acc]
+  [chat-id debtor-acc]
   (let [chat-data (get-chat-data chat-id)
         group-chat-id (:group chat-data)
         group-chat-data (get-chat-data group-chat-id)
         payer-acc-id (get-personal-account-id
-                       group-chat-data {:user-id user-id})
+                       group-chat-data {:user-id chat-id})
         expense-amount (:amount chat-data)
         expense-details (or (:expense-item chat-data)
                             (:expense-desc chat-data))
@@ -1198,12 +1198,12 @@
 
 ;; TODO: Abstract this away — "selecting 1 of N, with a special case for N=1".
 (defn- proceed-with-account!
-  [chat-id user-id]
+  [chat-id]
   (let [group-chat-id (:group (get-chat-data chat-id))
         accounts (get-active-group-chat-accounts group-chat-id)]
     (cond
       (< 1 (count accounts))
-      (let [other-accounts (filter #(not= (:user-id %) user-id) accounts)]
+      (let [other-accounts (filter #(not= (:user-id %) chat-id) accounts)]
         (proceed-and-respond! chat-id {:transition [:private :accounts-selection]
                                        :params {:accounts other-accounts
                                                 :txt select-payer-account-txt}}))
@@ -1215,7 +1215,7 @@
       :else
       (let [debtor-acc (first accounts)]
         (log/debug "Debtor account auto-selected:" debtor-acc)
-        (proceed-with-adding-new-expense! chat-id user-id debtor-acc)))))
+        (proceed-with-adding-new-expense! chat-id debtor-acc)))))
 
 (defn- proceed-with-expense-details!
   [chat-id group-chat-id first-name]
@@ -1702,20 +1702,18 @@
         op-succeed)))
 
   (m-hlr/callback-fn
-    (fn [{{user-id :id :as _user} :from
-          {{chat-id :id :as chat} :chat :as _msg} :message
+    (fn [{{{chat-id :id :as chat} :chat :as _msg} :message
           callback-btn-data :data :as _callback-query}]
       (when (and (tg-api/is-private? chat)
                  (= :detail-expense (get-chat-state chat-id))
                  (str/starts-with? callback-btn-data cd-expense-item-prefix))
         (let [expense-item (str/replace-first callback-btn-data cd-expense-item-prefix "")]
           (assoc-in-chat-data! chat-id [:expense-item] expense-item)
-          (proceed-with-account! chat-id user-id))
+          (proceed-with-account! chat-id))
         op-succeed)))
 
   (m-hlr/callback-fn
-    (fn [{{user-id :id :as _user} :from
-          {{chat-id :id :as chat} :chat :as _msg} :message
+    (fn [{{{chat-id :id :as chat} :chat :as _msg} :message
           callback-btn-data :data :as _callback-query}]
       (when (and (tg-api/is-private? chat)
                  (= :select-account (get-chat-state chat-id))
@@ -1723,7 +1721,7 @@
         (let [group-chat-id (:group (get-chat-data chat-id))
               group-chat-data (get-chat-data group-chat-id)
               debtor-acc (data->account callback-btn-data group-chat-data)]
-          (proceed-with-adding-new-expense! chat-id user-id debtor-acc))
+          (proceed-with-adding-new-expense! chat-id debtor-acc))
         op-succeed)))
 
   (m-hlr/callback-fn
@@ -1848,6 +1846,7 @@
       (when (and (tg-api/is-group? chat)
                  (= :waiting (get-chat-state chat-id))
                  (is-reply-to-bot? chat-id :name-request-msg-id message))
+        ;; NB: Here the 'user-id' exists for sure, since it is the User's response.
         (let [group-chat-id (get-real-chat-id chat-id)
               new-chat (setup-new-private-chat! user-id group-chat-id)]
           (when (nil? new-chat)
@@ -1882,6 +1881,7 @@
                  (is-reply-to-bot? chat-id
                                    [:to-user user-id :request-acc-name-msg-id]
                                    message))
+        ;; NB: Here the 'user-id' exists for sure, since it is the User's response.
         (let [chat-data (get-chat-data chat-id)
               input-data (get-in chat-data [:input user-id :create-account])
               acc-type (:account-type input-data)
@@ -1911,6 +1911,7 @@
                  (is-reply-to-bot? chat-id
                                    [:to-user user-id :request-rename-msg-id]
                                    message))
+        ;; NB: Here the 'user-id' exists for sure, since it is the User's response.
         (let [chat-data (get-chat-data chat-id)
               input-data (get-in chat-data [:input user-id :rename-account])
               acc-type (:account-type input-data)
@@ -1951,6 +1952,7 @@
               group-users (-> chat-data
                               (get :user-account-mapping)
                               keys)]
+          ;; NB: Here we iterate only real users, and this is exactly what we need.
           (doseq [user-id group-users]
             (update-private-chat-groups! user-id chat-id migrate-to-chat-id)))
         op-succeed)))
@@ -1971,15 +1973,12 @@
             op-succeed)))))
 
   (m-hlr/message-fn
-    (fn [{text :text
-          {user-id :id :as _user} :from
-          {chat-id :id :as chat} :chat
-          :as _message}]
+    (fn [{text :text {chat-id :id :as chat} :chat :as _message}]
       (when (and (tg-api/is-private? chat)
                  (= :detail-expense (get-chat-state chat-id)))
         (log/debugf "Expense description: \"%s\"" text)
         (assoc-in-chat-data! chat-id [:expense-desc] text)
-        (proceed-with-account! chat-id user-id)
+        (proceed-with-account! chat-id)
         op-succeed)))
 
   ; A "match-all catch-through" case.
