@@ -338,6 +338,10 @@
   {:type :text
    :text (str "Привет, " first-name "! Чтобы добавить новый расход просто напиши мне сумму.")})
 
+(def ^:private invalid-input-msg
+  {:type :text
+   :text "Пожалуйста, введите число. Например, \"145,99\"."})
+
 (def ^:private inline-calculator-markup
   (tg-api/build-reply-markup
     :inline-keyboard
@@ -1966,12 +1970,13 @@
       (when (and (tg-api/is-private? chat)
                  (= :input (get-chat-state chat-id)))
         (let [input (nums/parse-number text)]
-          ;; TODO: Send a notification if the input is invalid.
-          (when (number? input)
-            (log/debug "User input:" input)
-            (assoc-in-chat-data! chat-id [:amount] input)
-            (proceed-with-group! chat-id first-name)
-            op-succeed)))))
+          (if (number? input)
+            (do
+              (log/debug "User input:" input)
+              (assoc-in-chat-data! chat-id [:amount] input)
+              (proceed-with-group! chat-id first-name)
+              op-succeed)
+            (respond! (assoc invalid-input-msg :chat-id chat-id)))))))
 
   (m-hlr/message-fn
     (fn [{text :text {chat-id :id :as chat} :chat :as _message}]
