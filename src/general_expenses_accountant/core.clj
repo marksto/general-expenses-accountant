@@ -870,16 +870,19 @@
     (get-in chat-data [:expenses :items])))
 
 (defn- get-group-chat-accounts
+  ;; TODO: Sort them according popularity.
   ([chat-id]
-   ;; TODO: Sort them according popularity.
-   (->> [:general :group :personal]
-        (mapcat (partial get-group-chat-accounts chat-id))))
-  ([chat-id acc-type]
-   (when-let [chat-data (get-chat-data chat-id)]
-     (if (= acc-type :general)
-       (when-let [gen-acc (get-current-general-account chat-data)]
-         [gen-acc])
-       (get-accounts-of-type acc-type chat-data)))))
+   (get-group-chat-accounts chat-id :general :group :personal))
+  ([chat-id & acc-types]
+   (if (< 1 (count acc-types))
+     (->> acc-types
+          (mapcat (partial get-group-chat-accounts chat-id)))
+     (encore/when-let [chat-data (get-chat-data chat-id)
+                       :let [acc-type (first acc-types)]]
+       (if (= acc-type :general)
+         (when-let [gen-acc (get-current-general-account chat-data)]
+           [gen-acc])
+         (get-accounts-of-type acc-type chat-data))))))
 
 (defn- get-active-group-chat-accounts
   [chat-id & acc-type]
@@ -1330,14 +1333,12 @@
 (defn- proceed-with-account-selection!
   ([chat-id msg-id callback-query-id
     state-transition-name]
-   ;; TODO: Re-write more effectively, w/o the '(constantly true)'.
    (proceed-with-account-selection! chat-id msg-id callback-query-id
-                                    state-transition-name (constantly true)))
+                                    state-transition-name nil))
   ([chat-id msg-id callback-query-id
     state-transition-name filter-pred]
-   (let [eligible-accounts (->> [:group :personal]
-                                (mapcat (partial get-group-chat-accounts chat-id))
-                                (filter filter-pred))]
+   (let [eligible-accounts (cond->> (get-group-chat-accounts chat-id :group :personal)
+                                    (some? filter-pred) (filter filter-pred))]
      (if (seq eligible-accounts)
        (proceed-and-replace-response! chat-id
                                       {:transition [:group state-transition-name]
