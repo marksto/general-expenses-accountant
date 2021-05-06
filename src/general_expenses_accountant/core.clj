@@ -1525,7 +1525,7 @@
           callback-btn-data :data :as _callback-query}]
       (when (and (tg-api/is-group? chat)
                  (= :manage-accounts (get-chat-state chat-id)))
-        (encore/when-let [;; TODO: Extract all these predicates into a namespace predefined fns.
+        (encore/when-let [;; TODO: Extract all these predicates into a predefined namespace fns.
                           filter-revoked-pred (fn [acc]
                                                 (contains? acc :revoked))
                           filter-active-pred (fn [acc]
@@ -1789,7 +1789,8 @@
                                      :chat-id chat-id :msg-id msg-id))))))
         op-succeed)))
 
-  ;; TODO: Add universal callback for ignored queries ("Запрос не может быть обработан").
+  ;; TODO: Add a universal callback response for all intentionally ignored,
+  ;;       i.e. unprocessed, queries ("Запрос не может быть обработан").
 
   (m-hlr/callback-fn
     (fn [{callback-query-id :id _user :from _msg :message _msg-id :inline_message_id
@@ -1904,7 +1905,7 @@
             :personal (create-personal-account! chat-id text date)
             :group (create-group-account! chat-id members text date))
 
-          ;; TODO: Extract this common function-ty into a dedicated cleanup fn.
+          ;; TODO: Extract this common functionality into a dedicated cleanup fn.
           (update-chat-data! chat-id
                              update-in [:to-user user-id] dissoc :request-acc-name-msg-id)
           (update-chat-data! chat-id
@@ -1933,7 +1934,7 @@
           (update-chat-data! chat-id
                              assoc-in [:accounts acc-type acc-id :name] text)
 
-          ;; TODO: Extract this common function-ty into a dedicated cleanup fn.
+          ;; TODO: Extract this common functionality into a dedicated cleanup fn.
           (update-chat-data! chat-id
                              update-in [:to-user user-id] dissoc :request-rename-msg-id)
           (update-chat-data! chat-id
