@@ -387,10 +387,15 @@
   (new-expense-msg
     (str/join "\n"
               [amount
-               (str "_" (escape-markdown-v2 "Ошибка в выражении! Вычисление невозможно.") "_\n") ;; italic
                ;; TODO: Make this disclaimer permanent, i.e. always show it in the 'interactive input' mode.
                (escape-markdown-v2 "Введите /cancel, чтобы выйти из режима калькуляции и ввести данные вручную.")])
     {:reply-markup inline-calculator-markup}))
+
+(defn- get-invalid-input-notification
+  [callback-query-id]
+  {:type :callback
+   :callback-query-id callback-query-id
+   :options {:text "Ошибка в выражении! Вычисление невозможно."}})
 
 (defn- get-added-to-new-group-msg
   [chat-title]
@@ -1753,7 +1758,8 @@
           op-succeed))))
 
   (m-hlr/callback-fn
-    (fn [{{first-name :first_name :as _user} :from
+    (fn [{callback-query-id :id
+          {first-name :first_name :as _user} :from
           {msg-id :message_id {chat-id :id :as chat} :chat :as _msg} :message
           callback-btn-data :data :as _callback-query}]
       (when (and (tg-api/is-private? chat)
@@ -1773,7 +1779,9 @@
               (proceed-with-group! chat-id first-name))
             (do
               (log/debugf "Invalid user input: \"%s\"" parsed-val)
-              ;; TODO: Send a notification if the input is invalid.
+              (respond! (assoc (get-invalid-input-notification callback-query-id)
+                          :chat-id chat-id))
+
               (when-not (is-user-input-error? chat-id)
                 (update-user-input-error-status! chat-id true)
                 (replace-response! (assoc (get-calculation-failure-msg parsed-val)
