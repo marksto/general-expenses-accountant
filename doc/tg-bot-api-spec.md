@@ -129,7 +129,7 @@ switch_inline_query             	String      	Optional. If set, pressing the but
                                 	            	case just the bot's username will be inserted.
                                 	            	NOTE: This offers an easy way for users to start using your bot
                                 	            	in inline mode when they are currently in a private chat with it.
-                                	            	Especially useful when combined with switch_pm… actions –
+                                	            	Especially useful when combined with 'switch_pm…' actions –
                                 	            	in this case the user will be automatically returned to the chat
                                 	            	they switched from, skipping the chat selection screen.
 switch_inline_query_current_chat	String      	Optional. If set, pressing the button will insert the bot's username

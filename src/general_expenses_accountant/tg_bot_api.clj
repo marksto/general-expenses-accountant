@@ -1,5 +1,6 @@
 (ns general-expenses-accountant.tg-bot-api
-  "Additional available Telegram Bot API types & methods, as well as some auxiliary checks")
+  "Additional available Telegram Bot API types & methods, as well as some auxiliary checks"
+  (:require [clojure.string :as str]))
 
 ;; TODO: Define the most used "AVAILABLE TYPES" as CLJC records w/ type hints.
 
@@ -193,7 +194,7 @@
 ;                                 	            	case just the bot's username will be inserted.
 ;                                 	            	NOTE: This offers an easy way for users to start using your bot
 ;                                 	            	in inline mode when they are currently in a private chat with it.
-;                                 	            	Especially useful when combined with switch_pm… actions –
+;                                 	            	Especially useful when combined with 'switch_pm…' actions –
 ;                                 	            	in this case the user will be automatically returned to the chat
 ;                                 	            	they switched from, skipping the chat selection screen.
 ; switch_inline_query_current_chat	String      	Optional. If set, pressing the button will insert the bot's username
@@ -206,13 +207,20 @@
 ;                                 	            	NOTE: This type of button must be the 1st button in the first row.
 ; pay                             	Boolean     	Optional. Specify True, to send a Pay button.
 ;                                 	            	NOTE: This type of button must be the 1st button in the first row.
-;; TODO: Finalize. Check 'type-specific-key' validity. Switch all '-' to '_' in the keyword name.
+(def inline-kbd-btn-types
+  #{:url :login_url :callback_data :switch_inline_query :switch_inline_query_current_chat :callback_game :pay})
+
 (defn build-inline-kbd-btn
   [text type-specific-key type-specific-val]
   {:pre [(keyword? type-specific-key)
          (string? type-specific-val)]}
-  {:text text
-   type-specific-key type-specific-val})
+  (let [field (-> type-specific-key
+                  name
+                  (str/replace "-" "_")
+                  keyword)]
+    (assert (contains? inline-kbd-btn-types field))
+    {:text text
+     field type-specific-val}))
 
 ; ForceReply
 ;
