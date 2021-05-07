@@ -326,15 +326,6 @@
      :options (tg-api/build-message-options
                 {:parse-mode "MarkdownV2"})}))
 
-(defn- get-new-personal-expense-msg
-  [expense-amount expense-details]
-  (get-new-expense-msg expense-amount expense-details nil nil))
-
-(defn- get-new-group-expense-msg
-  [payer-acc-name debtor-acc-name expense-amount expense-details]
-  (get-new-expense-msg expense-amount expense-details
-                       payer-acc-name debtor-acc-name))
-
 ; private chats
 
 (defn- get-private-introduction-msg
@@ -1184,12 +1175,13 @@
         group-chat-data (get-chat-data group-chat-id)
         payer-acc-id (get-personal-account-id
                        group-chat-data {:user-id chat-id})
+        debtor-acc-id (:id debtor-acc)
         expense-amount (:amount chat-data)
         expense-details (or (:expense-item chat-data)
                             (:expense-desc chat-data))
         new-transaction {:chat-id group-chat-id
                          :payer-acc-id payer-acc-id
-                         :debtor-acc-id (:id debtor-acc)
+                         :debtor-acc-id debtor-acc-id
                          :expense-amount expense-amount
                          :expense-details expense-details}]
     (slingshot/try+
@@ -1200,15 +1192,18 @@
         (proceed-and-respond! chat-id {:transition [:private :failed-input]
                                        :params {:reason data-persistence-error}}))
       (else
-        (let [payer-acc (get-group-chat-account group-chat-data
-                                                :personal payer-acc-id)
-              new-expense-msg (if (is-chat-for-group-accounting? group-chat-data)
-                                (get-new-group-expense-msg (:name payer-acc)
-                                                           (:name debtor-acc)
-                                                           expense-amount
-                                                           expense-details)
-                                (get-new-personal-expense-msg expense-amount
-                                                              expense-details))]
+        (let [pers-accs-count (count (get-account-ids-of-type
+                                       :personal group-chat-data))
+              payer-acc-name (when-not (or (= pers-accs-count 1)
+                                           (= payer-acc-id debtor-acc-id))
+                               (:name (get-group-chat-account
+                                        group-chat-data :personal payer-acc-id)))
+              debtor-acc-name (when-not (= pers-accs-count 1)
+                                (:name debtor-acc))
+              new-expense-msg (get-new-expense-msg expense-amount
+                                                   expense-details
+                                                   payer-acc-name
+                                                   debtor-acc-name)]
           (respond! (assoc new-expense-msg :chat-id group-chat-id)))
         (proceed-and-respond! chat-id {:transition [:private :successful-input]})))))
 
