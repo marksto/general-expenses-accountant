@@ -1523,7 +1523,7 @@
       (log/debug "Callback query:" callback-query)))
 
   (m-hlr/callback-fn
-    (fn [{{msg-id :message_id {chat-id :id :as _chat} :chat :as _msg} :message
+    (fn [{{msg-id :message_id {chat-id :id} :chat} :message
           callback-btn-data :data
           :as callback-query}]
       (when (and (= :group (:chat-type callback-query))
@@ -1536,8 +1536,8 @@
 
   (m-hlr/callback-fn
     (fn [{callback-query-id :id
-          {user-id :id :as _user} :from
-          {msg-id :message_id {chat-id :id :as _chat} :chat :as _msg} :message
+          {user-id :id} :from
+          {msg-id :message_id {chat-id :id} :chat} :message
           callback-btn-data :data
           :as callback-query}]
       (when (and (= :group (:chat-type callback-query))
@@ -1572,7 +1572,7 @@
 
   (m-hlr/callback-fn
     (fn [{user :from
-          {msg-id :message_id {chat-id :id :as _chat} :chat :as _msg} :message
+          {msg-id :message_id {chat-id :id} :chat} :message
           callback-btn-data :data
           :as callback-query}]
       (when (and (= :group (:chat-type callback-query))
@@ -1589,7 +1589,7 @@
 
   (m-hlr/callback-fn
     (fn [{{user-id :id :as user} :from
-          {msg-id :message_id {chat-id :id :as _chat} :chat :as _msg} :message
+          {msg-id :message_id {chat-id :id} :chat} :message
           callback-btn-data :data
           :as callback-query}]
       (when (and (= :group (:chat-type callback-query))
@@ -1612,7 +1612,7 @@
 
   (m-hlr/callback-fn
     (fn [{user :from
-          {msg-id :message_id {chat-id :id :as _chat} :chat :as _msg} :message
+          {msg-id :message_id {chat-id :id} :chat} :message
           callback-btn-data :data
           :as callback-query}]
       (when (and (= :group (:chat-type callback-query))
@@ -1624,7 +1624,7 @@
 
   (m-hlr/callback-fn
     (fn [{user :from
-          {msg-id :message_id {chat-id :id :as _chat} :chat :as _msg} :message
+          {msg-id :message_id {chat-id :id} :chat} :message
           callback-btn-data :data
           :as callback-query}]
       (when (and (= :group (:chat-type callback-query))
@@ -1639,7 +1639,7 @@
         op-succeed)))
 
   (m-hlr/callback-fn
-    (fn [{{msg-id :message_id {chat-id :id :as _chat} :chat :as _msg} :message
+    (fn [{{msg-id :message_id {chat-id :id} :chat} :message
           callback-btn-data :data
           :as callback-query}]
       (when (and (= :group (:chat-type callback-query))
@@ -1660,7 +1660,7 @@
         op-succeed)))
 
   (m-hlr/callback-fn
-    (fn [{{msg-id :message_id {chat-id :id :as _chat} :chat :as _msg} :message
+    (fn [{{msg-id :message_id {chat-id :id} :chat} :message
           callback-btn-data :data
           :as callback-query}]
       (when (and (= :group (:chat-type callback-query))
@@ -1681,7 +1681,7 @@
         op-succeed)))
 
   (m-hlr/callback-fn
-    (fn [{{msg-id :message_id {chat-id :id :as _chat} :chat :as _msg} :message
+    (fn [{{msg-id :message_id {chat-id :id} :chat} :message
           callback-btn-data :data
           :as callback-query}]
       (when (and (= :group (:chat-type callback-query))
@@ -1695,7 +1695,7 @@
   ;; TODO: Implement handlers for ':manage-expense-items'.
 
   (m-hlr/callback-fn
-    (fn [{{msg-id :message_id {chat-id :id :as _chat} :chat :as _msg} :message
+    (fn [{{msg-id :message_id {chat-id :id} :chat} :message
           callback-btn-data :data
           :as callback-query}]
       (when (and (= :group (:chat-type callback-query))
@@ -1709,7 +1709,7 @@
   ;; TODO: Implement handlers for ':manage-shares'.
 
   (m-hlr/callback-fn
-    (fn [{{msg-id :message_id {chat-id :id :as _chat} :chat :as _msg} :message
+    (fn [{{msg-id :message_id {chat-id :id} :chat} :message
           callback-btn-data :data
           :as callback-query}]
       (when (and (= :group (:chat-type callback-query))
@@ -1726,8 +1726,8 @@
           op-succeed))))
 
   (m-hlr/callback-fn
-    (fn [{{first-name :first_name :as _user} :from
-          {{chat-id :id :as _chat} :chat :as _msg} :message
+    (fn [{{first-name :first_name} :from
+          {{chat-id :id} :chat} :message
           callback-btn-data :data
           :as callback-query}]
       (when (and (= :private (:chat-type callback-query))
@@ -1740,7 +1740,7 @@
         op-succeed)))
 
   (m-hlr/callback-fn
-    (fn [{{{chat-id :id :as _chat} :chat :as _msg} :message
+    (fn [{{{chat-id :id} :chat} :message
           callback-btn-data :data
           :as callback-query}]
       (when (and (= :private (:chat-type callback-query))
@@ -1752,7 +1752,7 @@
         op-succeed)))
 
   (m-hlr/callback-fn
-    (fn [{{{chat-id :id :as _chat} :chat :as _msg} :message
+    (fn [{{{chat-id :id} :chat} :message
           callback-btn-data :data
           :as callback-query}]
       (when (and (= :private (:chat-type callback-query))
@@ -1765,7 +1765,7 @@
         op-succeed)))
 
   (m-hlr/callback-fn
-    (fn [{{msg-id :message_id {chat-id :id :as _chat} :chat :as _msg} :message
+    (fn [{{msg-id :message_id {chat-id :id} :chat} :message
           callback-btn-data :data
           :as callback-query}]
       (when (and (= :private (:chat-type callback-query))
@@ -1790,8 +1790,8 @@
 
   (m-hlr/callback-fn
     (fn [{callback-query-id :id
-          {first-name :first_name :as _user} :from
-          {msg-id :message_id {chat-id :id :as _chat} :chat :as _msg} :message
+          {first-name :first_name} :from
+          {msg-id :message_id {chat-id :id} :chat} :message
           callback-btn-data :data
           :as callback-query}]
       (when (and (= :private (:chat-type callback-query))
@@ -1887,8 +1887,8 @@
 
   (m-hlr/message-fn
     (fn [{msg-id :message_id date :date text :text
-          {user-id :id :as _user} :from
-          {chat-id :id chat-title :title :as _chat} :chat
+          {user-id :id} :from
+          {chat-id :id chat-title :title} :chat
           :as message}]
       (when (and (= :group (:chat-type message))
                  (= :waiting (:chat-state message))
@@ -1918,8 +1918,8 @@
 
   (m-hlr/message-fn
     (fn [{date :date text :text
-          {user-id :id :as _user} :from
-          {chat-id :id :as _chat} :chat
+          {user-id :id} :from
+          {chat-id :id} :chat
           :as message}]
       (when (and (= :group (:chat-type message))
                  ;; TODO: Check if it blocks other users' interactions.
@@ -1948,8 +1948,8 @@
 
   (m-hlr/message-fn
     (fn [{text :text
-          {user-id :id :as _user} :from
-          {chat-id :id :as _chat} :chat
+          {user-id :id} :from
+          {chat-id :id} :chat
           :as message}]
       (when (and (= :group (:chat-type message))
                  ;; TODO: Check if it blocks other users' interactions.
@@ -1976,7 +1976,7 @@
         op-succeed)))
 
   (m-hlr/message-fn
-    (fn [{{chat-id :id :as _chat} :chat
+    (fn [{{chat-id :id} :chat
           new-chat-title :new_chat_title
           :as message}]
       (when (and (= :group (:chat-type message))
@@ -1986,7 +1986,7 @@
         op-succeed)))
 
   (m-hlr/message-fn
-    (fn [{{chat-id :id :as _chat} :chat
+    (fn [{{chat-id :id} :chat
           migrate-to-chat-id :migrate_to_chat_id
           :as message}]
       (when (and (= :group (:chat-type message))
@@ -2006,8 +2006,8 @@
 
   (m-hlr/message-fn
     (fn [{text :text
-          {first-name :first_name :as _user} :from
-          {chat-id :id :as _chat} :chat
+          {first-name :first_name} :from
+          {chat-id :id} :chat
           :as message}]
       (when (and (= :private (:chat-type message))
                  (= :input (:chat-state message)))
@@ -2021,7 +2021,7 @@
             (respond! (assoc invalid-input-msg :chat-id chat-id)))))))
 
   (m-hlr/message-fn
-    (fn [{text :text {chat-id :id :as _chat} :chat
+    (fn [{text :text {chat-id :id} :chat
           :as message}]
       (when (and (= :private (:chat-type message))
                  (= :detail-expense (:chat-state message)))
