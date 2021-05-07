@@ -9,6 +9,7 @@
        - via WEBHOOK (should be set in PROD env)
        - via LONG-POLLING"
   (:require [clojure.core.async.impl.protocols :refer [closed?]]
+            [clojure.tools.macro :as macro]
             [clojure.string :as str]
 
             [clj-http.client :as http] ;; comes with Morse
@@ -122,7 +123,29 @@
 
 ;; UPDATE HANDLERS
 
-;; TODO: Morse improvement. Implement a Compojure 'let-routes'-like 'let-handler' macro.
+(defn create-complex-handler
+  "Creates an update handler fn by combining several 'handlers' into one, and,
+   as well, applying the 'ctx-extractor' to their common argument (an incoming
+   update) and merging its return value w/ the original value of the argument
+   before calling 'handlers'."
+  [ctx-extractor & handlers]
+  (fn [upd]
+    (let [upd-type (first (second (vec upd)))
+          ctx (ctx-extractor upd upd-type)
+          upd (update upd upd-type merge ctx)]
+      (apply m-hlr/handling upd handlers))))
+
+(defmacro defhandler
+  "A version of the Morse's 'defhandler' macro that uses the 'ctx-extractor' fn
+   to form a context for an incoming update before handling it.
+
+   This helps to extract the common business logic that forms an update context,
+   execute it only once for an incoming update, and then use the context across
+   all 'handlers'."
+  [name ctx-extractor & handlers]
+  (let [[name handlers] (macro/name-with-attributes name handlers)]
+    `(def ~name (create-complex-handler ~ctx-extractor ~@handlers))))
+
 
 (defn get-commands
   "Retrieves a list of bot commands from the update's message text, if any."

@@ -1450,9 +1450,17 @@
 ; - No more than 20 messages per minute in one group,
 ; - No more than 30 messages per second in total.
 
-;; TODO: Add a common context for handlers, which includes e.g. a 'chat state'.
-(m-hlr/defhandler
+(tg-client/defhandler
   handler
+
+  ;; NB: This function is applied to the arguments of all handlers that follow
+  ;;     and merges its result with the original value of the argument.
+  (fn [upd upd-type]
+    (when-let [chat (case upd-type
+                      (:message :my_chat_member) (-> upd upd-type :chat)
+                      (:callback_query) (-> upd upd-type :message :chat)
+                      nil)]
+      {:chat-state (get-chat-state (:id chat))}))
 
   ;; - BOT COMMANDS
 
