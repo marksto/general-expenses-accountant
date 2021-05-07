@@ -692,7 +692,7 @@
                                         next-id acc-name created-dt
                                         ?user-id ?first-msg-id)]
                          (cond-> (assoc-in cd [:accounts :personal next-id] pers-acc)
-                                 (nil? ?user-id) (set-personal-account-id ?user-id next-id))))
+                                 (some? ?user-id) (set-personal-account-id ?user-id next-id))))
 
                      upd-general-acc-members-fn
                      (fn [cd]
@@ -1852,7 +1852,7 @@
             (when (is-chat-for-group-accounting? chat-data)
               (create-general-account! chat-id date)))
 
-          (when (= :initial (:chat-state my-chat-member-updated))
+          (when (= :initial (get-chat-state chat-id))
             (proceed-with-introduction! chat-id)
             ;; NB: It would be nice to update the list of personal
             ;;     accounts with new ones for those users who have
