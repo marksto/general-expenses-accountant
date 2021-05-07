@@ -1460,41 +1460,47 @@
                       (:message :my_chat_member) (-> upd upd-type :chat)
                       (:callback_query) (-> upd upd-type :message :chat)
                       nil)]
-      {:chat-state (get-chat-state (:id chat))}))
+      {:chat-type (cond
+                    (tg-api/is-private? chat) :private
+                    (tg-api/is-group? chat) :group)
+       :chat-state (get-chat-state (:id chat))}))
 
   ;; - BOT COMMANDS
 
   ; Each bot has to handle '/start' and '/help' commands.
   (tg-client/command-fn
     "start"
-    (fn [{user :from chat :chat :as _message}]
-      (when (tg-api/is-private? chat)
+    (fn [{user :from chat :chat :as message}]
+      (when (= :private (:chat-type message))
         (cmd-private-start chat user)
         op-succeed)))
 
   (tg-client/command-fn
     "help"
-    (fn [{chat :chat :as _message}]
-      (cond
-        (tg-api/is-private? chat)
+    (fn [{chat :chat :as message}]
+      (when (= :private (:chat-type message))
         (cmd-private-help chat)
-
-        (tg-api/is-group? chat)
-        (cmd-group-help chat))
-      op-succeed))
+        op-succeed)))
 
   (tg-client/command-fn
     "calc"
-    (fn [{chat :chat :as _message}]
-      (when (and (tg-api/is-private? chat)
+    (fn [{chat :chat :as message}]
+      (when (and (= :private (:chat-type message))
                  (cmd-private-calc chat))
         op-succeed)))
 
   (tg-client/command-fn
     "cancel"
-    (fn [{chat :chat :as _message}]
-      (when (tg-api/is-private? chat)
+    (fn [{chat :chat :as message}]
+      (when (= :private (:chat-type message))
         (cmd-private-cancel chat)
+        op-succeed)))
+
+  (tg-client/command-fn
+    "help"
+    (fn [{chat :chat :as message}]
+      (when (= :group (:chat-type message))
+        (cmd-group-help chat)
         op-succeed)))
 
   ;; - INLINE QUERIES
@@ -1517,10 +1523,10 @@
       (log/debug "Callback query:" callback-query)))
 
   (m-hlr/callback-fn
-    (fn [{{msg-id :message_id {chat-id :id :as chat} :chat :as _msg} :message
+    (fn [{{msg-id :message_id {chat-id :id :as _chat} :chat :as _msg} :message
           callback-btn-data :data
           :as callback-query}]
-      (when (and (tg-api/is-group? chat)
+      (when (and (= :group (:chat-type callback-query))
                  (= :ready (:chat-state callback-query))
                  (= cd-accounts callback-btn-data))
         (proceed-and-replace-response! chat-id
@@ -1531,10 +1537,10 @@
   (m-hlr/callback-fn
     (fn [{callback-query-id :id
           {user-id :id :as _user} :from
-          {msg-id :message_id {chat-id :id :as chat} :chat :as _msg} :message
+          {msg-id :message_id {chat-id :id :as _chat} :chat :as _msg} :message
           callback-btn-data :data
           :as callback-query}]
-      (when (and (tg-api/is-group? chat)
+      (when (and (= :group (:chat-type callback-query))
                  (= :manage-accounts (:chat-state callback-query)))
         (encore/when-let [;; TODO: Extract all these predicates into a predefined namespace fns.
                           filter-revoked-pred (fn [acc]
@@ -1566,10 +1572,10 @@
 
   (m-hlr/callback-fn
     (fn [{user :from
-          {msg-id :message_id {chat-id :id :as chat} :chat :as _msg} :message
+          {msg-id :message_id {chat-id :id :as _chat} :chat :as _msg} :message
           callback-btn-data :data
           :as callback-query}]
-      (when (and (tg-api/is-group? chat)
+      (when (and (= :group (:chat-type callback-query))
                  (= :select-acc-type (:chat-state callback-query))
                  (str/starts-with? callback-btn-data cd-account-type-prefix))
         (proceed-and-replace-response! chat-id
@@ -1583,10 +1589,10 @@
 
   (m-hlr/callback-fn
     (fn [{{user-id :id :as user} :from
-          {msg-id :message_id {chat-id :id :as chat} :chat :as _msg} :message
+          {msg-id :message_id {chat-id :id :as _chat} :chat :as _msg} :message
           callback-btn-data :data
           :as callback-query}]
-      (when (and (tg-api/is-group? chat)
+      (when (and (= :group (:chat-type callback-query))
                  (= :select-group-members (:chat-state callback-query))
                  (str/starts-with? callback-btn-data cd-account-prefix))
         (let [chat-data (get-chat-data chat-id)
@@ -1606,10 +1612,10 @@
 
   (m-hlr/callback-fn
     (fn [{user :from
-          {msg-id :message_id {chat-id :id :as chat} :chat :as _msg} :message
+          {msg-id :message_id {chat-id :id :as _chat} :chat :as _msg} :message
           callback-btn-data :data
           :as callback-query}]
-      (when (and (tg-api/is-group? chat)
+      (when (and (= :group (:chat-type callback-query))
                  (= :select-group-members (:chat-state callback-query))
                  (= cd-done callback-btn-data))
         ;; TODO: Replace the 'msg-id' w/ a text listing all selected members.
@@ -1618,10 +1624,10 @@
 
   (m-hlr/callback-fn
     (fn [{user :from
-          {msg-id :message_id {chat-id :id :as chat} :chat :as _msg} :message
+          {msg-id :message_id {chat-id :id :as _chat} :chat :as _msg} :message
           callback-btn-data :data
           :as callback-query}]
-      (when (and (tg-api/is-group? chat)
+      (when (and (= :group (:chat-type callback-query))
                  (= :rename-account (:chat-state callback-query))
                  (str/starts-with? callback-btn-data cd-account-prefix))
         (proceed-and-replace-response! chat-id
@@ -1633,10 +1639,10 @@
         op-succeed)))
 
   (m-hlr/callback-fn
-    (fn [{{msg-id :message_id {chat-id :id :as chat} :chat :as _msg} :message
+    (fn [{{msg-id :message_id {chat-id :id :as _chat} :chat :as _msg} :message
           callback-btn-data :data
           :as callback-query}]
-      (when (and (tg-api/is-group? chat)
+      (when (and (= :group (:chat-type callback-query))
                  (= :revoke-account (:chat-state callback-query))
                  (str/starts-with? callback-btn-data cd-account-prefix))
         (let [chat-data (get-chat-data chat-id)
@@ -1654,10 +1660,10 @@
         op-succeed)))
 
   (m-hlr/callback-fn
-    (fn [{{msg-id :message_id {chat-id :id :as chat} :chat :as _msg} :message
+    (fn [{{msg-id :message_id {chat-id :id :as _chat} :chat :as _msg} :message
           callback-btn-data :data
           :as callback-query}]
-      (when (and (tg-api/is-group? chat)
+      (when (and (= :group (:chat-type callback-query))
                  (= :reinstate-account (:chat-state callback-query))
                  (str/starts-with? callback-btn-data cd-account-prefix))
         (let [chat-data (get-chat-data chat-id)
@@ -1675,10 +1681,10 @@
         op-succeed)))
 
   (m-hlr/callback-fn
-    (fn [{{msg-id :message_id {chat-id :id :as chat} :chat :as _msg} :message
+    (fn [{{msg-id :message_id {chat-id :id :as _chat} :chat :as _msg} :message
           callback-btn-data :data
           :as callback-query}]
-      (when (and (tg-api/is-group? chat)
+      (when (and (= :group (:chat-type callback-query))
                  (= :ready (:chat-state callback-query))
                  (= cd-expense-items callback-btn-data))
         (proceed-and-replace-response! chat-id
@@ -1689,10 +1695,10 @@
   ;; TODO: Implement handlers for ':manage-expense-items'.
 
   (m-hlr/callback-fn
-    (fn [{{msg-id :message_id {chat-id :id :as chat} :chat :as _msg} :message
+    (fn [{{msg-id :message_id {chat-id :id :as _chat} :chat :as _msg} :message
           callback-btn-data :data
           :as callback-query}]
-      (when (and (tg-api/is-group? chat)
+      (when (and (= :group (:chat-type callback-query))
                  (= :ready (:chat-state callback-query))
                  (= cd-shares callback-btn-data))
         (proceed-and-replace-response! chat-id
@@ -1703,10 +1709,10 @@
   ;; TODO: Implement handlers for ':manage-shares'.
 
   (m-hlr/callback-fn
-    (fn [{{msg-id :message_id {chat-id :id :as chat} :chat :as _msg} :message
+    (fn [{{msg-id :message_id {chat-id :id :as _chat} :chat :as _msg} :message
           callback-btn-data :data
           :as callback-query}]
-      (when (and (tg-api/is-group? chat)
+      (when (and (= :group (:chat-type callback-query))
                  (= cd-back callback-btn-data))
         (when-let [state-transition-name
                    (condp contains? (:chat-state callback-query)
@@ -1721,10 +1727,10 @@
 
   (m-hlr/callback-fn
     (fn [{{first-name :first_name :as _user} :from
-          {{chat-id :id :as chat} :chat :as _msg} :message
+          {{chat-id :id :as _chat} :chat :as _msg} :message
           callback-btn-data :data
           :as callback-query}]
-      (when (and (tg-api/is-private? chat)
+      (when (and (= :private (:chat-type callback-query))
                  (= :select-group (:chat-state callback-query))
                  (str/starts-with? callback-btn-data cd-group-chat-prefix))
         (let [group-chat-id-str (str/replace-first callback-btn-data cd-group-chat-prefix "")
@@ -1734,10 +1740,10 @@
         op-succeed)))
 
   (m-hlr/callback-fn
-    (fn [{{{chat-id :id :as chat} :chat :as _msg} :message
+    (fn [{{{chat-id :id :as _chat} :chat :as _msg} :message
           callback-btn-data :data
           :as callback-query}]
-      (when (and (tg-api/is-private? chat)
+      (when (and (= :private (:chat-type callback-query))
                  (= :detail-expense (:chat-state callback-query))
                  (str/starts-with? callback-btn-data cd-expense-item-prefix))
         (let [expense-item (str/replace-first callback-btn-data cd-expense-item-prefix "")]
@@ -1746,10 +1752,10 @@
         op-succeed)))
 
   (m-hlr/callback-fn
-    (fn [{{{chat-id :id :as chat} :chat :as _msg} :message
+    (fn [{{{chat-id :id :as _chat} :chat :as _msg} :message
           callback-btn-data :data
           :as callback-query}]
-      (when (and (tg-api/is-private? chat)
+      (when (and (= :private (:chat-type callback-query))
                  (= :select-account (:chat-state callback-query))
                  (str/starts-with? callback-btn-data cd-account-prefix))
         (let [group-chat-id (:group (get-chat-data chat-id))
@@ -1759,10 +1765,10 @@
         op-succeed)))
 
   (m-hlr/callback-fn
-    (fn [{{msg-id :message_id {chat-id :id :as chat} :chat :as _msg} :message
+    (fn [{{msg-id :message_id {chat-id :id :as _chat} :chat :as _msg} :message
           callback-btn-data :data
           :as callback-query}]
-      (when (and (tg-api/is-private? chat)
+      (when (and (= :private (:chat-type callback-query))
                  (= :interactive-input (:chat-state callback-query)))
         (when-let [non-terminal-operation (condp apply [callback-btn-data]
                                             cd-digits-set {:type :append-digit
@@ -1785,10 +1791,10 @@
   (m-hlr/callback-fn
     (fn [{callback-query-id :id
           {first-name :first_name :as _user} :from
-          {msg-id :message_id {chat-id :id :as chat} :chat :as _msg} :message
+          {msg-id :message_id {chat-id :id :as _chat} :chat :as _msg} :message
           callback-btn-data :data
           :as callback-query}]
-      (when (and (tg-api/is-private? chat)
+      (when (and (= :private (:chat-type callback-query))
                  (= :interactive-input (:chat-state callback-query))
                  (= cd-enter callback-btn-data))
         (let [user-input (get-user-input (get-chat-data chat-id))
@@ -1882,9 +1888,9 @@
   (m-hlr/message-fn
     (fn [{msg-id :message_id date :date text :text
           {user-id :id :as _user} :from
-          {chat-id :id chat-title :title :as chat} :chat
+          {chat-id :id chat-title :title :as _chat} :chat
           :as message}]
-      (when (and (tg-api/is-group? chat)
+      (when (and (= :group (:chat-type message))
                  (= :waiting (:chat-state message))
                  (is-reply-to-bot? chat-id :name-request-msg-id message))
         ;; NB: Here the 'user-id' exists for sure, since it is the User's response.
@@ -1913,9 +1919,9 @@
   (m-hlr/message-fn
     (fn [{date :date text :text
           {user-id :id :as _user} :from
-          {chat-id :id :as chat} :chat
+          {chat-id :id :as _chat} :chat
           :as message}]
-      (when (and (tg-api/is-group? chat)
+      (when (and (= :group (:chat-type message))
                  ;; TODO: Check if it blocks other users' interactions.
                  ;;       Re-implement w/o the state transition, if so.
                  (= :request-new-account-name (:chat-state message))
@@ -1943,9 +1949,9 @@
   (m-hlr/message-fn
     (fn [{text :text
           {user-id :id :as _user} :from
-          {chat-id :id :as chat} :chat
+          {chat-id :id :as _chat} :chat
           :as message}]
-      (when (and (tg-api/is-group? chat)
+      (when (and (= :group (:chat-type message))
                  ;; TODO: Check if it blocks other users' interactions.
                  ;;       Re-implement w/o the state transition, if so.
                  (= :request-account-rename (:chat-state message))
@@ -1970,20 +1976,20 @@
         op-succeed)))
 
   (m-hlr/message-fn
-    (fn [{{chat-id :id :as chat} :chat
+    (fn [{{chat-id :id :as _chat} :chat
           new-chat-title :new_chat_title
-          :as _message}]
-      (when (and (tg-api/is-group? chat)
+          :as message}]
+      (when (and (= :group (:chat-type message))
                  (some? new-chat-title))
         (log/debugf "Chat %s title was changed to '%s'" chat-id new-chat-title)
         (assoc-in-chat-data! chat-id [:title] new-chat-title)
         op-succeed)))
 
   (m-hlr/message-fn
-    (fn [{{chat-id :id :as chat} :chat
+    (fn [{{chat-id :id :as _chat} :chat
           migrate-to-chat-id :migrate_to_chat_id
-          :as _message}]
-      (when (and (tg-api/is-group? chat)
+          :as message}]
+      (when (and (= :group (:chat-type message))
                  (some? migrate-to-chat-id))
         (log/debugf "Group %s has been migrated to a supergroup %s" chat-id migrate-to-chat-id)
         (let [new-chat (setup-new-supergroup-chat! migrate-to-chat-id chat-id)
@@ -2001,9 +2007,9 @@
   (m-hlr/message-fn
     (fn [{text :text
           {first-name :first_name :as _user} :from
-          {chat-id :id :as chat} :chat
+          {chat-id :id :as _chat} :chat
           :as message}]
-      (when (and (tg-api/is-private? chat)
+      (when (and (= :private (:chat-type message))
                  (= :input (:chat-state message)))
         (let [input (nums/parse-number text)]
           (if (number? input)
@@ -2015,9 +2021,9 @@
             (respond! (assoc invalid-input-msg :chat-id chat-id)))))))
 
   (m-hlr/message-fn
-    (fn [{text :text {chat-id :id :as chat} :chat
+    (fn [{text :text {chat-id :id :as _chat} :chat
           :as message}]
-      (when (and (tg-api/is-private? chat)
+      (when (and (= :private (:chat-type message))
                  (= :detail-expense (:chat-state message)))
         (log/debugf "Expense description: \"%s\"" text)
         (assoc-in-chat-data! chat-id [:expense-desc] text)
