@@ -856,6 +856,18 @@
     (assoc-in-chat-data! chat-id [:user-error] boolean-val)
     boolean-val))
 
+(defn- get-user-input-data
+  [chat-data user-id input-name]
+  (get-in chat-data [:input user-id input-name]))
+
+(defn- set-user-input-data!
+  [chat-id user-id input-name input-data]
+  (if (nil? input-data)
+    (update-chat-data! chat-id
+                       update-in [:input user-id] dissoc input-name)
+    (update-chat-data! chat-id
+                       assoc-in [:input user-id input-name] input-data)))
+
 ;; - CHATS > GROUP CHAT
 
 (defn- get-group-chat-expense-items
@@ -1306,9 +1318,7 @@
 (defn- proceed-with-account-creation!
   [chat-id acc-type {user-id :id :as user}]
   (let [input-data {:account-type acc-type}]
-    ;; TODO: Extract into a generalized fn for assoc/dissoc-ing the input data.
-    (update-chat-data! chat-id
-                       assoc-in [:input user-id :create-account] input-data))
+    (set-user-input-data! chat-id user-id :create-account input-data))
   (case acc-type
     :personal
     (proceed-with-account-naming! chat-id user)
@@ -1351,9 +1361,7 @@
   [chat-id {user-id :id :as user} acc-to-rename]
   (let [input-data {:account-type (:type acc-to-rename)
                     :account-id (:id acc-to-rename)}]
-    ;; TODO: Extract into a generalized fn for assoc/dissoc-ing the input data.
-    (update-chat-data! chat-id
-                       assoc-in [:input user-id :rename-account] input-data))
+    (set-user-input-data! chat-id user-id :rename-account input-data))
   (proceed-and-respond-attentively!
     chat-id
     {:transition [:group :request-acc-new-name]
@@ -1596,12 +1604,10 @@
                  (str/starts-with? callback-btn-data cd-account-prefix))
         (let [chat-data (get-chat-data chat-id)
               new-member (data->account callback-btn-data chat-data)
-              input-data (-> (get-in chat-data [:input user-id :create-account])
+              input-data (-> (get-user-input-data chat-data user-id :create-account)
                              (update :account-members conj new-member))
               acc-members (:account-members input-data)]
-          ;; TODO: Extract into a generalized fn for assoc/dissoc-ing the input data.
-          (update-chat-data! chat-id
-                             assoc-in [:input user-id :create-account] input-data)
+          (set-user-input-data! chat-id user-id :create-account input-data)
           (when-not
             (proceed-with-account-member-selection! chat-id msg-id acc-members)
             (proceed-with-account-naming! chat-id user)))
@@ -1930,7 +1936,7 @@
                                    message))
         ;; NB: Here the 'user-id' exists for sure, since it is the User's response.
         (let [chat-data (get-chat-data chat-id)
-              input-data (get-in chat-data [:input user-id :create-account])
+              input-data (get-user-input-data chat-data user-id :create-account)
               acc-type (:account-type input-data)
               members (map :id (:account-members input-data))]
           (case acc-type
@@ -1940,8 +1946,7 @@
           ;; TODO: Extract this common functionality into a dedicated cleanup fn.
           (update-chat-data! chat-id
                              update-in [:to-user user-id] dissoc :request-acc-name-msg-id)
-          (update-chat-data! chat-id
-                             update-in [:input user-id] dissoc :create-account)
+          (set-user-input-data! chat-id user-id :create-account nil)
 
           (proceed-and-respond! chat-id {:transition [:group :notify-changes-success]}))
         op-succeed)))
@@ -1960,7 +1965,7 @@
                                    message))
         ;; NB: Here the 'user-id' exists for sure, since it is the User's response.
         (let [chat-data (get-chat-data chat-id)
-              input-data (get-in chat-data [:input user-id :rename-account])
+              input-data (get-user-input-data chat-data user-id :rename-account)
               acc-type (:account-type input-data)
               acc-id (:account-id input-data)]
           (update-chat-data! chat-id
@@ -1969,8 +1974,7 @@
           ;; TODO: Extract this common functionality into a dedicated cleanup fn.
           (update-chat-data! chat-id
                              update-in [:to-user user-id] dissoc :request-rename-msg-id)
-          (update-chat-data! chat-id
-                             update-in [:input user-id] dissoc :rename-account)
+          (set-user-input-data! chat-id user-id :rename-account nil)
 
           (proceed-and-respond! chat-id {:transition [:group :notify-changes-success]}))
         op-succeed)))
