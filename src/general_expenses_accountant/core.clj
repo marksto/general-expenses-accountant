@@ -1970,8 +1970,7 @@
             :acc-type/group (create-group-account! chat-id members text date))
 
           ;; TODO: Extract this common functionality into a dedicated cleanup fn.
-          (update-chat-data! chat-id
-                             update-in [:to-user user-id] dissoc :request-acc-name-msg-id)
+          (set-bot-msg-id! chat-id [:to-user user-id :request-acc-name-msg-id] nil)
           (set-user-input-data! chat-id user-id :create-account nil)
 
           (proceed-and-respond! chat-id {:transition [:chat-type/group :notify-changes-success]}))
@@ -1998,8 +1997,7 @@
                              assoc-in [:accounts acc-type acc-id :name] text)
 
           ;; TODO: Extract this common functionality into a dedicated cleanup fn.
-          (update-chat-data! chat-id
-                             update-in [:to-user user-id] dissoc :request-rename-msg-id)
+          (set-bot-msg-id! chat-id [:to-user user-id :request-rename-msg-id] nil)
           (set-user-input-data! chat-id user-id :rename-account nil)
 
           (proceed-and-respond! chat-id {:transition [:chat-type/group :notify-changes-success]}))
