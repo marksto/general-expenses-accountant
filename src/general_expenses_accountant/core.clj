@@ -1082,7 +1082,7 @@
                                     :message-fn get-failed-to-add-new-expense-msg
                                     :message-params [:reason]}}})
 
-(defn- handle-state-transition
+(defn- handle-state-transition!
   [chat-id event]
   (let [chat-type (first (:transition event))
         transition (get-in state-transitions (:transition event))
@@ -1130,7 +1130,7 @@
   "Continues the course of transitions between states and sends a message
    in response to a user (or a group)."
   [chat-id event]
-  (let [result (handle-state-transition chat-id event)]
+  (let [result (handle-state-transition! chat-id event)]
     (respond! (assoc (:message result) :chat-id chat-id))))
 
 ;; TODO: Re-implement it in asynchronous fashion (or adding it as option).
@@ -1147,7 +1147,7 @@
    response to a user (or a group), and awaits for a feedback (Telegram's
    response) which is then processed by the provided handler function."
   [chat-id event tg-response-handler-fn]
-  (let [result (handle-state-transition chat-id event)]
+  (let [result (handle-state-transition! chat-id event)]
     (respond-attentively! (assoc (:message result) :chat-id chat-id)
                           tg-response-handler-fn)))
 
@@ -1172,7 +1172,7 @@
   "Continues the course of transitions between states and replaces some
    existing response to a user (or a group)."
   [chat-id event msg-id]
-  (let [result (handle-state-transition chat-id event)]
+  (let [result (handle-state-transition! chat-id event)]
     (replace-response! (assoc (:message result) :chat-id chat-id
                                                 :msg-id msg-id))))
 
@@ -1372,11 +1372,9 @@
 
 ;; - COMMANDS ACTIONS
 
-;; TODO: Rename properly, with '!' in the end (they modify state).
-
 ; private chats
 
-(defn- cmd-private-start
+(defn- cmd-private-start!
   [{chat-id :id :as chat}
    {first-name :first_name :as _user}]
   (log/debug "Conversation started in a private chat:" chat)
@@ -1384,28 +1382,28 @@
                                  :params {:first-name first-name}}))
 
 ;; TODO: Implement proper '/help' message (w/ the list of commands, etc.).
-(defn- cmd-private-help
+(defn- cmd-private-help!
   [{chat-id :id :as chat}]
   (log/debug "Help requested in a private chat:" chat)
   (respond! {:type :text
              :chat-id chat-id
              :text "Help is on the way!"}))
 
-(defn- cmd-private-calc
+(defn- cmd-private-calc!
   [{chat-id :id :as chat}]
   (when (= :input (get-chat-state chat-id))
     (log/debug "Calculator opened in a private chat:" chat)
     (proceed-and-respond! chat-id {:transition [:private :show-calculator]})))
 
-(defn- cmd-private-cancel
+(defn- cmd-private-cancel!
   [{chat-id :id :as chat}]
   (log/debug "The operation is canceled in a private chat:" chat)
-  (handle-state-transition chat-id {:transition [:private :cancel-input]}))
+  (handle-state-transition! chat-id {:transition [:private :cancel-input]}))
 
 ; group chats
 
 ;; TODO: Implement proper '/help' message (w/ the list of commands, etc.).
-(defn- cmd-group-help
+(defn- cmd-group-help!
   [{chat-id :id :as chat}]
   (log/debug "Help requested in a group chat:" chat)
   (respond! {:type :text
@@ -1479,35 +1477,35 @@
     "start"
     (fn [{user :from chat :chat :as message}]
       (when (= :private (:chat-type message))
-        (cmd-private-start chat user)
+        (cmd-private-start! chat user)
         op-succeed)))
 
   (tg-client/command-fn
     "help"
     (fn [{chat :chat :as message}]
       (when (= :private (:chat-type message))
-        (cmd-private-help chat)
+        (cmd-private-help! chat)
         op-succeed)))
 
   (tg-client/command-fn
     "calc"
     (fn [{chat :chat :as message}]
       (when (and (= :private (:chat-type message))
-                 (cmd-private-calc chat))
+                 (cmd-private-calc! chat))
         op-succeed)))
 
   (tg-client/command-fn
     "cancel"
     (fn [{chat :chat :as message}]
       (when (= :private (:chat-type message))
-        (cmd-private-cancel chat)
+        (cmd-private-cancel! chat)
         op-succeed)))
 
   (tg-client/command-fn
     "help"
     (fn [{chat :chat :as message}]
       (when (= :group (:chat-type message))
-        (cmd-group-help chat)
+        (cmd-group-help! chat)
         op-succeed)))
 
   ;; - INLINE QUERIES
