@@ -131,9 +131,9 @@
 (def ^:private undo-button-text "Отмена")
 (def ^:private done-button-text "Готово")
 (def ^:private default-general-acc-name "общие")
-(def ^:private account-types-names {:personal "Личный*"
-                                    :group "Групповой"
-                                    :general "Общий"})
+(def ^:private account-types-names {:acc-type/personal "Личный*"
+                                    :acc-type/group "Групповой"
+                                    :acc-type/general "Общий"})
 (def ^:private select-account-txt "Выберите счёт:")
 (def ^:private select-payer-account-txt "Выберите тех, кто понёс расход:")
 ;;                                    "Error while saving data. Please, try again later." (en)
@@ -548,7 +548,7 @@
 (defn- ->general-account
   [id name created members]
   {:id id
-   :type :general
+   :type :acc-type/general
    :name name
    :created created
    :members (set members)})
@@ -556,7 +556,7 @@
 (defn- ->personal-account
   [id name created ?user-id ?msg-id]
   (cond-> {:id id
-           :type :personal
+           :type :acc-type/personal
            :name name
            :created created}
           (some? ?user-id) (assoc :user-id ?user-id)
@@ -565,7 +565,7 @@
 (defn- ->group-account
   [id name created members]
   {:id id
-   :type :group
+   :type :acc-type/group
    :name name
    :created created
    :members (set members)})
@@ -594,7 +594,7 @@
 
 (defn- get-current-general-account
   [chat-data]
-  (let [gen-accs (get-accounts-of-type :general chat-data)]
+  (let [gen-accs (get-accounts-of-type :acc-type/general chat-data)]
     (when (seq gen-accs)
       (apply max-key :id gen-accs))))
 
@@ -617,7 +617,7 @@
                           curr-gen-acc-id (:id curr-gen-acc)]
                       (if-not (nil? curr-gen-acc)
                         (assoc-in cd
-                                  [:accounts :general curr-gen-acc-id :revoked]
+                                  [:accounts :acc-type/general curr-gen-acc-id :revoked]
                                   created-dt)
                         cd)))
 
@@ -628,11 +628,11 @@
                                      default-general-acc-name
                                      (:name curr-gen-acc))
                           members (if (nil? curr-gen-acc)
-                                    (get-account-ids-of-type :personal chat-data)
+                                    (get-account-ids-of-type :acc-type/personal chat-data)
                                     (:members curr-gen-acc))
                           general-acc (->general-account
                                         next-id acc-name created-dt members)]
-                      (assoc-in cd [:accounts :general next-id] general-acc)))]
+                      (assoc-in cd [:accounts :acc-type/general next-id] general-acc)))]
               (-> chat-data
                   upd-accounts-next-id-fn
                   upd-old-general-acc-fn
@@ -651,7 +651,7 @@
 
 (defn- find-personal-account-by-name
   [chat-data acc-name]
-  (->> (get-accounts-of-type :personal chat-data)
+  (->> (get-accounts-of-type :acc-type/personal chat-data)
        (filter #(= (:name %) acc-name))
        first))
 
@@ -672,7 +672,7 @@
   {:pre [(or (some? ?user-id) (some? ?acc-name))]}
   (if (some? ?user-id)
     (let [pers-acc-id (get-personal-account-id chat-data ids)]
-      (get-in chat-data [:accounts :personal pers-acc-id]))
+      (get-in chat-data [:accounts :acc-type/personal pers-acc-id]))
     (find-personal-account-by-name chat-data ?acc-name)))
 
 ;; TODO: Rename optional args in all other fns to start w/ '?...' as well.
@@ -699,14 +699,14 @@
                        (let [pers-acc (->personal-account
                                         next-id acc-name created-dt
                                         ?user-id ?first-msg-id)]
-                         (cond-> (assoc-in cd [:accounts :personal next-id] pers-acc)
+                         (cond-> (assoc-in cd [:accounts :acc-type/personal next-id] pers-acc)
                                  (some? ?user-id) (set-personal-account-id ?user-id next-id))))
 
                      upd-general-acc-members-fn
                      (fn [cd]
                        (encore/if-let [curr-gen-acc-id (:id (get-current-general-account chat-data))
-                                       curr-gen-acc (get-in cd [:accounts :general curr-gen-acc-id])]
-                         (assoc-in cd [:accounts :general curr-gen-acc-id]
+                                       curr-gen-acc (get-in cd [:accounts :acc-type/general curr-gen-acc-id])]
+                         (assoc-in cd [:accounts :acc-type/general curr-gen-acc-id]
                                    (add-general-account-member curr-gen-acc next-id))
                          cd))]
                  (-> chat-data
@@ -727,19 +727,19 @@
                 (let [upd-acc-name-fn
                       (fn [cd]
                         (if (some? new-name)
-                          (assoc-in cd [:accounts :personal pers-acc-id :name] new-name)
+                          (assoc-in cd [:accounts :acc-type/personal pers-acc-id :name] new-name)
                           cd))
 
                       upd-acc-revoked-fn
                       (fn [cd]
                         (if (true? revoke?)
-                          (assoc-in cd [:accounts :personal pers-acc-id :revoked] datetime)
+                          (assoc-in cd [:accounts :acc-type/personal pers-acc-id :revoked] datetime)
                           cd))
 
                       upd-acc-reinstated-fn
                       (fn [cd]
                         (if (true? reinstate?)
-                          (update-in cd [:accounts :personal pers-acc-id] dissoc :revoked)
+                          (update-in cd [:accounts :acc-type/personal pers-acc-id] dissoc :revoked)
                           cd))
 
                       upd-general-acc-members-fn
@@ -749,11 +749,11 @@
                           (let [new-gen-acc (create-general-account! chat-id datetime)]
                             (cond
                               (true? revoke?)
-                              (assoc-in cd [:accounts :general (:id new-gen-acc)]
+                              (assoc-in cd [:accounts :acc-type/general (:id new-gen-acc)]
                                         (remove-general-account-member new-gen-acc pers-acc-id))
 
                               (true? reinstate?)
-                              (assoc-in cd [:accounts :general (:id new-gen-acc)]
+                              (assoc-in cd [:accounts :acc-type/general (:id new-gen-acc)]
                                         (add-general-account-member new-gen-acc pers-acc-id))))
                           cd))]
                   (-> chat-data
@@ -769,7 +769,7 @@
 
 (defn- find-group-accounts
   [chat-data members]
-  (->> (get-accounts-of-type :group chat-data)
+  (->> (get-accounts-of-type :acc-type/group chat-data)
        (filter #(= (:members %) members))))
 
 (defn- get-latest-group-account
@@ -797,7 +797,7 @@
                   (fn [cd]
                     (let [group-acc (->group-account
                                       next-id acc-name created-dt members)]
-                      (assoc-in cd [:accounts :group next-id] group-acc)))]
+                      (assoc-in cd [:accounts :acc-type/group next-id] group-acc)))]
               (-> chat-data
                   upd-accounts-next-id-fn
                   add-new-group-acc-fn))))]
@@ -887,14 +887,15 @@
 (defn- get-group-chat-accounts
   ;; TODO: Sort them according popularity.
   ([chat-id]
-   (get-group-chat-accounts chat-id :general :group :personal))
+   (get-group-chat-accounts
+     chat-id :acc-type/general :acc-type/group :acc-type/personal))
   ([chat-id & acc-types]
    (if (< 1 (count acc-types))
      (->> acc-types
           (mapcat (partial get-group-chat-accounts chat-id)))
      (encore/when-let [chat-data (get-chat-data chat-id)
                        :let [acc-type (first acc-types)]]
-       (if (= acc-type :general)
+       (if (= acc-type :acc-type/general)
          (when-let [gen-acc (get-current-general-account chat-data)]
            [gen-acc])
          (get-accounts-of-type acc-type chat-data))))))
@@ -914,18 +915,18 @@
   [chat-id user-id]
   (fn [acc]
     (and (is-account-active? acc)
-         (or (and (= :personal (:type acc))
+         (or (and (= :acc-type/personal (:type acc))
                   (contains? #{user-id nil} (:user-id acc)))
-             (and (= :group (:type acc))
+             (and (= :acc-type/group (:type acc))
                   (is-group-acc-member? acc chat-id user-id))))))
 
 (defn- can-revoke-account?
   [chat-id user-id]
   (fn [acc]
     (and (is-account-active? acc)
-         (or (and (= :personal (:type acc))
+         (or (and (= :acc-type/personal (:type acc))
                   (not= (:user-id acc) user-id))
-             (and (= :group (:type acc))
+             (and (= :acc-type/group (:type acc))
                   (is-group-acc-member? acc chat-id user-id))))))
 
 (defn- can-reinstate-account?
@@ -941,7 +942,7 @@
   [chat-id user-id]
   (let [group-chat-data (get-chat-data chat-id)
         pers-acc-id (get-personal-account-id group-chat-data {:user-id user-id})
-        pers-acc (get-group-chat-account group-chat-data :personal pers-acc-id)]
+        pers-acc (get-group-chat-account group-chat-data :acc-type/personal pers-acc-id)]
     (is-account-active? pers-acc)))
 
 (defn- data->account
@@ -950,7 +951,7 @@
   (let [account (str/replace-first callback-btn-data cd-account-prefix "")
         account-path (str/split account #"-")]
     (get-group-chat-account group-chat-data
-                            (keyword (nth account-path 0))
+                            (keyword "acc-type" (nth account-path 0))
                             (.intValue (biginteger (nth account-path 1))))))
 
 (defn- get-bot-msg-id
@@ -1249,11 +1250,11 @@
                                        :params {:reason data-persistence-error}}))
       (else
         (let [pers-accs-count (count (get-account-ids-of-type
-                                       :personal group-chat-data))
+                                       :acc-type/personal group-chat-data))
               payer-acc-name (when-not (or (= pers-accs-count 1)
                                            (= payer-acc-id debtor-acc-id))
                                (:name (get-group-chat-account
-                                        group-chat-data :personal payer-acc-id)))
+                                        group-chat-data :acc-type/personal payer-acc-id)))
               debtor-acc-name (when-not (= pers-accs-count 1)
                                 (:name debtor-acc))
               new-expense-msg (get-new-expense-msg expense-amount
@@ -1340,7 +1341,8 @@
   [chat-id msg-id state-transition-name]
   (proceed-and-replace-response! chat-id
                                  {:transition [:group state-transition-name]
-                                  :params {:account-types [:group :personal]
+                                  :params {:account-types [:acc-type/group
+                                                           :acc-type/personal]
                                            :extra-buttons [back-button]}}
                                  msg-id))
 
@@ -1358,17 +1360,18 @@
   (let [input-data {:account-type acc-type}]
     (set-user-input-data! chat-id user-id :create-account input-data))
   (case acc-type
-    :personal
+    :acc-type/personal
     (proceed-with-account-naming! chat-id user)
-    :group
-    (let [personal-accs (get-accounts-of-type :personal (get-chat-data chat-id))]
+    :acc-type/group
+    (let [personal-accs (get-accounts-of-type
+                          :acc-type/personal (get-chat-data chat-id))]
       (proceed-and-respond! chat-id {:transition [:group :select-group-members]
                                      :params {:accounts personal-accs}}))))
 
 (defn- proceed-with-account-member-selection!
   [chat-id msg-id already-selected-account-members]
   (let [chat-data (get-chat-data chat-id)
-        personal-accs (set (get-accounts-of-type :personal chat-data))
+        personal-accs (set (get-accounts-of-type :acc-type/personal chat-data))
         selected-accs (set already-selected-account-members)
         remaining-accs (set/difference personal-accs selected-accs)]
     (when (seq remaining-accs)
@@ -1384,7 +1387,8 @@
                                     state-transition-name nil))
   ([chat-id msg-id callback-query-id
     state-transition-name filter-pred]
-   (let [eligible-accounts (cond->> (get-group-chat-accounts chat-id :group :personal)
+   (let [eligible-accounts (cond->> (get-group-chat-accounts
+                                      chat-id :acc-type/group :acc-type/personal)
                                     (some? filter-pred) (filter filter-pred))]
      (if (seq eligible-accounts)
        (proceed-and-replace-response! chat-id
@@ -1618,7 +1622,7 @@
                                        msg-id)
         (let [acc-type-name (str/replace-first callback-btn-data
                                                cd-account-type-prefix "")
-              acc-type (keyword acc-type-name)]
+              acc-type (keyword "acc-type" acc-type-name)]
           (proceed-with-account-creation! chat-id acc-type user))
         op-succeed)))
 
@@ -1682,11 +1686,11 @@
               account-to-revoke (data->account callback-btn-data chat-data)
               datetime (get-datetime-in-tg-format)]
           (case (:type account-to-revoke)
-            :personal (update-personal-account! chat-id
-                                                account-to-revoke
-                                                {:revoke? true
-                                                 :datetime datetime})
-            :group (throw (Exception. "Not implemented yet"))))
+            :acc-type/personal (update-personal-account! chat-id
+                                                         account-to-revoke
+                                                         {:revoke? true
+                                                          :datetime datetime})
+            :acc-type/group (throw (Exception. "Not implemented yet")))) ;; TODO!
         (proceed-and-replace-response! chat-id
                                        {:transition [:group :restore-intro]}
                                        msg-id)
@@ -1704,10 +1708,10 @@
           ;; TODO: Check whether we can simply update an existing personal account
           ;;       rather than create a new version w/ 'create-personal-account!'.
           (case (:type account-to-reinstate)
-            :personal (update-personal-account! chat-id
-                                                account-to-reinstate
-                                                {:reinstate? true})
-            :group (throw (Exception. "Not implemented yet"))))
+            :acc-type/personal (update-personal-account! chat-id
+                                                         account-to-reinstate
+                                                         {:reinstate? true})
+            :acc-type/group (throw (Exception. "Not implemented yet")))) ;; TODO!
         (proceed-and-replace-response! chat-id
                                        {:transition [:group :restore-intro]}
                                        msg-id)
@@ -1939,7 +1943,7 @@
           (update-personal-account! chat-id {:user-id user-id} {:new-name text}))
 
         (let [chat-data (get-chat-data chat-id)
-              pers-accs-count (count (get-account-ids-of-type :personal chat-data))
+              pers-accs-count (count (get-account-ids-of-type :acc-type/personal chat-data))
               uncreated-count (get-number-of-missing-personal-accounts
                                 chat-data pers-accs-count)
               event (if (zero? uncreated-count)
@@ -1968,8 +1972,8 @@
               acc-type (:account-type input-data)
               members (map :id (:account-members input-data))]
           (case acc-type
-            :personal (create-personal-account! chat-id text date)
-            :group (create-group-account! chat-id members text date))
+            :acc-type/personal (create-personal-account! chat-id text date)
+            :acc-type/group (create-group-account! chat-id members text date))
 
           ;; TODO: Extract this common functionality into a dedicated cleanup fn.
           (update-chat-data! chat-id

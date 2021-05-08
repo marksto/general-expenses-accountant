@@ -32,52 +32,52 @@
                                    :to-user {1200000000 {:request-new-name-msg-id 10}}}
 
                     ;; user input/temporary values
-                    :input {1200000000 {:rename-account {:account-type :personal
+                    :input {1200000000 {:rename-account {:account-type :acc-type/personal
                                                          :account-id 2}}}
 
                     ;; configured by users
-                    :accounts {:general {0 {:id 0
-                                            :type :general
-                                            :name "Common"
-                                            :created 426300760
-                                            :revoked 426320300
-                                            :members #{1 2}}
-                                         5 {:id 5
-                                            :type :general
-                                            :name "Common"
-                                            :created 426320300
-                                            :revoked 432500000
-                                            :members #{1 2 3}}
-                                         6 {:id 6
-                                            :type :general
-                                            :name "Common"
-                                            :created 432500000
-                                            :members #{1 2}}}
-                               :personal {1 {:id 1
-                                             :type :personal
-                                             :name "Alice"
-                                             :created 426300760
-                                             :msg-id 3
-                                             :user-id 1400000000}
-                                          2 {:id 2
-                                             :type :personal
-                                             :name "Bob"
-                                             :created 426301230
-                                             :msg-id 4
-                                             :user-id 1200000000}
-                                          3 {:id 3
-                                             :type :personal
-                                             :name "Carl"
-                                             :created 426320300
-                                             :revoked 432500000
-                                             :msg-id 5
-                                             :user-id 2000000000}}
-                               :group {4 {:id 4
-                                          :type :group
-                                          :name "Alice & Bob"
-                                          :created 426307670
-                                          :revoked 432500000
-                                          :members #{1 2}}}
+                    :accounts {:acc-type/general {0 {:id 0
+                                                     :type :acc-type/general
+                                                     :name "Common"
+                                                     :created 426300760
+                                                     :revoked 426320300
+                                                     :members #{1 2}}
+                                                  5 {:id 5
+                                                     :type :acc-type/general
+                                                     :name "Common"
+                                                     :created 426320300
+                                                     :revoked 432500000
+                                                     :members #{1 2 3}}
+                                                  6 {:id 6
+                                                     :type :acc-type/general
+                                                     :name "Common"
+                                                     :created 432500000
+                                                     :members #{1 2}}}
+                               :acc-type/personal {1 {:id 1
+                                                      :type :acc-type/personal
+                                                      :name "Alice"
+                                                      :created 426300760
+                                                      :msg-id 3
+                                                      :user-id 1400000000}
+                                                   2 {:id 2
+                                                      :type :acc-type/personal
+                                                      :name "Bob"
+                                                      :created 426301230
+                                                      :msg-id 4
+                                                      :user-id 1200000000}
+                                                   3 {:id 3
+                                                      :type :acc-type/personal
+                                                      :name "Carl"
+                                                      :created 426320300
+                                                      :revoked 432500000
+                                                      :msg-id 5
+                                                      :user-id 2000000000}}
+                               :acc-type/group {4 {:id 4
+                                                   :type :acc-type/group
+                                                   :name "Alice & Bob"
+                                                   :created 426307670
+                                                   :revoked 432500000
+                                                   :members #{1 2}}}
                                :last-id 6}
                     ;; TODO: Re-implement ':items' with another data structure.
                     :expenses {:items [{:code "food"

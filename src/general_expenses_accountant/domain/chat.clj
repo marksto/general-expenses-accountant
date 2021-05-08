@@ -16,14 +16,14 @@
    ;; group chat-specific
    :bot-messages {:to-user db/restore-numeric-keys}
    :input db/restore-numeric-keys
-   :accounts {:general [db/restore-numeric-keys
-                        {:* {:type keyword
-                             :members set}}]
-              :personal [db/restore-numeric-keys
-                         {:* {:type keyword}}]
-              :group [db/restore-numeric-keys
-                      {:* {:type keyword
-                           :members set}}]}
+   :accounts {:acc-type/general [db/restore-numeric-keys
+                                 {:* {:type keyword
+                                      :members set}}]
+              :acc-type/personal [db/restore-numeric-keys
+                                  {:* {:type keyword}}]
+              :acc-type/group [db/restore-numeric-keys
+                               {:* {:type keyword
+                                    :members set}}]}
    :expenses {:popularity db/restore-string-keys}
    :user-account-mapping db/restore-numeric-keys})
 
