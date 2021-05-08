@@ -582,6 +582,14 @@
   [acc-type chat-data]
   (map key (get-in chat-data [:accounts acc-type])))
 
+(defn- is-account-revoked?
+  [acc]
+  (contains? acc :revoked))
+
+(defn- is-account-active?
+  [acc]
+  (not (is-account-revoked? acc)))
+
 ;; - ACCOUNTS > GENERAL
 
 (defn- get-current-general-account
@@ -894,11 +902,47 @@
 (defn- get-active-group-chat-accounts
   [chat-id & acc-type]
   (->> (apply get-group-chat-accounts chat-id acc-type)
-       (filter #(not (contains? % :revoked)))))
+       (filter is-account-active?)))
+
+(defn- is-group-acc-member?
+  [group-acc chat-id user-id]
+  (let [group-chat-data (get-chat-data chat-id)
+        pers-acc-id (get-personal-account-id group-chat-data {:user-id user-id})]
+    (contains? (:members group-acc) pers-acc-id)))
+
+(defn- can-rename-account?
+  [chat-id user-id]
+  (fn [acc]
+    (and (is-account-active? acc)
+         (or (and (= :personal (:type acc))
+                  (contains? #{user-id nil} (:user-id acc)))
+             (and (= :group (:type acc))
+                  (is-group-acc-member? acc chat-id user-id))))))
+
+(defn- can-revoke-account?
+  [chat-id user-id]
+  (fn [acc]
+    (and (is-account-active? acc)
+         (or (and (= :personal (:type acc))
+                  (not= (:user-id acc) user-id))
+             (and (= :group (:type acc))
+                  (is-group-acc-member? acc chat-id user-id))))))
+
+(defn- can-reinstate-account?
+  []
+  (fn [acc]
+    (is-account-revoked? acc)))
 
 (defn- get-group-chat-account
   [group-chat-data acc-type acc-id]
   (get-in group-chat-data [:accounts acc-type acc-id]))
+
+(defn- is-group-chat-eligible?
+  [chat-id user-id]
+  (let [group-chat-data (get-chat-data chat-id)
+        pers-acc-id (get-personal-account-id group-chat-data {:user-id user-id})
+        pers-acc (get-group-chat-account group-chat-data :personal pers-acc-id)]
+    (is-account-active? pers-acc)))
 
 (defn- data->account
   "Retrieves a group chat's account by parsing the callback button data."
@@ -1254,13 +1298,7 @@
 (defn- proceed-with-group!
   [chat-id first-name]
   (let [is-eligible? (fn [group-chat-id]
-                       (let [group-chat-data (get-chat-data group-chat-id)
-                             pers-acc-id (get-personal-account-id
-                                           group-chat-data {:user-id chat-id})
-                             pers-acc (get-group-chat-account group-chat-data
-                                                              :personal
-                                                              pers-acc-id)]
-                         (not (contains? pers-acc :revoked))))
+                       (is-group-chat-eligible? group-chat-id chat-id))
         groups (->> (get-chat-data chat-id)
                     get-private-chat-groups
                     (filter is-eligible?))]
@@ -1547,30 +1585,22 @@
           :as callback-query}]
       (when (and (= :group (:chat-type callback-query))
                  (= :accounts-mgmt (:chat-state callback-query)))
-        (encore/when-let [;; TODO: Extract all these predicates into a predefined namespace fns.
-                          filter-revoked-pred (fn [acc]
-                                                (contains? acc :revoked))
-                          filter-active-pred (fn [acc]
-                                               (not (filter-revoked-pred acc)))
-                          handler-fn
+        (encore/when-let [handler-fn
                           (condp = callback-btn-data
                             cd-accounts-create #(proceed-with-account-type-selection!
                                                   chat-id msg-id :select-acc-type)
                             cd-accounts-rename #(proceed-with-account-selection!
                                                   chat-id msg-id callback-query-id
                                                   :rename-account
-                                                  ;; TODO: Specify the predicate more precisely.
-                                                  filter-active-pred)
+                                                  (can-rename-account? chat-id user-id))
                             cd-accounts-revoke #(proceed-with-account-selection!
                                                   chat-id msg-id callback-query-id
                                                   :revoke-account
-                                                  (fn [acc]
-                                                    (and (filter-active-pred acc)
-                                                         (not= (:user-id acc) user-id))))
+                                                  (can-revoke-account? chat-id user-id))
                             cd-accounts-reinstate #(proceed-with-account-selection!
                                                      chat-id msg-id callback-query-id
                                                      :reinstate-account
-                                                     filter-revoked-pred)
+                                                     (can-reinstate-account?))
                             nil)]
           (handler-fn)
           op-succeed))))
