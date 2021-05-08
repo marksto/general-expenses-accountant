@@ -947,50 +947,50 @@
    :waiting #{:waiting
               :ready}
    :ready #{:waiting
-            :manage-accounts
-            :select-group-members
-            :request-new-account-name
-            :request-account-rename
-            :manage-expense-items
-            :manage-shares
+            :accounts-mgmt
+            :group-members-selection
+            :new-account-name-request
+            :account-rename-request
+            :expense-items-mgmt
+            :shares-mgmt
             :ready}
-   :manage-accounts #{:select-acc-type
-                      :rename-account
-                      :revoke-account
-                      :reinstate-account
-                      :ready}
-   :select-acc-type #{:manage-accounts
-                      :ready}
-   :select-group-members #{:select-group-members
-                           :request-new-account-name
-                           :ready}
-   :request-new-account-name #{:ready}
-   :rename-account #{:manage-accounts
-                     :ready}
-   :request-account-rename #{:ready}
-   :revoke-account #{:manage-accounts
-                     :ready}
-   :reinstate-account #{:manage-accounts
-                        :ready}
-   :manage-expense-items #{:ready}
-   :manage-shares #{:ready}})
+   :accounts-mgmt #{:account-type-selection
+                    :account-renaming
+                    :account-revocation
+                    :account-reinstatement
+                    :ready}
+   :account-type-selection #{:accounts-mgmt
+                             :ready}
+   :group-members-selection #{:group-members-selection
+                              :new-account-name-request
+                              :ready}
+   :new-account-name-request #{:ready}
+   :account-renaming #{:accounts-mgmt
+                       :ready}
+   :account-rename-request #{:ready}
+   :account-revocation #{:accounts-mgmt
+                         :ready}
+   :account-reinstatement #{:accounts-mgmt
+                            :ready}
+   :expense-items-mgmt #{:ready}
+   :shares-mgmt #{:ready}})
 
 (def ^:private private-chat-states
   {:initial #{:input}
-   :input {:to #{:select-group
-                 :detail-expense
+   :input {:to #{:group-selection
+                 :expense-detailing
                  :interactive-input
                  :input}
            :init-fn (fn [chat-data]
                       (select-keys chat-data [:groups]))}
-   :interactive-input #{:select-group
-                        :detail-expense
+   :interactive-input #{:group-selection
+                        :expense-detailing
                         :input}
-   :select-group #{:detail-expense
-                   :input}
-   :detail-expense #{:select-account
-                     :input}
-   :select-account #{:input}})
+   :group-selection #{:expense-detailing
+                      :input}
+   :expense-detailing #{:account-selection
+                        :input}
+   :account-selection #{:input}})
 
 (defn- change-chat-state!*
   [chat-type chat-id new-state]
@@ -999,76 +999,76 @@
                       :private private-chat-states)]
     (change-chat-state! chat-states chat-id new-state)))
 
-;; TODO: The names of transitions and states are confused. Fix this!
 (def ^:private state-transitions
-  {:group {:show-intro {:to-state :waiting
-                        :message introduction-msg}
-           :request-account-names {:to-state :waiting
-                                   :message personal-account-name-request-msg}
-           :waiting-for-others {:to-state :waiting
+  {:group {:show-introduction {:to-state :waiting
+                               :message introduction-msg}
+           :request-acc-names {:to-state :waiting
+                               :message personal-account-name-request-msg}
+           :show-accounts-left {:to-state :waiting
                                 :message-fn get-personal-accounts-left-msg
                                 :message-params [:uncreated-count]}
            :declare-readiness {:to-state :ready
                                :message-fn get-bot-readiness-msg
                                :message-params [:bot-username]}
 
-           :accounts-mgmt {:to-state :manage-accounts
-                           :message accounts-mgmt-options-msg}
-           :account-type-selection {:to-state :select-acc-type
-                                    :message-fn get-account-type-selection-msg
-                                    :message-params [:account-types :extra-buttons]}
-           :request-acc-name {:to-state :request-new-account-name
+           :manage-accounts {:to-state :accounts-mgmt
+                             :message accounts-mgmt-options-msg}
+           :select-acc-type {:to-state :account-type-selection
+                             :message-fn get-account-type-selection-msg
+                             :message-params [:account-types :extra-buttons]}
+           :request-acc-name {:to-state :new-account-name-request
                               :message-fn get-new-account-name-request-msg
                               :message-params [:user]}
-           :request-group-members {:to-state :select-group-members
-                                   :message-fn get-new-member-selection-msg
-                                   :message-params [:accounts]}
-           :account-renaming {:to-state :rename-account
-                              :message-fn get-account-selection-msg
-                              :message-params [:accounts :txt :extra-buttons]}
-           :request-acc-rename {:to-state :request-account-rename
-                                :message-fn get-account-rename-request-msg
-                                :message-params [:user :acc-name]}
-           :account-revocation {:to-state :revoke-account
-                                :message-fn get-account-selection-msg
-                                :message-params [:accounts :txt :extra-buttons]}
-           :account-reinstatement {:to-state :reinstate-account
-                                   :message-fn get-account-selection-msg
-                                   :message-params [:accounts :txt :extra-buttons]}
+           :select-group-members {:to-state :group-members-selection
+                                  :message-fn get-new-member-selection-msg
+                                  :message-params [:accounts]}
+           :rename-account {:to-state :account-renaming
+                            :message-fn get-account-selection-msg
+                            :message-params [:accounts :txt :extra-buttons]}
+           :request-acc-new-name {:to-state :account-rename-request
+                                  :message-fn get-account-rename-request-msg
+                                  :message-params [:user :acc-name]}
+           :revoke-account {:to-state :account-revocation
+                            :message-fn get-account-selection-msg
+                            :message-params [:accounts :txt :extra-buttons]}
+           :reinstate-account {:to-state :account-reinstatement
+                               :message-fn get-account-selection-msg
+                               :message-params [:accounts :txt :extra-buttons]}
 
-           :expense-items-mgmt {:to-state :manage-expense-items}
-           :shares-mgmt {:to-state :manage-shares}
+           :manage-expense-items {:to-state :expense-items-mgmt}
+
+           :manage-shares {:to-state :shares-mgmt}
 
            :restore-intro {:to-state :ready
                            :message introduction-msg}
-           :successful-changes {:to-state :ready
-                                :message successful-changes-msg}}
+           :notify-changes-success {:to-state :ready
+                                    :message successful-changes-msg}}
 
-   :private {:amount-input {:to-state :input
-                            :message-fn get-private-introduction-msg
-                            :message-params [:first-name]}
-             :interactive-input {:to-state :interactive-input
-                                 :message-fn get-interactive-input-msg
-                                 :message-params [:user-input]}
-             :group-selection {:to-state :select-group
-                               :message-fn get-group-selection-msg
-                               :message-params [:group-refs]}
-             :expense-item-selection {:to-state :detail-expense
-                                      :message-fn get-expense-item-selection-msg
-                                      :message-params [:expense-items]}
-             :manual-expense-description {:to-state :detail-expense
-                                          :message-fn get-expense-manual-description-msg
-                                          :message-params [:first-name]}
-             :accounts-selection {:to-state :select-account
-                                  :message-fn get-account-selection-msg
-                                  :message-params [:accounts :txt]}
+   :private {:request-amount {:to-state :input
+                              :message-fn get-private-introduction-msg
+                              :message-params [:first-name]}
+             :show-calculator {:to-state :interactive-input
+                               :message-fn get-interactive-input-msg
+                               :message-params [:user-input]}
+             :select-group {:to-state :group-selection
+                            :message-fn get-group-selection-msg
+                            :message-params [:group-refs]}
+             :select-expense-item {:to-state :expense-detailing
+                                   :message-fn get-expense-item-selection-msg
+                                   :message-params [:expense-items]}
+             :request-expense-desc {:to-state :expense-detailing
+                                    :message-fn get-expense-manual-description-msg
+                                    :message-params [:first-name]}
+             :select-account {:to-state :account-selection
+                              :message-fn get-account-selection-msg
+                              :message-params [:accounts :txt]}
 
-             :successful-input {:to-state :input
-                                :message expense-added-successfully-msg}
-             :failed-input {:to-state :input
-                            :message-fn get-failed-to-add-new-expense-msg
-                            :message-params [:reason]}
-             :canceled-input {:to-state :input}}})
+             :cancel-input {:to-state :input}
+             :notify-input-success {:to-state :input
+                                    :message expense-added-successfully-msg}
+             :notify-input-failure {:to-state :input
+                                    :message-fn get-failed-to-add-new-expense-msg
+                                    :message-params [:reason]}}})
 
 (defn- handle-state-transition
   [chat-id event]
@@ -1189,7 +1189,7 @@
       (catch Exception e
         ;; TODO: Retry to log the failed transaction?
         (log/error e "Failed to log transaction:" new-transaction)
-        (proceed-and-respond! chat-id {:transition [:private :failed-input]
+        (proceed-and-respond! chat-id {:transition [:private :notify-input-failure]
                                        :params {:reason data-persistence-error}}))
       (else
         (let [pers-accs-count (count (get-account-ids-of-type
@@ -1205,7 +1205,7 @@
                                                    payer-acc-name
                                                    debtor-acc-name)]
           (respond! (assoc new-expense-msg :chat-id group-chat-id)))
-        (proceed-and-respond! chat-id {:transition [:private :successful-input]})))))
+        (proceed-and-respond! chat-id {:transition [:private :notify-input-success]})))))
 
 ;; TODO: Abstract this away — "selecting 1 of N, with a special case for N=1".
 (defn- proceed-with-account!
@@ -1215,13 +1215,13 @@
     (cond
       (< 1 (count accounts))
       (let [other-accounts (filter #(not= (:user-id %) chat-id) accounts)]
-        (proceed-and-respond! chat-id {:transition [:private :accounts-selection]
+        (proceed-and-respond! chat-id {:transition [:private :select-account]
                                        :params {:accounts other-accounts
                                                 :txt select-payer-account-txt}}))
       (empty? accounts)
       (do
         (log/error "No eligible accounts to select a debtor account from")
-        (proceed-and-respond! chat-id {:transition [:private :failed-input]
+        (proceed-and-respond! chat-id {:transition [:private :notify-input-failure]
                                        :params {:reason no-debtor-account-error}}))
       :else
       (let [debtor-acc (first accounts)]
@@ -1232,9 +1232,9 @@
   [chat-id group-chat-id first-name]
   (let [expense-items (get-group-chat-expense-items group-chat-id)
         event (if (seq expense-items)
-                {:transition [:private :expense-item-selection]
+                {:transition [:private :select-expense-item]
                  :params {:expense-items expense-items}}
-                {:transition [:private :manual-expense-description]
+                {:transition [:private :request-expense-desc]
                  :params {:first-name first-name}})]
     (proceed-and-respond! chat-id event)))
 
@@ -1255,12 +1255,12 @@
     (cond
       (< 1 (count groups))
       (let [group-refs (map ->group-ref groups)]
-        (proceed-and-respond! chat-id {:transition [:private :group-selection]
+        (proceed-and-respond! chat-id {:transition [:private :select-group]
                                        :params {:group-refs group-refs}}))
       (empty? groups)
       (do
         (log/error "No eligible groups to record expenses to")
-        (proceed-and-respond! chat-id {:transition [:private :failed-input]
+        (proceed-and-respond! chat-id {:transition [:private :notify-input-failure]
                                        :params {:reason no-group-to-record-error}}))
       :else
       (let [group-chat-id (first groups)]
@@ -1276,14 +1276,14 @@
   [chat-id]
   (proceed-and-respond-attentively!
     chat-id
-    {:transition [:group :show-intro]}
+    {:transition [:group :show-introduction]}
     #(->> % :message_id (set-bot-msg-id! chat-id :intro-msg-id))))
 
 (defn- proceed-with-personal-accounts-creation!
   [chat-id]
   (proceed-and-respond-attentively!
     chat-id
-    {:transition [:group :request-account-names]}
+    {:transition [:group :request-acc-names]}
     #(->> % :message_id (set-bot-msg-id! chat-id :name-request-msg-id))))
 
 (defn- proceed-with-account-type-selection!
@@ -1314,7 +1314,7 @@
     (proceed-with-account-naming! chat-id user)
     :group
     (let [personal-accs (get-accounts-of-type :personal (get-chat-data chat-id))]
-      (proceed-and-respond! chat-id {:transition [:group :request-group-members]
+      (proceed-and-respond! chat-id {:transition [:group :select-group-members]
                                      :params {:accounts personal-accs}}))))
 
 (defn- proceed-with-account-member-selection!
@@ -1325,7 +1325,7 @@
         remaining-accs (set/difference personal-accs selected-accs)]
     (when (seq remaining-accs)
       (proceed-and-replace-response! chat-id
-                                     {:transition [:group :request-group-members]
+                                     {:transition [:group :select-group-members]
                                       :params {:accounts remaining-accs}}
                                      msg-id))))
 
@@ -1356,7 +1356,7 @@
                        assoc-in [:input user-id :rename-account] input-data))
   (proceed-and-respond-attentively!
     chat-id
-    {:transition [:group :request-acc-rename]
+    {:transition [:group :request-acc-new-name]
      :params {:user user
               :acc-name (:name acc-to-rename)}}
     #(->> % :message_id
@@ -1372,7 +1372,7 @@
   [{chat-id :id :as chat}
    {first-name :first_name :as _user}]
   (log/debug "Conversation started in a private chat:" chat)
-  (proceed-and-respond! chat-id {:transition [:private :amount-input]
+  (proceed-and-respond! chat-id {:transition [:private :request-amount]
                                  :params {:first-name first-name}}))
 
 ;; TODO: Implement proper '/help' message (w/ the list of commands, etc.).
@@ -1387,12 +1387,12 @@
   [{chat-id :id :as chat}]
   (when (= :input (get-chat-state chat-id))
     (log/debug "Calculator opened in a private chat:" chat)
-    (proceed-and-respond! chat-id {:transition [:private :interactive-input]})))
+    (proceed-and-respond! chat-id {:transition [:private :show-calculator]})))
 
 (defn- cmd-private-cancel
   [{chat-id :id :as chat}]
   (log/debug "The operation is canceled in a private chat:" chat)
-  (handle-state-transition chat-id {:transition [:private :canceled-input]}))
+  (handle-state-transition chat-id {:transition [:private :cancel-input]}))
 
 ; group chats
 
@@ -1529,7 +1529,7 @@
                  (= :ready (:chat-state callback-query))
                  (= cd-accounts callback-btn-data))
         (proceed-and-replace-response! chat-id
-                                       {:transition [:group :accounts-mgmt]}
+                                       {:transition [:group :manage-accounts]}
                                        msg-id)
         op-succeed)))
 
@@ -1540,7 +1540,7 @@
           callback-btn-data :data
           :as callback-query}]
       (when (and (= :group (:chat-type callback-query))
-                 (= :manage-accounts (:chat-state callback-query)))
+                 (= :accounts-mgmt (:chat-state callback-query)))
         (encore/when-let [;; TODO: Extract all these predicates into a predefined namespace fns.
                           filter-revoked-pred (fn [acc]
                                                 (contains? acc :revoked))
@@ -1549,21 +1549,21 @@
                           handler-fn
                           (condp = callback-btn-data
                             cd-accounts-create #(proceed-with-account-type-selection!
-                                                  chat-id msg-id :account-type-selection)
+                                                  chat-id msg-id :select-acc-type)
                             cd-accounts-rename #(proceed-with-account-selection!
                                                   chat-id msg-id callback-query-id
-                                                  :account-renaming
+                                                  :rename-account
                                                   ;; TODO: Specify the predicate more precisely.
                                                   filter-active-pred)
                             cd-accounts-revoke #(proceed-with-account-selection!
                                                   chat-id msg-id callback-query-id
-                                                  :account-revocation
+                                                  :revoke-account
                                                   (fn [acc]
                                                     (and (filter-active-pred acc)
                                                          (not= (:user-id acc) user-id))))
                             cd-accounts-reinstate #(proceed-with-account-selection!
                                                      chat-id msg-id callback-query-id
-                                                     :account-reinstatement
+                                                     :reinstate-account
                                                      filter-revoked-pred)
                             nil)]
           (handler-fn)
@@ -1575,7 +1575,7 @@
           callback-btn-data :data
           :as callback-query}]
       (when (and (= :group (:chat-type callback-query))
-                 (= :select-acc-type (:chat-state callback-query))
+                 (= :account-type-selection (:chat-state callback-query))
                  (str/starts-with? callback-btn-data cd-account-type-prefix))
         (proceed-and-replace-response! chat-id
                                        {:transition [:group :restore-intro]}
@@ -1592,7 +1592,7 @@
           callback-btn-data :data
           :as callback-query}]
       (when (and (= :group (:chat-type callback-query))
-                 (= :select-group-members (:chat-state callback-query))
+                 (= :group-members-selection (:chat-state callback-query))
                  (str/starts-with? callback-btn-data cd-account-prefix))
         (let [chat-data (get-chat-data chat-id)
               new-member (data->account callback-btn-data chat-data)
@@ -1615,7 +1615,7 @@
           callback-btn-data :data
           :as callback-query}]
       (when (and (= :group (:chat-type callback-query))
-                 (= :select-group-members (:chat-state callback-query))
+                 (= :group-members-selection (:chat-state callback-query))
                  (= cd-done callback-btn-data))
         ;; TODO: Replace the 'msg-id' w/ a text listing all selected members.
         (proceed-with-account-naming! chat-id user)
@@ -1627,7 +1627,7 @@
           callback-btn-data :data
           :as callback-query}]
       (when (and (= :group (:chat-type callback-query))
-                 (= :rename-account (:chat-state callback-query))
+                 (= :account-renaming (:chat-state callback-query))
                  (str/starts-with? callback-btn-data cd-account-prefix))
         (proceed-and-replace-response! chat-id
                                        {:transition [:group :restore-intro]}
@@ -1642,7 +1642,7 @@
           callback-btn-data :data
           :as callback-query}]
       (when (and (= :group (:chat-type callback-query))
-                 (= :revoke-account (:chat-state callback-query))
+                 (= :account-revocation (:chat-state callback-query))
                  (str/starts-with? callback-btn-data cd-account-prefix))
         (let [chat-data (get-chat-data chat-id)
               account-to-revoke (data->account callback-btn-data chat-data)
@@ -1663,7 +1663,7 @@
           callback-btn-data :data
           :as callback-query}]
       (when (and (= :group (:chat-type callback-query))
-                 (= :reinstate-account (:chat-state callback-query))
+                 (= :account-reinstatement (:chat-state callback-query))
                  (str/starts-with? callback-btn-data cd-account-prefix))
         (let [chat-data (get-chat-data chat-id)
               account-to-reinstate (data->account callback-btn-data chat-data)]
@@ -1687,11 +1687,11 @@
                  (= :ready (:chat-state callback-query))
                  (= cd-expense-items callback-btn-data))
         (proceed-and-replace-response! chat-id
-                                       {:transition [:group :expense-items-mgmt]}
+                                       {:transition [:group :manage-expense-items]}
                                        msg-id)
         op-succeed)))
 
-  ;; TODO: Implement handlers for ':manage-expense-items'.
+  ;; TODO: Implement handlers for ':expense-items-mgmt'.
 
   (m-hlr/callback-fn
     (fn [{{msg-id :message_id {chat-id :id} :chat} :message
@@ -1701,11 +1701,11 @@
                  (= :ready (:chat-state callback-query))
                  (= cd-shares callback-btn-data))
         (proceed-and-replace-response! chat-id
-                                       {:transition [:group :shares-mgmt]}
+                                       {:transition [:group :manage-shares]}
                                        msg-id)
         op-succeed)))
 
-  ;; TODO: Implement handlers for ':manage-shares'.
+  ;; TODO: Implement handlers for ':shares-mgmt'.
 
   (m-hlr/callback-fn
     (fn [{{msg-id :message_id {chat-id :id} :chat} :message
@@ -1714,10 +1714,11 @@
       (when (and (= :group (:chat-type callback-query))
                  (= cd-back callback-btn-data))
         (when-let [state-transition-name
-                   (condp contains? (:chat-state callback-query)
-                     #{:ready} :restore-intro ;; for when something went wrong
-                     #{:manage-accounts :manage-expense-items :manage-shares} :restore-intro
-                     #{:select-acc-type :rename-account :revoke-account :reinstate-account} :accounts-mgmt
+                   (case (:chat-state callback-query)
+                     (:ready) :restore-intro ;; for when something went wrong
+                     (:accounts-mgmt :expense-items-mgmt :shares-mgmt) :restore-intro
+                     (:account-type-selection :account-renaming
+                       :account-revocation :account-reinstatement) :manage-accounts
                      nil)]
           (proceed-and-replace-response! chat-id
                                          {:transition [:group state-transition-name]}
@@ -1730,7 +1731,7 @@
           callback-btn-data :data
           :as callback-query}]
       (when (and (= :private (:chat-type callback-query))
-                 (= :select-group (:chat-state callback-query))
+                 (= :group-selection (:chat-state callback-query))
                  (str/starts-with? callback-btn-data cd-group-chat-prefix))
         (let [group-chat-id-str (str/replace-first callback-btn-data cd-group-chat-prefix "")
               group-chat-id (nums/parse-int group-chat-id-str)]
@@ -1743,7 +1744,7 @@
           callback-btn-data :data
           :as callback-query}]
       (when (and (= :private (:chat-type callback-query))
-                 (= :detail-expense (:chat-state callback-query))
+                 (= :expense-detailing (:chat-state callback-query))
                  (str/starts-with? callback-btn-data cd-expense-item-prefix))
         (let [expense-item (str/replace-first callback-btn-data cd-expense-item-prefix "")]
           (assoc-in-chat-data! chat-id [:expense-item] expense-item)
@@ -1755,7 +1756,7 @@
           callback-btn-data :data
           :as callback-query}]
       (when (and (= :private (:chat-type callback-query))
-                 (= :select-account (:chat-state callback-query))
+                 (= :account-selection (:chat-state callback-query))
                  (str/starts-with? callback-btn-data cd-account-prefix))
         (let [group-chat-id (:group (get-chat-data chat-id))
               group-chat-data (get-chat-data group-chat-id)
@@ -1782,7 +1783,7 @@
                 new-user-input (update-user-input! chat-id non-terminal-operation)]
             (when (not= old-user-input new-user-input)
               (proceed-and-replace-response! chat-id
-                                             {:transition [:private :interactive-input]
+                                             {:transition [:private :show-calculator]
                                               :params {:user-input new-user-input}}
                                              msg-id)))
           op-succeed))))
@@ -1910,7 +1911,7 @@
               event (if (zero? uncreated-count)
                       {:transition [:group :declare-readiness]
                        :params {:bot-username (get @*bot-user :username)}}
-                      {:transition [:group :waiting-for-others]
+                      {:transition [:group :show-accounts-left]
                        :params {:uncreated-count uncreated-count}})]
           (proceed-and-respond! chat-id event))
         op-succeed)))
@@ -1923,7 +1924,7 @@
       (when (and (= :group (:chat-type message))
                  ;; TODO: Check if it blocks other users' interactions.
                  ;;       Re-implement w/o the state transition, if so.
-                 (= :request-new-account-name (:chat-state message))
+                 (= :new-account-name-request (:chat-state message))
                  (is-reply-to-bot? chat-id
                                    [:to-user user-id :request-acc-name-msg-id]
                                    message))
@@ -1942,7 +1943,7 @@
           (update-chat-data! chat-id
                              update-in [:input user-id] dissoc :create-account)
 
-          (proceed-and-respond! chat-id {:transition [:group :successful-changes]}))
+          (proceed-and-respond! chat-id {:transition [:group :notify-changes-success]}))
         op-succeed)))
 
   (m-hlr/message-fn
@@ -1953,7 +1954,7 @@
       (when (and (= :group (:chat-type message))
                  ;; TODO: Check if it blocks other users' interactions.
                  ;;       Re-implement w/o the state transition, if so.
-                 (= :request-account-rename (:chat-state message))
+                 (= :account-rename-request (:chat-state message))
                  (is-reply-to-bot? chat-id
                                    [:to-user user-id :request-rename-msg-id]
                                    message))
@@ -1971,7 +1972,7 @@
           (update-chat-data! chat-id
                              update-in [:input user-id] dissoc :rename-account)
 
-          (proceed-and-respond! chat-id {:transition [:group :successful-changes]}))
+          (proceed-and-respond! chat-id {:transition [:group :notify-changes-success]}))
         op-succeed)))
 
   (m-hlr/message-fn
@@ -2023,7 +2024,7 @@
     (fn [{text :text {chat-id :id} :chat
           :as message}]
       (when (and (= :private (:chat-type message))
-                 (= :detail-expense (:chat-state message)))
+                 (= :expense-detailing (:chat-state message)))
         (log/debugf "Expense description: \"%s\"" text)
         (assoc-in-chat-data! chat-id [:expense-desc] text)
         (proceed-with-account! chat-id)
