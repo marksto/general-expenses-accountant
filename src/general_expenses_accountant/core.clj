@@ -37,6 +37,8 @@
     (log/debug "Identified myself:" bot-user)
     (reset! *bot-user bot-user))
 
+  ;; TODO: Send the list of supported commands w/ 'setMyCommands'.
+
   (let [chats (chats/select-all)
         ids (map :id chats)]
     (log/debug "Total chats uploaded from the DB:" (count chats))

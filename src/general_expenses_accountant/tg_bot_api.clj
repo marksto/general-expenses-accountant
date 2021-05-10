@@ -16,6 +16,7 @@
   ([user]
    ;; NB: This is the default option since the User always have a 'first_name' and an 'id'.
    (get-user-mention-text user :by-name))
+  ;; TODO: Have to escape the user names?
   ([{user-id :id first-name :first_name ?last-name :last_name ?username :username :as user}
     mention-type]
    {:pre [(contains? mention-types mention-type)]}

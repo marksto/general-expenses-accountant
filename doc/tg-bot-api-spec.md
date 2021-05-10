@@ -187,3 +187,7 @@ action  	String          	Yes     	Type of action to broadcast. Choose one, depe
         	                	        	- `find_location` for location data, 
         	                	        	- `record_video_note` or `upload_video_note` for video notes.
 ```
+
+## /setMyCommands
+
+;; TODO: Describe.
