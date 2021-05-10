@@ -289,11 +289,19 @@
 
 ;; TODO: Add messages for 'shares' here.
 
-(def ^:private personal-account-name-request-msg
+(defn- get-personal-account-name-request-msg
+  [?chat-members]
   {:type :text
-   :text "Как будет называться ваш личный счёт?"
+   :text (let [request-txt "как будет называться ваш личный счёт?"]
+           (if (some? ?chat-members)
+             (let [mentions (for [user ?chat-members]
+                              (tg-api/get-user-mention-text user))]
+               (str (str/join " " mentions) ", " request-txt))
+             (str/capitalize request-txt)))
    :options (tg-api/build-message-options
-              {:reply-markup (tg-api/build-reply-markup :force-reply)})})
+              {:reply-markup (tg-api/build-reply-markup
+                               :force-reply {:selective (some? ?chat-members)})
+               :parse-mode "MarkdownV2"})})
 
 (defn- get-personal-accounts-left-msg
   [count]
@@ -574,6 +582,7 @@
   [chat-id]
   (-> (get-chat-data chat-id) :accounts :last-id inc))
 
+;; TODO: Differentiate on usage scenario (all vs. active only).
 (defn- get-accounts-of-type
   [acc-type chat-data]
   (map val (get-in chat-data [:accounts acc-type])))
@@ -594,58 +603,64 @@
 
 (defn- get-current-general-account
   [chat-data]
-  (let [gen-accs (get-accounts-of-type :acc-type/general chat-data)]
-    (when (seq gen-accs)
-      (apply max-key :id gen-accs))))
+  ;; TODO: A good candidate for extraction (an 'active-only' case).
+  (let [gen-accs (->> chat-data
+                      (get-accounts-of-type :acc-type/general)
+                      (filter is-account-active?))]
+    (if (< 1 (count gen-accs))
+      (do
+        (log/warn "There is more than 1 active general account in chat:" (:id chat-data))
+        (apply max-key :id gen-accs))
+      (first gen-accs))))
 
+;; TODO: Rename into 'update-general-account!'.
 (defn- create-general-account!
-  [chat-id created-dt]
-  (let [updated-chat-data
-        (update-chat-data!
-          chat-id
-          (fn [chat-data]
-            (let [real-chat-id (get-real-chat-id chat-id)
-                  next-id (get-accounts-next-id real-chat-id)
+  ([chat-id created-dt]
+   (create-general-account! chat-id created-dt nil))
+  ([chat-id created-dt {:keys [remove-member add-member] :as _opts}]
+   (let [updated-chat-data
+         (update-chat-data!
+           chat-id
+           (fn [chat-data]
+             (let [real-chat-id (get-real-chat-id chat-id)
+                   next-id (get-accounts-next-id real-chat-id)
 
-                  upd-accounts-next-id-fn
-                  (fn [cd]
-                    (assoc-in cd [:accounts :last-id] next-id))
+                   curr-gen-acc (get-current-general-account chat-data)
+                   ;; TODO: A good candidate for extraction (an 'active-only' case).
+                   old-members (->> chat-data
+                                    (get-accounts-of-type :acc-type/personal)
+                                    (filter is-account-active?)
+                                    (map :id)
+                                    set)
+                   new-members (cond-> old-members
+                                       (some? add-member) (conj add-member)
+                                       (some? remove-member) (disj remove-member))
 
-                  upd-old-general-acc-fn
-                  (fn [cd]
-                    (let [curr-gen-acc (get-current-general-account chat-data)
-                          curr-gen-acc-id (:id curr-gen-acc)]
-                      (if-not (nil? curr-gen-acc)
-                        (assoc-in cd
-                                  [:accounts :acc-type/general curr-gen-acc-id :revoked]
-                                  created-dt)
-                        cd)))
+                   upd-old-general-acc-fn
+                   (fn [cd]
+                     (if-not (nil? curr-gen-acc)
+                       (assoc-in cd
+                                 [:accounts :acc-type/general (:id curr-gen-acc) :revoked]
+                                 created-dt)
+                       cd))
 
-                  add-new-general-acc-fn
-                  (fn [cd]
-                    (let [curr-gen-acc (get-current-general-account chat-data)
-                          acc-name (if (nil? curr-gen-acc)
-                                     default-general-acc-name
-                                     (:name curr-gen-acc))
-                          members (if (nil? curr-gen-acc)
-                                    (get-account-ids-of-type :acc-type/personal chat-data)
-                                    (:members curr-gen-acc))
-                          general-acc (->general-account
-                                        next-id acc-name created-dt members)]
-                      (assoc-in cd [:accounts :acc-type/general next-id] general-acc)))]
-              (-> chat-data
-                  upd-accounts-next-id-fn
-                  upd-old-general-acc-fn
-                  add-new-general-acc-fn))))]
-    (get-current-general-account updated-chat-data)))
-
-(defn- add-general-account-member
-  [general-account new-pers-acc-id]
-  (update general-account :members conj new-pers-acc-id))
-
-(defn- remove-general-account-member
-  [general-account old-pers-acc-id]
-  (update general-account :members disj old-pers-acc-id))
+                   ;; TODO: Extract into the real (logical) 'create-general-account!' fn.
+                   add-new-general-acc-fn
+                   (fn [cd]
+                     ;; IMPLEMENTATION NOTE:
+                     ;; Here the chat 'members-count' have to already be updated!
+                     (if (is-chat-for-group-accounting? cd)
+                       (let [acc-name (:name curr-gen-acc default-general-acc-name)
+                             new-general-acc (->general-account
+                                               next-id acc-name created-dt new-members)]
+                         (-> cd
+                             (assoc-in [:accounts :last-id] next-id)
+                             (assoc-in [:accounts :acc-type/general next-id] new-general-acc)))
+                       cd))]
+               (-> chat-data
+                   upd-old-general-acc-fn
+                   add-new-general-acc-fn))))]
+     (get-current-general-account updated-chat-data))))
 
 ;; - ACCOUNTS > PERSONAL
 
@@ -668,21 +683,28 @@
   (assoc-in chat-data [:user-account-mapping user-id] pers-acc-id))
 
 (defn- get-personal-account
-  [chat-data {?user-id :user-id ?acc-name :name :as ids}]
-  {:pre [(or (some? ?user-id) (some? ?acc-name))]}
-  (if (some? ?user-id)
+  [chat-data {?user-id :user-id ?acc-name :name ?acc-id :acc-id :as ids}]
+  {:pre [(or (some? ?user-id) (some? ?acc-name) (some? ?acc-id))]}
+  (cond
+    (some? ?user-id)
     (let [pers-acc-id (get-personal-account-id chat-data ids)]
       (get-in chat-data [:accounts :acc-type/personal pers-acc-id]))
-    (find-personal-account-by-name chat-data ?acc-name)))
+
+    (some? ?acc-name)
+    (find-personal-account-by-name chat-data ?acc-name)
+
+    (some? ?acc-id)
+    (get-in chat-data [:accounts :acc-type/personal ?acc-id])))
 
 ;; TODO: Rename optional args in all other fns to start w/ '?...' as well.
 (defn- create-personal-account!
   ([chat-id acc-name created-dt]
    (create-personal-account! chat-id acc-name created-dt nil nil))
   ([chat-id acc-name created-dt ?user-id ?first-msg-id]
-   ;; TODO: Add some check for the 'acc-name' uniqueness and a re-request flow.
+   ;; TODO: Add some check for the 'acc-name' uniqueness and an account name re-request flow.
    (when (or (nil? ?user-id)
-             (nil? (get-personal-account-id (get-chat-data chat-id) {:user-id ?user-id}))) ;; petty RC
+             (let [pers-acc (get-personal-account (get-chat-data chat-id) {:user-id ?user-id})] ;; petty RC
+               (or (nil? pers-acc) (is-account-revoked? pers-acc))))
      (let [updated-chat-data
            (update-chat-data!
              chat-id
@@ -700,19 +722,10 @@
                                         next-id acc-name created-dt
                                         ?user-id ?first-msg-id)]
                          (cond-> (assoc-in cd [:accounts :acc-type/personal next-id] pers-acc)
-                                 (some? ?user-id) (set-personal-account-id ?user-id next-id))))
-
-                     upd-general-acc-members-fn
-                     (fn [cd]
-                       (encore/if-let [curr-gen-acc-id (:id (get-current-general-account chat-data))
-                                       curr-gen-acc (get-in cd [:accounts :acc-type/general curr-gen-acc-id])]
-                         (assoc-in cd [:accounts :acc-type/general curr-gen-acc-id]
-                                   (add-general-account-member curr-gen-acc next-id))
-                         cd))]
+                                 (some? ?user-id) (set-personal-account-id ?user-id next-id))))]
                  (-> chat-data
                      upd-accounts-next-id-fn
-                     add-new-personal-acc-fn
-                     upd-general-acc-members-fn))))]
+                     add-new-personal-acc-fn))))]
        (get-personal-account updated-chat-data {:user-id ?user-id :name acc-name})))))
 
 (defn- update-personal-account!
@@ -733,35 +746,20 @@
                       upd-acc-revoked-fn
                       (fn [cd]
                         (if (true? revoke?)
+                          ;; TODO: Update the ':user-account-mapping' here as well?
                           (assoc-in cd [:accounts :acc-type/personal pers-acc-id :revoked] datetime)
                           cd))
 
                       upd-acc-reinstated-fn
                       (fn [cd]
                         (if (true? reinstate?)
+                          ;; TODO: Update the ':user-account-mapping' here as well?
                           (update-in cd [:accounts :acc-type/personal pers-acc-id] dissoc :revoked)
-                          cd))
-
-                      upd-general-acc-members-fn
-                      (fn [cd]
-                        (if (and (or (true? revoke?) (true? reinstate?))
-                                 (some? (get-current-general-account cd)))
-                          (let [new-gen-acc (create-general-account! chat-id datetime)]
-                            (cond
-                              (true? revoke?)
-                              (assoc-in cd [:accounts :acc-type/general (:id new-gen-acc)]
-                                        (remove-general-account-member new-gen-acc pers-acc-id))
-
-                              (true? reinstate?)
-                              (assoc-in cd [:accounts :acc-type/general (:id new-gen-acc)]
-                                        (add-general-account-member new-gen-acc pers-acc-id))))
                           cd))]
                   (-> chat-data
                       upd-acc-name-fn
                       upd-acc-revoked-fn
-                      upd-acc-reinstated-fn
-                      ;; TODO: Need to update group accs that the 'pers-acc-id' is a member of?
-                      upd-general-acc-members-fn))))]
+                      upd-acc-reinstated-fn))))]
         (get-personal-account updated-chat-data {:user-id ?user-id
                                                  :name (or new-name ?acc-name)})))))
 
@@ -954,6 +952,17 @@
                             (keyword "acc-type" (nth account-path 0))
                             (.intValue (biginteger (nth account-path 1))))))
 
+(defn- change-personal-and-related-accounts!
+  [chat-id acc-to-change {:keys [revoke? reinstate? datetime] :as opts}]
+  (let [changed-pers-acc (update-personal-account! chat-id acc-to-change opts)
+        changed-pers-acc-id (:id changed-pers-acc)
+        member-opts (cond
+                      (true? revoke?) {:remove-member changed-pers-acc-id}
+                      (true? reinstate?) {:add-member changed-pers-acc-id})]
+    ;; TODO: Update group accs of which the 'changed-pers-acc-id' is a member.
+    (create-general-account! chat-id datetime member-opts)
+    changed-pers-acc-id))
+
 (defn- get-bot-msg-id
   [chat-id msg-keys]
   (let [ensured-msg-keys (if (coll? msg-keys) msg-keys [msg-keys])]
@@ -1061,7 +1070,8 @@
    {:show-introduction {:to-state :waiting
                         :message introduction-msg}
     :request-acc-names {:to-state :waiting
-                        :message personal-account-name-request-msg}
+                        :message-fn get-personal-account-name-request-msg
+                        :message-params [:chat-members]}
     :show-accounts-left {:to-state :waiting
                          :message-fn get-personal-accounts-left-msg
                          :message-params [:uncreated-count]}
@@ -1333,11 +1343,41 @@
     #(->> % :message_id (set-bot-msg-id! chat-id :intro-msg-id))))
 
 (defn- proceed-with-personal-accounts-creation!
-  [chat-id]
+  [chat-id ?new-chat-members]
   (proceed-and-respond-attentively!
     chat-id
-    {:transition [:chat-type/group :request-acc-names]}
+    {:transition [:chat-type/group :request-acc-names]
+     :params {:chat-members ?new-chat-members}}
     #(->> % :message_id (set-bot-msg-id! chat-id :name-request-msg-id))))
+
+(defn- proceed-with-new-group-chat-finalization!
+  [chat-id]
+  (let [chat-data (get-chat-data chat-id)
+        pers-accs (get-accounts-of-type :acc-type/personal chat-data)
+        last-created (->> pers-accs (apply max-key :created) :created)]
+    ;; NB: Tries to create a new version of the general account
+    ;;     even if the group chat already existed before.
+    (create-general-account! chat-id last-created))
+  (proceed-and-respond! chat-id {:transition [:chat-type/group :declare-readiness]
+                                 :params {:bot-username (get @*bot-user :username)}}))
+
+(defn- proceed-with-new-chat-members!
+  [chat-id new-chat-members]
+  (update-chat-data! chat-id
+                     update :members-count (partial + (count new-chat-members)))
+  (proceed-with-personal-accounts-creation! chat-id new-chat-members))
+
+(defn- proceed-with-left-chat-member!
+  [chat-id left-chat-member]
+  (update-chat-data! chat-id
+                     update :members-count dec)
+  ;; TODO: Report "removed from a chat" event.
+  (let [chat-data (get-chat-data chat-id)
+        pers-acc (get-personal-account chat-data {:user-id (:id left-chat-member)})]
+    (change-personal-and-related-accounts! chat-id
+                                           pers-acc
+                                           {:revoke? true
+                                            :datetime (get-datetime-in-tg-format)})))
 
 (defn- proceed-with-account-type-selection!
   [chat-id msg-id state-transition-name]
@@ -1365,6 +1405,7 @@
     :acc-type/personal
     (proceed-with-account-naming! chat-id user)
     :acc-type/group
+    ;; TODO: It seems to be an 'active-only' case. Filter them out.
     (let [personal-accs (get-accounts-of-type
                           :acc-type/personal (get-chat-data chat-id))]
       (proceed-and-respond! chat-id {:transition [:chat-type/group :select-group-members]
@@ -1373,6 +1414,7 @@
 (defn- proceed-with-account-member-selection!
   [chat-id msg-id already-selected-account-members]
   (let [chat-data (get-chat-data chat-id)
+        ;; TODO: It seems to be an 'active-only' case. Filter them out.
         personal-accs (set (get-accounts-of-type :acc-type/personal chat-data))
         selected-accs (set already-selected-account-members)
         remaining-accs (set/difference personal-accs selected-accs)]
@@ -1685,10 +1727,9 @@
               account-to-revoke (data->account callback-btn-data chat-data)
               datetime (get-datetime-in-tg-format)]
           (case (:type account-to-revoke)
-            :acc-type/personal (update-personal-account! chat-id
-                                                         account-to-revoke
-                                                         {:revoke? true
-                                                          :datetime datetime})
+            :acc-type/personal (change-personal-and-related-accounts!
+                                 chat-id account-to-revoke {:revoke? true
+                                                            :datetime datetime})
             :acc-type/group (throw (Exception. "Not implemented yet")))) ;; TODO!
         (proceed-and-replace-response!
           chat-id {:transition [:chat-type/group :restore-intro]} msg-id)
@@ -1702,13 +1743,14 @@
                  (= :account-reinstatement (:chat-state callback-query))
                  (str/starts-with? callback-btn-data cd-account-prefix))
         (let [chat-data (get-chat-data chat-id)
-              account-to-reinstate (data->account callback-btn-data chat-data)]
+              account-to-reinstate (data->account callback-btn-data chat-data)
+              datetime (get-datetime-in-tg-format)]
           ;; TODO: Check whether we can simply update an existing personal account
           ;;       rather than create a new version w/ 'create-personal-account!'.
           (case (:type account-to-reinstate)
-            :acc-type/personal (update-personal-account! chat-id
-                                                         account-to-reinstate
-                                                         {:reinstate? true})
+            :acc-type/personal (change-personal-and-related-accounts!
+                                 chat-id account-to-reinstate {:reinstate? true
+                                                               :datetime datetime})
             :acc-type/group (throw (Exception. "Not implemented yet")))) ;; TODO!
         (proceed-and-replace-response!
           chat-id {:transition [:chat-type/group :restore-intro]} msg-id)
@@ -1872,27 +1914,19 @@
           {_new-user :user _new-status :status :as _new-chat-member} :new_chat_member
           :as my-chat-member-updated}]
       (log/debug "Bot chat member status updated in:" chat)
+      ;; TODO: Process an event of the bot leaving the chat.
       (if (tg-api/has-joined? my-chat-member-updated)
-        (do
-          (let [token (config/get-prop :bot-api-token)
-                chat-members-count (tg-client/get-chat-members-count token chat-id)
-                new-chat (setup-new-group-chat! chat-id chat-title chat-members-count)
-                chat-data (if (some? new-chat)
-                            (:data new-chat)
-                            (get-chat-data chat-id))]
-            ;; NB: Create a new version of the general account,
-            ;;     even if the group chat already existed.
-            (when (is-chat-for-group-accounting? chat-data)
-              (create-general-account! chat-id date)))
-
-          (when (= :initial (get-chat-state chat-id))
+        (let [token (config/get-prop :bot-api-token)
+              chat-members-count (tg-client/get-chat-members-count token chat-id)
+              new-chat (setup-new-group-chat! chat-id chat-title chat-members-count)]
+          (when (some? new-chat) ;; for newly created groups only!
             (proceed-with-introduction! chat-id)
             ;; NB: It would be nice to update the list of personal
             ;;     accounts with new ones for those users who have
             ;;     joined the group chat during the bot's absence,
             ;;     but this is not feasible, since the chat state
             ;;     may be not ':waiting' at this point.
-            (proceed-with-personal-accounts-creation! chat-id))
+            (proceed-with-personal-accounts-creation! chat-id nil))
           op-succeed)
         (ignore "bot chat member status update dated %s in chat=%s" date chat-id))))
 
@@ -1905,12 +1939,33 @@
           {_new-user :user _new-status :status :as _new-chat-member} :new_chat_member
           :as _chat-member-updated}]
       (log/debug "Chat member status updated in:" chat)
-      ;; TODO: State transition of the group to ':waiting'.
-      ;; TODO: Inc-/decrement the ':members-count' in this group.
-      ;; TODO: Create a general account anew (and check its ':members').
+      ;; NB: The bot must be an administrator in the chat to receive 'chat_member' updates
+      ;;     about other chat members. By default, only 'my_chat_member' updates about the
+      ;;     bot itself are received.
       (ignore "chat member status update dated %s in chat=%s" date chat-id)))
 
   ;; - PLAIN MESSAGES
+
+  (m-hlr/message-fn
+    (fn [{{chat-id :id :as chat} :chat
+          new-chat-members :new_chat_members
+          :as _message}]
+      (when (some? new-chat-members)
+        (log/debug "New chat members in chat:" chat)
+        (let [new-chat-members (filter #(not (:is_bot %)) new-chat-members)]
+          (when (seq new-chat-members)
+            (proceed-with-new-chat-members! chat-id new-chat-members)
+            op-succeed)))))
+
+  (m-hlr/message-fn
+    (fn [{{chat-id :id :as chat} :chat
+          left-chat-member :left_chat_member
+          :as _message}]
+      (when (some? left-chat-member)
+        (log/debug "Chat member left chat:" chat)
+        (when-not (:is_bot left-chat-member)
+          (proceed-with-left-chat-member! chat-id left-chat-member)
+          op-succeed))))
 
   (m-hlr/message-fn
     (fn [{msg-id :message_id group-chat-created :group_chat_created :as _message}]
@@ -1938,14 +1993,11 @@
 
         (let [chat-data (get-chat-data chat-id)
               pers-accs-count (count (get-account-ids-of-type :acc-type/personal chat-data))
-              uncreated-count (get-number-of-missing-personal-accounts
-                                chat-data pers-accs-count)
-              event (if (zero? uncreated-count)
-                      {:transition [:chat-type/group :declare-readiness]
-                       :params {:bot-username (get @*bot-user :username)}}
-                      {:transition [:chat-type/group :show-accounts-left]
-                       :params {:uncreated-count uncreated-count}})]
-          (proceed-and-respond! chat-id event))
+              uncreated-count (get-number-of-missing-personal-accounts chat-data pers-accs-count)]
+          (if (> uncreated-count 0)
+            (proceed-and-respond! chat-id {:transition [:chat-type/group :show-accounts-left]
+                                           :params {:uncreated-count uncreated-count}})
+            (proceed-with-new-group-chat-finalization! chat-id)))
         op-succeed)))
 
   (m-hlr/message-fn
@@ -1966,7 +2018,9 @@
               acc-type (:account-type input-data)
               members (map :id (:account-members input-data))]
           (case acc-type
-            :acc-type/personal (create-personal-account! chat-id text date)
+            :acc-type/personal (do
+                                 (create-personal-account! chat-id text date)
+                                 (create-general-account! chat-id date))
             :acc-type/group (create-group-account! chat-id members text date))
 
           ;; TODO: Extract this common functionality into a dedicated cleanup fn.
