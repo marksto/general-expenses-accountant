@@ -185,7 +185,7 @@
     (build-select-items-options accounts
                                 :name
                                 (constantly :callback_data)
-                                #(str cd-account-prefix (name (:type %)) "-" (:id %)))
+                                #(str cd-account-prefix (name (:type %)) "::" (:id %)))
     extra-buttons))
 
 (defn- account-types->options
@@ -949,7 +949,7 @@
   "Retrieves a group chat's account by parsing the callback button data."
   [callback-btn-data group-chat-data]
   (let [account (str/replace-first callback-btn-data cd-account-prefix "")
-        account-path (str/split account #"-")]
+        account-path (str/split account #"::")]
     (get-group-chat-account group-chat-data
                             (keyword "acc-type" (nth account-path 0))
                             (.intValue (biginteger (nth account-path 1))))))
