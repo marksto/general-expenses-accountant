@@ -617,7 +617,7 @@
                       (filter is-account-active?))]
     (if (< 1 (count gen-accs))
       (do
-        (log/warn "There is more than 1 active general account in chat:" (:id chat-data))
+        (log/warn "There is more than 1 active general account in chat=" (:id chat-data))
         (apply max-key :id gen-accs))
       (first gen-accs))))
 
