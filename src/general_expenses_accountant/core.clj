@@ -205,14 +205,22 @@
 ;; TODO: Make messages texts localizable:
 ;;       - take the ':language_code' of the chat initiator (no personal settings)
 ;;       - externalize texts, keep only their keys (to get them via 'l10n')
-(def ^:private introduction-msg
+(defn- get-introduction-msg
+  [{:keys [chat-members-count first-name]}]
   {:type :text
-   :text "Привет, народ! Я — бот-бухгалтер. И я призван помочь вам с учётом ваших общих расходов.\n
-Для того, чтобы начать работу, просто ответьте на следующее сообщение.\n
-Также меня можно настроить, чтобы учитывались:
+   :text (apply format "Привет, %s! Я — бот-бухгалтер. И я призван помочь %s с учётом ваших общих расходов.\n
+Для того, чтобы начать работу, просто %s на следующее сообщение."
+                (if (= chat-members-count 1) [first-name "тебе" "ответь"] ["народ" "вам" "ответьте каждый"]))})
+
+(defn- get-settings-msg
+  [first-time?]
+  {:type :text
+   ;; TODO: Shorten this text and spreading its content between the mgmt views?
+   :text (format "%s можно настроить, чтобы учитывались:
 - счета — не только личные, но и групповые;
 - статьи расходов — подходящие по смыслу и удобные вам;
 - доли — по умолчанию равные для всех счетов и статей расходов."
+                 (if (true? first-time?) "Также меня" "Меня"))
    :options (tg-api/build-message-options
               {:reply-markup (tg-api/build-reply-markup
                                :inline-keyboard
@@ -1067,9 +1075,7 @@
 
 (def ^:private state-transitions
   {:chat-type/group
-   {:show-introduction {:to-state :waiting
-                        :message introduction-msg}
-    :request-acc-names {:to-state :waiting
+   {:request-acc-names {:to-state :waiting
                         :message-fn get-personal-account-name-request-msg
                         :message-params [:chat-members]}
     :show-accounts-left {:to-state :waiting
@@ -1107,8 +1113,8 @@
 
     :manage-shares {:to-state :shares-mgmt}
 
-    :restore-intro {:to-state :ready
-                    :message introduction-msg}
+    :restore-settings {:to-state :ready
+                       :message (get-settings-msg false)}
     :notify-changes-success {:to-state :ready
                              :message successful-changes-msg}}
 
@@ -1340,12 +1346,16 @@
 
 ; group chats
 
-(defn- proceed-with-introduction!
-  [chat-id]
-  (proceed-and-respond-attentively!
-    chat-id
-    {:transition [:chat-type/group :show-introduction]}
-    #(->> % :message_id (set-bot-msg-id! chat-id :intro-msg-id))))
+(defn- send-group-chat-intro!
+  [chat-id chat-members-count first-name]
+  (let [intro-msg (get-introduction-msg {:chat-members-count chat-members-count
+                                         :first-name first-name})]
+    (respond! (assoc intro-msg :chat-id chat-id))))
+
+(defn- send-group-chat-settings!
+  [chat-id first-time?]
+  (let [settings-msg (get-settings-msg first-time?)]
+    (respond! (assoc settings-msg :chat-id chat-id))))
 
 (defn- proceed-with-personal-accounts-creation!
   [chat-id ?new-chat-members]
@@ -1363,8 +1373,10 @@
     ;; NB: Tries to create a new version of the general account
     ;;     even if the group chat already existed before.
     (create-general-account! chat-id last-created))
+  ;; TODO: It may be better to merge these two separate messages into a single one.
   (proceed-and-respond! chat-id {:transition [:chat-type/group :declare-readiness]
-                                 :params {:bot-username (get @*bot-user :username)}}))
+                                 :params {:bot-username (get @*bot-user :username)}})
+  (send-group-chat-settings! chat-id true))
 
 (defn- proceed-with-new-chat-members!
   [chat-id new-chat-members]
@@ -1666,7 +1678,7 @@
                  (= :account-type-selection (:chat-state callback-query))
                  (str/starts-with? callback-btn-data cd-account-type-prefix))
         (proceed-and-replace-response!
-          chat-id {:transition [:chat-type/group :restore-intro]} msg-id)
+          chat-id {:transition [:chat-type/group :restore-settings]} msg-id)
         (let [acc-type-name (str/replace-first callback-btn-data
                                                cd-account-type-prefix "")
               acc-type (keyword "acc-type" acc-type-name)]
@@ -1715,7 +1727,7 @@
                  (= :account-renaming (:chat-state callback-query))
                  (str/starts-with? callback-btn-data cd-account-prefix))
         (proceed-and-replace-response!
-          chat-id {:transition [:chat-type/group :restore-intro]} msg-id)
+          chat-id {:transition [:chat-type/group :restore-settings]} msg-id)
         (let [chat-data (get-chat-data chat-id)
               account-to-rename (data->account callback-btn-data chat-data)]
           (proceed-with-account-renaming! chat-id user account-to-rename))
@@ -1737,7 +1749,7 @@
                                                             :datetime datetime})
             :acc-type/group (throw (Exception. "Not implemented yet")))) ;; TODO!
         (proceed-and-replace-response!
-          chat-id {:transition [:chat-type/group :restore-intro]} msg-id)
+          chat-id {:transition [:chat-type/group :restore-settings]} msg-id)
         op-succeed)))
 
   (m-hlr/callback-fn
@@ -1758,7 +1770,7 @@
                                                                :datetime datetime})
             :acc-type/group (throw (Exception. "Not implemented yet")))) ;; TODO!
         (proceed-and-replace-response!
-          chat-id {:transition [:chat-type/group :restore-intro]} msg-id)
+          chat-id {:transition [:chat-type/group :restore-settings]} msg-id)
         op-succeed)))
 
   (m-hlr/callback-fn
@@ -1795,8 +1807,8 @@
                  (= cd-back callback-btn-data))
         (when-let [state-transition-name
                    (case (:chat-state callback-query)
-                     (:ready) :restore-intro ;; for when something went wrong
-                     (:accounts-mgmt :expense-items-mgmt :shares-mgmt) :restore-intro
+                     (:ready) :restore-settings ;; for when something went wrong
+                     (:accounts-mgmt :expense-items-mgmt :shares-mgmt) :restore-settings
                      (:account-type-selection :account-renaming
                        :account-revocation :account-reinstatement) :manage-accounts
                      nil)]
@@ -1912,7 +1924,7 @@
 
   (tg-client/bot-chat-member-status-fn
     (fn [{{chat-id :id _type :type chat-title :title _username :username :as chat} :chat
-          {_user-id :id _first-name :first_name _last-name :last_name
+          {_user-id :id first-name :first_name _last-name :last_name
            _username :username _is-bot :is_bot _lang :language_code :as _user} :from
           date :date
           {_old-user :user _old-status :status :as _old-chat-member} :old_chat_member
@@ -1924,14 +1936,19 @@
         (let [token (config/get-prop :bot-api-token)
               chat-members-count (tg-client/get-chat-members-count token chat-id)
               new-chat (setup-new-group-chat! chat-id chat-title chat-members-count)]
-          (when (some? new-chat) ;; for newly created groups only!
-            (proceed-with-introduction! chat-id)
-            ;; NB: It would be nice to update the list of personal
-            ;;     accounts with new ones for those users who have
-            ;;     joined the group chat during the bot's absence,
-            ;;     but this is not feasible, since the chat state
-            ;;     may be not ':waiting' at this point.
-            (proceed-with-personal-accounts-creation! chat-id nil))
+          (if (some? new-chat)
+            (do
+              (send-group-chat-intro! chat-id chat-members-count first-name)
+              ;; NB: It would be nice to update the list of personal
+              ;;     accounts with new ones for those users who have
+              ;;     joined the group chat during the bot's absence,
+              ;;     but this is not feasible, since existing chats
+              ;;     may not be in ':waiting' state at this point.
+              (proceed-with-personal-accounts-creation! chat-id nil))
+            (do
+              (log/debugf "The chat=%s already exists" chat-id)
+              (when (= :waiting (:chat-state my-chat-member-updated))
+                (proceed-with-new-group-chat-finalization! chat-id))))
           op-succeed)
         (ignore "bot chat member status update dated %s in chat=%s" date chat-id))))
 
