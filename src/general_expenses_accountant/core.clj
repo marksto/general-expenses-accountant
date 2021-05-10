@@ -1237,6 +1237,11 @@
 
 ; private chats
 
+(defn- report-added-to-new-chat!
+  [user-id chat-title]
+  (when (can-write-to-user? user-id)
+    (respond! (assoc (get-added-to-new-group-msg chat-title) :chat-id user-id))))
+
 (defn- proceed-with-adding-new-expense!
   [chat-id debtor-acc]
   (let [chat-data (get-chat-data chat-id)
@@ -1977,6 +1982,7 @@
           {user-id :id} :from
           {chat-id :id chat-title :title} :chat
           :as message}]
+      ;; TODO: Figure out how to proceed if someone accidentally closes the reply.
       (when (and (= :chat-type/group (:chat-type message))
                  (= :waiting (:chat-state message))
                  (is-reply-to-bot? chat-id :name-request-msg-id message))
@@ -1987,8 +1993,7 @@
             (update-private-chat-groups! user-id group-chat-id)))
 
         (if (create-personal-account! chat-id text date user-id msg-id)
-          (when (can-write-to-user? user-id)
-            (respond! (assoc (get-added-to-new-group-msg chat-title) :chat-id user-id)))
+          (report-added-to-new-chat! user-id chat-title)
           (update-personal-account! chat-id {:user-id user-id} {:new-name text}))
 
         (let [chat-data (get-chat-data chat-id)
