@@ -21,13 +21,13 @@
 
 ;; STATE
 
+(defonce ^:private *bot-user (atom nil))
+
 ;; TODO: Normally, this should be transformed into a 'cloffeine' cache
 ;;       which periodically auto-evicts the cast-off chats data. Then,
 ;;       the initial data should be truncated, e.g. by an 'updated_at'
 ;;       timestamps, and the data for chats from the incoming requests
 ;;       should be (re)loaded from the DB on demand.
-(defonce ^:private *bot-user (atom nil))
-
 (defonce ^:private *bot-data (atom {}))
 
 (defn init!
@@ -2064,10 +2064,27 @@
           {_user-id :id _first-name :first_name _last-name :last_name
            _username :username _is-bot :is_bot _lang :language_code :as _user} :from
           {_chat-id :id _type :type _chat-title :title _username :username :as chat} :chat
+          _sender-chat :sender_chat
+          _forward-from :forward_from
+          _forward-from-chat :forward_from_chat
+          _forward-from-message-id :forward_from_message_id
+          _forward-signature :forward_signature
+          _forward-sender-name :forward_sender_name
+          _forward-date :forward_date
           _original-msg :reply_to_message ;; for replies
+          _via-bot :via_bot
+          _edit-date :edit_date
+          _author-signature :author_signature
+          _entities :entities
           _new-chat-members :new_chat_members
           _left-chat-member :left_chat_member
+          _new-chat-title :new_chat_title
+          _new-chat-photo :new_chat_photo
+          _delete-chat-photo :delete_chat_photo
           _group-chat-created :group_chat_created
+          _supergroup-chat-created :supergroup_chat_created
+          _channel-chat-created :channel_chat_created
+          _message-auto-delete-timer-changed :message_auto_delete_timer_changed
           _migrate-to-chat-id :migrate_to_chat_id
           _migrate-from-chat-id :migrate_from_chat_id
           _pinned-message :pinned_message
