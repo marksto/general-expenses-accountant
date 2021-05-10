@@ -592,15 +592,6 @@
   [chat-id]
   (-> (get-chat-data chat-id) :accounts :last-id inc))
 
-;; TODO: Differentiate on usage scenario (all vs. active only).
-(defn- get-accounts-of-type
-  [acc-type chat-data]
-  (map val (get-in chat-data [:accounts acc-type])))
-
-(defn- get-account-ids-of-type
-  [acc-type chat-data]
-  (map key (get-in chat-data [:accounts acc-type])))
-
 (defn- is-account-revoked?
   [acc]
   (contains? acc :revoked))
@@ -609,21 +600,29 @@
   [acc]
   (not (is-account-revoked? acc)))
 
+(defn- get-accounts-of-type
+  ([chat-data acc-type]
+   (map val (get-in chat-data [:accounts acc-type])))
+  ([chat-data acc-type filter-pred]
+   (filter filter-pred (get-accounts-of-type chat-data acc-type))))
+
+(defn- get-account-ids-of-type
+  [acc-type chat-data]
+  (map key (get-in chat-data [:accounts acc-type])))
+
 ;; - ACCOUNTS > GENERAL
 
 (defn- get-current-general-account
   [chat-data]
-  ;; TODO: A good candidate for extraction (an 'active-only' case).
-  (let [gen-accs (->> chat-data
-                      (get-accounts-of-type :acc-type/general)
-                      (filter is-account-active?))]
+  (let [gen-accs (get-accounts-of-type chat-data
+                                       :acc-type/general
+                                       is-account-active?)]
     (if (< 1 (count gen-accs))
       (do
         (log/warn "There is more than 1 active general account in chat=" (:id chat-data))
         (apply max-key :id gen-accs))
       (first gen-accs))))
 
-;; TODO: Rename into 'update-general-account!'.
 (defn- create-general-account!
   ([chat-id created-dt]
    (create-general-account! chat-id created-dt nil))
@@ -635,11 +634,10 @@
              (let [real-chat-id (get-real-chat-id chat-id)
                    next-id (get-accounts-next-id real-chat-id)
 
-                   curr-gen-acc (get-current-general-account chat-data)
-                   ;; TODO: A good candidate for extraction (an 'active-only' case).
-                   old-members (->> chat-data
-                                    (get-accounts-of-type :acc-type/personal)
-                                    (filter is-account-active?)
+                   old-gen-acc (get-current-general-account chat-data)
+                   old-members (->> (get-accounts-of-type chat-data
+                                                          :acc-type/personal
+                                                          is-account-active?)
                                     (map :id)
                                     set)
                    new-members (cond-> old-members
@@ -648,19 +646,18 @@
 
                    upd-old-general-acc-fn
                    (fn [cd]
-                     (if-not (nil? curr-gen-acc)
+                     (if (some? old-gen-acc)
                        (assoc-in cd
-                                 [:accounts :acc-type/general (:id curr-gen-acc) :revoked]
+                                 [:accounts :acc-type/general (:id old-gen-acc) :revoked]
                                  created-dt)
                        cd))
 
-                   ;; TODO: Extract into the real (logical) 'create-general-account!' fn.
                    add-new-general-acc-fn
                    (fn [cd]
                      ;; IMPLEMENTATION NOTE:
                      ;; Here the chat 'members-count' have to already be updated!
                      (if (is-chat-for-group-accounting? cd)
-                       (let [acc-name (:name curr-gen-acc default-general-acc-name)
+                       (let [acc-name (:name old-gen-acc default-general-acc-name)
                              new-general-acc (->general-account
                                                next-id acc-name created-dt new-members)]
                          (-> cd
@@ -676,8 +673,9 @@
 
 (defn- find-personal-account-by-name
   [chat-data acc-name]
-  (->> (get-accounts-of-type :acc-type/personal chat-data)
-       (filter #(= (:name %) acc-name))
+  (->> (get-accounts-of-type chat-data
+                             :acc-type/personal
+                             #(= (:name %) acc-name))
        first))
 
 (defn- get-personal-account-id
@@ -756,14 +754,12 @@
                       upd-acc-revoked-fn
                       (fn [cd]
                         (if (true? revoke?)
-                          ;; TODO: Update the ':user-account-mapping' here as well?
                           (assoc-in cd [:accounts :acc-type/personal pers-acc-id :revoked] datetime)
                           cd))
 
                       upd-acc-reinstated-fn
                       (fn [cd]
                         (if (true? reinstate?)
-                          ;; TODO: Update the ':user-account-mapping' here as well?
                           (update-in cd [:accounts :acc-type/personal pers-acc-id] dissoc :revoked)
                           cd))]
                   (-> chat-data
@@ -777,8 +773,9 @@
 
 (defn- find-group-accounts
   [chat-data members]
-  (->> (get-accounts-of-type :acc-type/group chat-data)
-       (filter #(= (:members %) members))))
+  (get-accounts-of-type chat-data
+                        :acc-type/group
+                        #(= (:members %) members)))
 
 (defn- get-latest-group-account
   [chat-data members]
@@ -906,12 +903,7 @@
        (if (= acc-type :acc-type/general)
          (when-let [gen-acc (get-current-general-account chat-data)]
            [gen-acc])
-         (get-accounts-of-type acc-type chat-data))))))
-
-(defn- get-active-group-chat-accounts
-  [chat-id & acc-type]
-  (->> (apply get-group-chat-accounts chat-id acc-type)
-       (filter is-account-active?)))
+         (get-accounts-of-type chat-data acc-type))))))
 
 (defn- is-group-acc-member?
   [group-acc chat-id user-id]
@@ -1293,7 +1285,7 @@
 (defn- proceed-with-account!
   [chat-id]
   (let [group-chat-id (:group (get-chat-data chat-id))
-        accounts (get-active-group-chat-accounts group-chat-id)]
+        accounts (filter (get-group-chat-accounts group-chat-id) is-account-active?)]
     (cond
       (< 1 (count accounts))
       (let [other-accounts (filter #(not= (:user-id %) chat-id) accounts)]
@@ -1370,7 +1362,7 @@
 (defn- proceed-with-new-group-chat-finalization!
   [chat-id]
   (let [chat-data (get-chat-data chat-id)
-        pers-accs (get-accounts-of-type :acc-type/personal chat-data)
+        pers-accs (get-accounts-of-type chat-data :acc-type/personal)
         last-created (->> pers-accs (apply max-key :created) :created)]
     ;; NB: Tries to create a new version of the general account
     ;;     even if the group chat already existed before.
@@ -1424,17 +1416,18 @@
     :acc-type/personal
     (proceed-with-account-naming! chat-id user)
     :acc-type/group
-    ;; TODO: It seems to be an 'active-only' case. Filter them out.
-    (let [personal-accs (get-accounts-of-type
-                          :acc-type/personal (get-chat-data chat-id))]
+    (let [personal-accs (get-accounts-of-type (get-chat-data chat-id)
+                                              :acc-type/personal
+                                              is-account-active?)]
       (proceed-and-respond! chat-id {:transition [:chat-type/group :select-group-members]
                                      :params {:accounts personal-accs}}))))
 
 (defn- proceed-with-account-member-selection!
   [chat-id msg-id already-selected-account-members]
   (let [chat-data (get-chat-data chat-id)
-        ;; TODO: It seems to be an 'active-only' case. Filter them out.
-        personal-accs (set (get-accounts-of-type :acc-type/personal chat-data))
+        personal-accs (set (get-accounts-of-type chat-data
+                                                 :acc-type/personal
+                                                 is-account-active?))
         selected-accs (set already-selected-account-members)
         remaining-accs (set/difference personal-accs selected-accs)]
     (when (seq remaining-accs)
@@ -1449,10 +1442,10 @@
    (proceed-with-account-selection! chat-id msg-id callback-query-id
                                     state-transition-name nil))
   ([chat-id msg-id callback-query-id
-    state-transition-name filter-pred]
+    state-transition-name ?filter-pred]
    (let [eligible-accounts (cond->> (get-group-chat-accounts
                                       chat-id :acc-type/group :acc-type/personal)
-                                    (some? filter-pred) (filter filter-pred))]
+                                    (some? ?filter-pred) (filter ?filter-pred))]
      (if (seq eligible-accounts)
        (proceed-and-replace-response! chat-id
                                       {:transition [:chat-type/group state-transition-name]
