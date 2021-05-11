@@ -136,7 +136,7 @@
 (def ^:private undo-button-text "Отмена")
 (def ^:private done-button-text "Готово")
 (def ^:private default-general-acc-name "общие")
-(def ^:private account-types-names {:acc-type/personal "Личный*"
+(def ^:private account-types-names {:acc-type/personal "Личный*" ;; TODO: Make this '*' optional.
                                     :acc-type/group "Групповой"
                                     :acc-type/general "Общий"})
 (def ^:private select-account-txt "Выберите счёт:")
@@ -224,7 +224,7 @@
    :text (format "%s можно настроить, чтобы учитывались:
 - счета — не только личные, но и групповые;
 - статьи расходов — подходящие по смыслу и удобные вам;
-- доли — по умолчанию равные для всех счетов и статей расходов."
+- доли — по умолчанию равные для всех счетов и статей расходов." ;; TODO: Rewrite copy for "доли".
                  (if (true? first-time?) "Также меня" "Меня"))
    :options (tg-api/build-message-options
               {:reply-markup (tg-api/build-reply-markup
@@ -233,9 +233,17 @@
                                  (tg-api/build-inline-kbd-btn "Статьи" :callback_data cd-expense-items)
                                  (tg-api/build-inline-kbd-btn "Доли" :callback_data cd-shares)]])})})
 
-(def ^:private accounts-mgmt-options-msg
+(defn- get-accounts-mgmt-options-msg
+  [accounts-by-type]
   {:type :text
-   :text "Выберите, что вы хотите сделать со счетами в данной группе:"
+   :text (str "Список счетов данной группы\n\n"
+              ;; TODO: Display the general account, if any, in a special way ("Счёт для общих расходов.").
+              (->> accounts-by-type
+                   (map (fn [[acc-type accounts]]
+                          (str (get account-types-names acc-type) ":\n"
+                               (str/join "\n" (map #(str "- " (:name %)) accounts))))) ;; TODO: Escape MDv2!
+                   (str/join "\n\n"))
+              "\n\nВыберите, что вы хотите сделать:")
    :options (tg-api/build-message-options
               {:reply-markup (tg-api/build-reply-markup
                                :inline-keyboard
@@ -611,8 +619,9 @@
 (defn- get-accounts-of-type
   ([chat-data acc-type]
    (map val (get-in chat-data [:accounts acc-type])))
-  ([chat-data acc-type filter-pred]
-   (filter filter-pred (get-accounts-of-type chat-data acc-type))))
+  ([chat-data acc-type ?filter-pred]
+   (cond->> (get-accounts-of-type chat-data acc-type)
+            (some? ?filter-pred) (filter ?filter-pred))))
 
 (defn- get-account-ids-of-type
   [acc-type chat-data]
@@ -621,15 +630,24 @@
 ;; - ACCOUNTS > GENERAL
 
 (defn- get-current-general-account
-  [chat-data]
-  (let [gen-accs (get-accounts-of-type chat-data
-                                       :acc-type/general
-                                       is-account-active?)]
-    (if (< 1 (count gen-accs))
-      (do
-        (log/warn "There is more than 1 active general account in chat=" (:id chat-data))
-        (apply max-key :id gen-accs))
-      (first gen-accs))))
+  "Retrieves the current (the one that will be used) account of 'general' type
+   from the provided chat data.
+   NB: This function differs from the plain vanilla 'get-accounts-of-type' one
+       in that it filters out inactive (revoked) accounts by default. However,
+       this behavior can be overridden by providing the exact '?filter-pred'.
+       In the latter case, the most recent general account will be returned."
+  ([chat-data]
+   (get-current-general-account chat-data is-account-active?))
+  ([chat-data ?filter-pred]
+   (let [gen-accs (get-accounts-of-type chat-data
+                                        :acc-type/general
+                                        ?filter-pred)]
+     (if (< 1 (count gen-accs))
+       (do
+         (log/warnf "There is more than 1 suitable general account in chat=%s"
+                    (:id chat-data)) ;; it might be ok for custom 'filter-pred'
+         (apply max-key :id gen-accs))
+       (first gen-accs)))))
 
 (defn- create-general-account!
   ([chat-id created-dt]
@@ -681,10 +699,10 @@
 
 (defn- find-personal-account-by-name
   [chat-data acc-name]
-  (->> (get-accounts-of-type chat-data
-                             :acc-type/personal
-                             #(= (:name %) acc-name))
-       first))
+  ;; NB: A personal account's name must be unique.
+  (first (get-accounts-of-type chat-data
+                               :acc-type/personal
+                               #(= (:name %) acc-name))))
 
 (defn- get-personal-account-id
   [chat-data {?user-id :user-id ?acc-name :name :as _ids}]
@@ -897,21 +915,45 @@
     ;; TODO: Sort them according popularity.
     (get-in chat-data [:expenses :items])))
 
+(def ^:private all-account-types
+  [:acc-type/personal :acc-type/group :acc-type/general])
+
 (defn- get-group-chat-accounts
+  "Retrieves accounts of all or specific types (if the 'acc-types' is present)
+   for a group chat with the specified 'chat-id'.
+   NB: This function differs from the plain vanilla 'get-accounts-of-type' one
+       in that it filters out inactive (revoked) accounts by default. However,
+       this behavior can be overridden by providing the exact 'filter-pred'."
   ;; TODO: Sort them according popularity.
   ([chat-id]
-   (get-group-chat-accounts
-     chat-id :acc-type/general :acc-type/group :acc-type/personal))
-  ([chat-id & acc-types]
+   (get-group-chat-accounts chat-id
+                            {:acc-types all-account-types}))
+  ([chat-id {:keys [acc-types filter-pred sort-by-popularity]
+             :or {acc-types all-account-types
+                  filter-pred is-account-active?}}]
    (if (< 1 (count acc-types))
+     ;; multiple types
      (->> acc-types
-          (mapcat (partial get-group-chat-accounts chat-id)))
-     (encore/when-let [chat-data (get-chat-data chat-id)
-                       :let [acc-type (first acc-types)]]
-       (if (= acc-type :acc-type/general)
-         (when-let [gen-acc (get-current-general-account chat-data)]
-           [gen-acc])
-         (get-accounts-of-type chat-data acc-type))))))
+          (mapcat #(get-group-chat-accounts chat-id
+                                            {:acc-types [%]
+                                             :filter-pred filter-pred})))
+     ;; single type
+     (when-let [chat-data (get-chat-data chat-id)]
+       (get-accounts-of-type chat-data (first acc-types) filter-pred)))))
+
+(defn- get-group-chat-accounts-by-type
+  "Retrieves accounts, grouped in a map by account type, for a group chat with
+   the specified 'chat-id'.
+   NB: This function differs from the plain vanilla 'get-accounts-of-type' one
+       in that it filters out inactive (revoked) accounts by default. However,
+       this behavior can be overridden by providing the exact '?filter-pred'."
+  ([chat-id]
+   (get-group-chat-accounts-by-type chat-id is-account-active?))
+  ([chat-id ?filter-pred]
+   (group-by :type
+             (get-group-chat-accounts chat-id
+                                      {:acc-types all-account-types
+                                       :filter-pred ?filter-pred}))))
 
 (defn- is-group-acc-member?
   [group-acc chat-id user-id]
@@ -1088,7 +1130,8 @@
                         :message-params [:bot-username]}
 
     :manage-accounts {:to-state :accounts-mgmt
-                      :message accounts-mgmt-options-msg}
+                      :message-fn get-accounts-mgmt-options-msg
+                      :message-params [:accounts-by-type]}
     :select-acc-type {:to-state :account-type-selection
                       :message-fn get-account-type-selection-msg
                       :message-params [:account-types :extra-buttons]}
@@ -1298,20 +1341,20 @@
 (defn- proceed-with-account!
   [chat-id]
   (let [group-chat-id (:group (get-chat-data chat-id))
-        accounts (filter (get-group-chat-accounts group-chat-id) is-account-active?)]
+        active-accounts (get-group-chat-accounts group-chat-id)]
     (cond
-      (< 1 (count accounts))
-      (let [other-accounts (filter #(not= (:user-id %) chat-id) accounts)]
+      (< 1 (count active-accounts))
+      (let [other-accounts (filter #(not= (:user-id %) chat-id) active-accounts)]
         (proceed-and-respond! chat-id {:transition [:chat-type/private :select-account]
                                        :params {:accounts other-accounts
                                                 :txt select-payer-account-txt}}))
-      (empty? accounts)
+      (empty? active-accounts)
       (do
         (log/error "No eligible accounts to select a debtor account from")
         (proceed-and-respond! chat-id {:transition [:chat-type/private :notify-input-failure]
                                        :params {:reason no-debtor-account-error}}))
       :else
-      (let [debtor-acc (first accounts)]
+      (let [debtor-acc (first active-accounts)]
         (log/debug "Debtor account auto-selected:" debtor-acc)
         (proceed-with-adding-new-expense! chat-id debtor-acc)))))
 
@@ -1374,9 +1417,9 @@
 
 (defn- proceed-with-new-group-chat-finalization!
   [chat-id]
-  (let [chat-data (get-chat-data chat-id)
-        pers-accs (get-accounts-of-type chat-data :acc-type/personal)
-        last-created (->> pers-accs (apply max-key :created) :created)]
+  (let [personal-accs (get-group-chat-accounts chat-id
+                                               {:acc-types [:acc-type/personal]})
+        last-created (->> personal-accs (apply max-key :created) :created)]
     ;; NB: Tries to create a new version of the general account
     ;;     even if the group chat already existed before.
     (create-general-account! chat-id last-created))
@@ -1430,18 +1473,15 @@
     :acc-type/personal
     (proceed-with-account-naming! chat-id user)
     :acc-type/group
-    (let [personal-accs (get-accounts-of-type (get-chat-data chat-id)
-                                              :acc-type/personal
-                                              is-account-active?)]
+    (let [personal-accs (get-group-chat-accounts chat-id
+                                                 {:acc-types [:acc-type/personal]})]
       (proceed-and-respond! chat-id {:transition [:chat-type/group :select-group-members]
                                      :params {:accounts personal-accs}}))))
 
 (defn- proceed-with-account-member-selection!
   [chat-id msg-id already-selected-account-members]
-  (let [chat-data (get-chat-data chat-id)
-        personal-accs (set (get-accounts-of-type chat-data
-                                                 :acc-type/personal
-                                                 is-account-active?))
+  (let [personal-accs (set (get-group-chat-accounts chat-id
+                                                    {:acc-types [:acc-type/personal]}))
         selected-accs (set already-selected-account-members)
         remaining-accs (set/difference personal-accs selected-accs)]
     (when (seq remaining-accs)
@@ -1457,13 +1497,14 @@
                                     state-transition-name nil))
   ([chat-id msg-id callback-query-id
     state-transition-name ?filter-pred]
-   (let [eligible-accounts (cond->> (get-group-chat-accounts
-                                      chat-id :acc-type/group :acc-type/personal)
-                                    (some? ?filter-pred) (filter ?filter-pred))]
-     (if (seq eligible-accounts)
+   (let [eligible-accs (get-group-chat-accounts chat-id
+                                                {:acc-types [:acc-type/group
+                                                             :acc-type/personal]
+                                                 :filter-pred ?filter-pred})]
+     (if (seq eligible-accs)
        (proceed-and-replace-response! chat-id
                                       {:transition [:chat-type/group state-transition-name]
-                                       :params {:accounts eligible-accounts
+                                       :params {:accounts eligible-accs
                                                 :txt select-account-txt
                                                 :extra-buttons [back-button]}}
                                       msg-id)
@@ -1646,8 +1687,10 @@
       (when (and (= :chat-type/group (:chat-type callback-query))
                  (= :ready (:chat-state callback-query))
                  (= cd-accounts callback-btn-data))
-        (proceed-and-replace-response!
-          chat-id {:transition [:chat-type/group :manage-accounts]} msg-id)
+        (let [accounts-by-type (get-group-chat-accounts-by-type chat-id)]
+          (proceed-and-replace-response!
+            chat-id {:transition [:chat-type/group :manage-accounts]
+                     :params {:accounts-by-type accounts-by-type}} msg-id))
         op-succeed)))
 
   (m-hlr/callback-fn
@@ -1814,15 +1857,19 @@
           :as callback-query}]
       (when (and (= :chat-type/group (:chat-type callback-query))
                  (= cd-back callback-btn-data))
-        (when-let [state-transition-name
-                   (case (:chat-state callback-query)
-                     (:ready) :restore-settings ;; for when something went wrong
-                     (:accounts-mgmt :expense-items-mgmt :shares-mgmt) :restore-settings
-                     (:account-type-selection :account-renaming
-                       :account-revocation :account-reinstatement) :manage-accounts
-                     nil)]
-          (proceed-and-replace-response!
-            chat-id {:transition [:chat-type/group state-transition-name]} msg-id)
+        (encore/when-let [state-transition-name
+                          (case (:chat-state callback-query)
+                            (:ready) :restore-settings ;; for when something went wrong
+                            (:accounts-mgmt :expense-items-mgmt :shares-mgmt) :restore-settings
+                            (:account-type-selection :account-renaming
+                              :account-revocation :account-reinstatement) :manage-accounts
+                            nil)
+                          event
+                          (cond-> {:transition [:chat-type/group state-transition-name]}
+                                  (= :manage-accounts state-transition-name)
+                                  (assoc :accounts-by-type
+                                         (get-group-chat-accounts-by-type chat-id)))]
+          (proceed-and-replace-response! chat-id event msg-id)
           op-succeed))))
 
   (m-hlr/callback-fn
