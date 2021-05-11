@@ -79,10 +79,13 @@
    required for it to be used for the general expenses accounting."
   3)
 
-;; TODO: Fix the logical issue w/ "virtual members" (those who aren't
-;;       chat members, but nevertheless have a personal account) in a
-;;       personal accounting case. Do they count? Or these are merely
-;;       different personal accounts?
+;; TODO: Cerebrate the approach to the design of the "virtual members"
+;;       (those who aren't real chat members, but nevertheless occupy
+;;       a personal account) in a personal accounting case.
+;;       - Do they count when determining the use case for a chat?
+;;         At the moment, they DO NOT count.
+;;       - Are they merely different accounts for personal budgeting?
+;;         This bot was not intended for a full-featured accounting.
 (defn- is-chat-for-group-accounting?
   "Determines the use case for a chat by the number of its members."
   [chat-data]
