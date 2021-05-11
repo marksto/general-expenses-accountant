@@ -415,6 +415,11 @@
   {:type :text
    :text (str "Вас добавили в группу \"" chat-title "\".")})
 
+(defn- get-removed-from-group-msg
+  [chat-title]
+  {:type :text
+   :text (str "Вы покинули группу \"" chat-title "\".")})
+
 (defn- get-group-selection-msg
   [group-refs]
   {:pre [(seq group-refs)]}
@@ -1242,6 +1247,11 @@
   (when (can-write-to-user? user-id)
     (respond! (assoc (get-added-to-new-group-msg chat-title) :chat-id user-id))))
 
+(defn- report-removed-from-chat!
+  [user-id chat-title]
+  (when (can-write-to-user? user-id)
+    (respond! (assoc (get-removed-from-group-msg chat-title) :chat-id user-id))))
+
 (defn- proceed-with-adding-new-expense!
   [chat-id debtor-acc]
   (let [chat-data (get-chat-data chat-id)
@@ -1382,13 +1392,14 @@
   [chat-id left-chat-member]
   (update-chat-data! chat-id
                      update :members-count dec)
-  ;; TODO: Report "removed from a chat" event.
   (let [chat-data (get-chat-data chat-id)
-        pers-acc (get-personal-account chat-data {:user-id (:id left-chat-member)})]
+        user-id (:id left-chat-member)
+        pers-acc (get-personal-account chat-data {:user-id user-id})]
     (change-personal-and-related-accounts! chat-id
                                            pers-acc
                                            {:revoke? true
-                                            :datetime (get-datetime-in-tg-format)})))
+                                            :datetime (get-datetime-in-tg-format)})
+    (report-removed-from-chat! user-id (:title chat-data))))
 
 (defn- proceed-with-account-type-selection!
   [chat-id msg-id state-transition-name]
