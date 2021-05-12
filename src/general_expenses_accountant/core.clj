@@ -1647,6 +1647,11 @@
              :chat-id chat-id
              :text "Help is on the way!"}))
 
+(defn- cmd-group-settings!
+  [{chat-id :id :as chat}]
+  (log/debug "Settings requested in a group chat:" chat)
+  (send-group-chat-settings! chat-id false))
+
 
 ;; API RESPONSES
 
@@ -1725,6 +1730,13 @@
     (fn [{chat :chat :as message}]
       (when (= :chat-type/group (:chat-type message))
         (cmd-group-help! chat)
+        op-succeed)))
+
+  (tg-client/command-fn
+    "settings"
+    (fn [{chat :chat :as message}]
+      (when (= :chat-type/group (:chat-type message))
+        (cmd-group-settings! chat)
         op-succeed)))
 
   ; private chats
