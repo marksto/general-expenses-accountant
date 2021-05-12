@@ -31,11 +31,14 @@
                                    :to-user {1200000000 {:request-new-name-msg-id 10}}
 
                                    ;; message state (for navigation)
-                                   :states {1 [:settings :initial]}}
+                                   :states {20 [:settings :initial]}}
 
                     ;; user input/temporary values
                     :input {1200000000 {:rename-account {:account-type :acc-type/personal
-                                                         :account-id 2}}}
+                                                         :account-id 2}
+
+                                        ;; individual message locks
+                                        :locked-messages #{20}}}
 
                     ;; configured by users
                     :accounts {:acc-type/general {0 {:id 0

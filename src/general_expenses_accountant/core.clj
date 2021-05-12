@@ -2,6 +2,7 @@
   "Bot API and business logic (core functionality)"
   (:require [clojure.set :as set]
             [clojure.string :as str]
+            [clojure.core.async :refer [<! go timeout]]
 
             [morse
              [api :as m-api]
@@ -232,6 +233,10 @@
                                [[(tg-api/build-inline-kbd-btn "Счета" :callback_data cd-accounts)
                                  (tg-api/build-inline-kbd-btn "Статьи" :callback_data cd-expense-items)
                                  (tg-api/build-inline-kbd-btn "Доли" :callback_data cd-shares)]])})})
+
+(def ^:private msg-already-in-use-notification
+  {:type :callback
+   :options {:text "Другой пользователь взаимодействует с сообщением"}})
 
 (defn- get-accounts-mgmt-options-msg
   [accounts-by-type]
@@ -994,6 +999,48 @@
     (update-chat-data! chat-id
                        assoc-in [:input user-id input-name] input-data)))
 
+(defn- drop-user-input-data!
+  [chat-id user-id]
+  (update-chat-data! chat-id
+                     update-in [:input] dissoc user-id))
+
+(defn- release-message-lock!
+  [chat-id user-id msg-id]
+  (update-chat-data!
+    chat-id
+    (fn [chat-data]
+      (let [user-locked (get-user-input-data chat-data user-id :locked-messages)]
+        (if (contains? user-locked msg-id)
+          (update-in chat-data [:input user-id :locked-messages] set/difference #{msg-id})
+          chat-data))))
+  nil)
+
+(defn- acquire-message-lock! ;; TODO: Rewrite the docstring.
+  "The user input data should also store the 'msg-id' of the current message
+   and we should use it as a kind of \"input lock\" so that other users cannot
+   \"intercept\" the current user's input. Also, this data will be auto-erased
+   when the user leaves/is removed from the chat, to no longer block others."
+  [chat-id user-id msg-id]
+  (let [updated-chat-data
+        (update-chat-data!
+          chat-id
+          (fn [chat-data]
+            (let [all-locked (->> (vals (:input chat-data))
+                                  (map :locked-messages)
+                                  (reduce #(set/union %1 %2) #{}))
+                  user-locked (get-user-input-data chat-data user-id :locked-messages)]
+              (if (or (not (contains? all-locked msg-id))
+                      (contains? user-locked msg-id))
+                (update-in chat-data [:input user-id :locked-messages] set/union #{msg-id})
+                chat-data))))
+        user-locked (get-user-input-data updated-chat-data user-id :locked-messages)
+        has-message-lock? (contains? user-locked msg-id)]
+    (when has-message-lock?
+      (go
+        (<! (timeout (* 5 60 1000))) ;; after 5 minutes
+        (release-message-lock! chat-id user-id msg-id)))
+    has-message-lock?))
+
 ;; - CHATS > PRIVATE CHAT
 
 (defn- can-write-to-user?
@@ -1480,6 +1527,12 @@
   (let [intro-msg (get-introduction-msg chat-members-count first-name)]
     (respond! (assoc intro-msg :chat-id chat-id))))
 
+(defn- restore-group-chat-intro!
+  [chat-id user-id msg-id]
+  (release-message-lock! chat-id user-id msg-id)
+  (proceed-and-replace-response! chat-id msg-id
+                                 {:transition [:settings :restore]}))
+
 (defn- send-accounts-left-notification!
   [chat-id uncreated-count]
   (let [accs-left-msg (get-personal-accounts-left-msg uncreated-count)]
@@ -1491,6 +1544,11 @@
     (respond-attentively!
       (assoc settings-msg :chat-id chat-id)
       #(change-bot-msg-state!* chat-id :settings (:message_id %) :initial))))
+
+(defn- send-message-already-in-use-notification!
+  [callback-query-id]
+  (respond! (assoc msg-already-in-use-notification
+              :callback-query-id callback-query-id)))
 
 (defn- send-changes-success-notification!
   [chat-id]
@@ -1535,6 +1593,7 @@
                                            pers-acc
                                            {:revoke? true
                                             :datetime (get-datetime-in-tg-format)})
+    (drop-user-input-data! chat-id user-id)
     (report-removed-from-chat! user-id (get-chat-title chat-data))))
 
 (defn- proceed-with-account-type-selection!
@@ -1611,6 +1670,12 @@
               :acc-name (:name acc-to-rename)}}
     #(->> % :message_id
           (set-bot-msg-id! chat-id [:to-user user-id :request-rename-msg-id]))))
+
+(defmacro try-with-message-lock-or-send-notification!
+  [chat-id user-id msg-id callback-query-id & body]
+  `(if (acquire-message-lock! ~chat-id ~user-id ~msg-id)
+    (do ~@body)
+    (send-message-already-in-use-notification! ~callback-query-id)))
 
 ;; - COMMANDS ACTIONS
 
@@ -1796,21 +1861,22 @@
   ; group chats
 
   (m-hlr/callback-fn
-    (fn [{{msg-id :message_id {chat-id :id} :chat} :message
+    (fn [{callback-query-id :id
+          {user-id :id} :from
+          {msg-id :message_id {chat-id :id} :chat} :message
           callback-btn-data :data
           :as callback-query}]
       (when (and (= :chat-type/group (:chat-type callback-query))
                  (= :ready (:chat-state callback-query))
                  (= [:settings :initial] (:msg-state callback-query))
                  (= cd-accounts callback-btn-data))
-        ;; TODO: The user input data should also store the 'msg-id' of the current message
-        ;;       and we should use it as a kind of "input lock" so that other users cannot
-        ;;       "intercept" the current user's input. Also, this data will be auto-erased
-        ;;       when the user leaves/is removed from the chat, to no longer block others.
-        (let [accounts-by-type (get-group-chat-accounts-by-type chat-id)]
-          (proceed-and-replace-response! chat-id msg-id
-                                         {:transition [:settings :manage-accounts]
-                                          :params {:accounts-by-type accounts-by-type}}))
+        (try-with-message-lock-or-send-notification!
+          chat-id user-id msg-id callback-query-id
+
+          (let [accounts-by-type (get-group-chat-accounts-by-type chat-id)]
+            (proceed-and-replace-response! chat-id msg-id
+                                           {:transition [:settings :manage-accounts]
+                                            :params {:accounts-by-type accounts-by-type}})))
         op-succeed)))
 
   (m-hlr/callback-fn
@@ -1822,28 +1888,31 @@
       (when (and (= :chat-type/group (:chat-type callback-query))
                  (= :ready (:chat-state callback-query))
                  (= [:settings :accounts-mgmt] (:msg-state callback-query)))
-        (encore/when-let [handler-fn
-                          (condp = callback-btn-data
-                            cd-accounts-create #(proceed-with-account-type-selection!
-                                                  chat-id msg-id :select-acc-type)
-                            cd-accounts-rename #(proceed-with-account-selection!
-                                                  chat-id msg-id callback-query-id
-                                                  :rename-account
-                                                  (can-rename-account? chat-id user-id))
-                            cd-accounts-revoke #(proceed-with-account-selection!
-                                                  chat-id msg-id callback-query-id
-                                                  :revoke-account
-                                                  (can-revoke-account? chat-id user-id))
-                            cd-accounts-reinstate #(proceed-with-account-selection!
-                                                     chat-id msg-id callback-query-id
-                                                     :reinstate-account
-                                                     (can-reinstate-account? chat-id user-id))
-                            nil)]
-          (handler-fn)
-          op-succeed))))
+        (try-with-message-lock-or-send-notification!
+          chat-id user-id msg-id callback-query-id
+
+          (encore/when-let [handler-fn
+                            (condp = callback-btn-data
+                              cd-accounts-create #(proceed-with-account-type-selection!
+                                                    chat-id msg-id :select-acc-type)
+                              cd-accounts-rename #(proceed-with-account-selection!
+                                                    chat-id msg-id callback-query-id
+                                                    :rename-account
+                                                    (can-rename-account? chat-id user-id))
+                              cd-accounts-revoke #(proceed-with-account-selection!
+                                                    chat-id msg-id callback-query-id
+                                                    :revoke-account
+                                                    (can-revoke-account? chat-id user-id))
+                              cd-accounts-reinstate #(proceed-with-account-selection!
+                                                       chat-id msg-id callback-query-id
+                                                       :reinstate-account
+                                                       (can-reinstate-account? chat-id user-id))
+                              nil)]
+            (handler-fn)
+            op-succeed)))))
 
   (m-hlr/callback-fn
-    (fn [{user :from
+    (fn [{{user-id :id :as user} :from
           {msg-id :message_id {chat-id :id} :chat} :message
           callback-btn-data :data
           :as callback-query}]
@@ -1851,8 +1920,7 @@
                  (= :ready (:chat-state callback-query))
                  (= [:settings :account-type-selection] (:msg-state callback-query))
                  (str/starts-with? callback-btn-data cd-account-type-prefix))
-        (proceed-and-replace-response! chat-id msg-id
-                                       {:transition [:settings :restore]})
+        (restore-group-chat-intro! chat-id user-id msg-id)
         (let [acc-type-name (str/replace-first callback-btn-data
                                                cd-account-type-prefix "")
               acc-type (keyword "acc-type" acc-type-name)]
@@ -1895,7 +1963,8 @@
         op-succeed)))
 
   (m-hlr/callback-fn
-    (fn [{user :from
+    (fn [{callback-query-id :id
+          {user-id :id :as user} :from
           {msg-id :message_id {chat-id :id} :chat} :message
           callback-btn-data :data
           :as callback-query}]
@@ -1903,110 +1972,132 @@
                  (= :ready (:chat-state callback-query))
                  (= [:settings :account-renaming] (:msg-state callback-query))
                  (str/starts-with? callback-btn-data cd-account-prefix))
-        (proceed-and-replace-response! chat-id msg-id
-                                       {:transition [:settings :restore]})
-        (let [chat-data (get-chat-data chat-id)
-              account-to-rename (data->account callback-btn-data chat-data)]
-          (proceed-with-account-renaming! chat-id user account-to-rename))
+        (try-with-message-lock-or-send-notification!
+          chat-id user-id msg-id callback-query-id
+
+          (restore-group-chat-intro! chat-id user-id msg-id)
+          (let [chat-data (get-chat-data chat-id)
+                account-to-rename (data->account callback-btn-data chat-data)]
+            (proceed-with-account-renaming! chat-id user account-to-rename)))
         op-succeed)))
 
   (m-hlr/callback-fn
-    (fn [{{msg-id :message_id {chat-id :id} :chat} :message
+    (fn [{callback-query-id :id
+          {user-id :id} :from
+          {msg-id :message_id {chat-id :id} :chat} :message
           callback-btn-data :data
           :as callback-query}]
       (when (and (= :chat-type/group (:chat-type callback-query))
                  (= :ready (:chat-state callback-query))
                  (= [:settings :account-revocation] (:msg-state callback-query))
                  (str/starts-with? callback-btn-data cd-account-prefix))
-        (let [chat-data (get-chat-data chat-id)
-              account-to-revoke (data->account callback-btn-data chat-data)
-              datetime (get-datetime-in-tg-format)]
-          (case (:type account-to-revoke)
-            :acc-type/personal (change-personal-and-related-accounts!
-                                 chat-id account-to-revoke {:revoke? true
-                                                            :datetime datetime})
-            :acc-type/group (throw (Exception. "Not implemented yet")))) ;; TODO!
+        (try-with-message-lock-or-send-notification!
+          chat-id user-id msg-id callback-query-id
 
-        (proceed-and-replace-response! chat-id msg-id
-                                       {:transition [:settings :restore]})
-        (send-changes-success-notification! chat-id)
+          (let [chat-data (get-chat-data chat-id)
+                account-to-revoke (data->account callback-btn-data chat-data)
+                datetime (get-datetime-in-tg-format)]
+            (case (:type account-to-revoke)
+              :acc-type/personal (change-personal-and-related-accounts!
+                                   chat-id account-to-revoke {:revoke? true
+                                                              :datetime datetime})
+              :acc-type/group (throw (Exception. "Not implemented yet")))) ;; TODO!
+
+          (restore-group-chat-intro! chat-id user-id msg-id)
+          (send-changes-success-notification! chat-id))
         op-succeed)))
 
   (m-hlr/callback-fn
-    (fn [{{msg-id :message_id {chat-id :id} :chat} :message
+    (fn [{callback-query-id :id
+          {user-id :id} :from
+          {msg-id :message_id {chat-id :id} :chat} :message
           callback-btn-data :data
           :as callback-query}]
       (when (and (= :chat-type/group (:chat-type callback-query))
                  (= :ready (:chat-state callback-query))
                  (= [:settings :account-reinstatement] (:msg-state callback-query))
                  (str/starts-with? callback-btn-data cd-account-prefix))
-        (let [chat-data (get-chat-data chat-id)
-              account-to-reinstate (data->account callback-btn-data chat-data)
-              datetime (get-datetime-in-tg-format)]
-          ;; TODO: Check whether we can simply update an existing personal account
-          ;;       rather than create a new version w/ 'create-personal-account!'.
-          (case (:type account-to-reinstate)
-            :acc-type/personal (change-personal-and-related-accounts!
-                                 chat-id account-to-reinstate {:reinstate? true
-                                                               :datetime datetime})
-            :acc-type/group (throw (Exception. "Not implemented yet")))) ;; TODO!
+        (try-with-message-lock-or-send-notification!
+          chat-id user-id msg-id callback-query-id
 
-        (proceed-and-replace-response! chat-id msg-id
-                                       {:transition [:settings :restore]})
-        (send-changes-success-notification! chat-id)
+          (let [chat-data (get-chat-data chat-id)
+                account-to-reinstate (data->account callback-btn-data chat-data)
+                datetime (get-datetime-in-tg-format)]
+            ;; TODO: Check whether we can simply update an existing personal account
+            ;;       rather than create a new version w/ 'create-personal-account!'.
+            (case (:type account-to-reinstate)
+              :acc-type/personal (change-personal-and-related-accounts!
+                                   chat-id account-to-reinstate {:reinstate? true
+                                                                 :datetime datetime})
+              :acc-type/group (throw (Exception. "Not implemented yet")))) ;; TODO!
+
+          (restore-group-chat-intro! chat-id user-id msg-id)
+          (send-changes-success-notification! chat-id))
         op-succeed)))
 
   (m-hlr/callback-fn
-    (fn [{{msg-id :message_id {chat-id :id} :chat} :message
+    (fn [{callback-query-id :id
+          {user-id :id} :from
+          {msg-id :message_id {chat-id :id} :chat} :message
           callback-btn-data :data
           :as callback-query}]
       (when (and (= :chat-type/group (:chat-type callback-query))
                  (= :ready (:chat-state callback-query))
                  (= [:settings :initial] (:msg-state callback-query))
                  (= cd-expense-items callback-btn-data))
-        (proceed-and-replace-response! chat-id msg-id
-                                       {:transition [:settings :manage-expense-items]})
+        (try-with-message-lock-or-send-notification!
+          chat-id user-id msg-id callback-query-id
+
+          (proceed-and-replace-response! chat-id msg-id
+                                         {:transition [:settings :manage-expense-items]}))
         op-succeed)))
 
   ;; TODO: Implement handlers for ':expense-items-mgmt'.
 
   (m-hlr/callback-fn
-    (fn [{{msg-id :message_id {chat-id :id} :chat} :message
+    (fn [{callback-query-id :id
+          {user-id :id} :from
+          {msg-id :message_id {chat-id :id} :chat} :message
           callback-btn-data :data
           :as callback-query}]
       (when (and (= :chat-type/group (:chat-type callback-query))
                  (= :ready (:chat-state callback-query))
                  (= [:settings :initial] (:msg-state callback-query))
                  (= cd-shares callback-btn-data))
-        (proceed-and-replace-response! chat-id msg-id
-                                       {:transition [:settings :manage-shares]})
+        (try-with-message-lock-or-send-notification!
+          chat-id user-id msg-id callback-query-id
+
+          (proceed-and-replace-response! chat-id msg-id
+                                         {:transition [:settings :manage-shares]}))
         op-succeed)))
 
   ;; TODO: Implement handlers for ':shares-mgmt'.
 
   (m-hlr/callback-fn
-    (fn [{{msg-id :message_id {chat-id :id} :chat} :message
+    (fn [{callback-query-id :id
+          {user-id :id} :from
+          {msg-id :message_id {chat-id :id} :chat} :message
           callback-btn-data :data
           :as callback-query}]
       (when (and (= :chat-type/group (:chat-type callback-query))
                  (= :ready (:chat-state callback-query))
                  (= :settings (first (:msg-state callback-query)))
                  (= cd-back callback-btn-data))
-        (encore/when-let [msg-state (get-bot-msg-state (get-chat-data chat-id) msg-id)
-                          state-transition-name
-                          (case (second msg-state)
-                            (:initial ;; for when something went wrong
-                              :accounts-mgmt :expense-items-mgmt :shares-mgmt) :restore
-                            (:account-type-selection :account-renaming
-                              :account-revocation :account-reinstatement) :manage-accounts
-                            nil)
-                          event
-                          (cond-> {:transition [:settings state-transition-name]}
-                                  (= :manage-accounts state-transition-name)
-                                  (assoc-in [:params :accounts-by-type]
-                                            (get-group-chat-accounts-by-type chat-id)))]
-          (proceed-and-replace-response! chat-id msg-id event)
-          op-succeed))))
+        (try-with-message-lock-or-send-notification!
+          chat-id user-id msg-id callback-query-id
+
+          (encore/when-let [state-transition-name (second (:msg-state callback-query))]
+            (case state-transition-name
+              (:initial ;; for when something went wrong
+                :accounts-mgmt :expense-items-mgmt :shares-mgmt)
+              (restore-group-chat-intro! chat-id user-id msg-id)
+
+              (:account-type-selection :account-renaming :account-revocation :account-reinstatement)
+              (let [accounts-by-type (get-group-chat-accounts-by-type chat-id)]
+                (proceed-and-replace-response! chat-id msg-id
+                                               {:transition [:settings :manage-accounts]
+                                                :params {:accounts-by-type accounts-by-type}})))))
+        op-succeed)))
 
   ; private chats
 
