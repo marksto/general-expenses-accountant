@@ -296,10 +296,8 @@
               {:reply-markup (tg-api/build-reply-markup :force-reply {:selective true})
                :parse-mode "MarkdownV2"})})
 
-(defn- get-no-eligible-accounts-notification
-  [callback-query-id]
+(def ^:private no-eligible-accounts-notification
   {:type :callback
-   :callback-query-id callback-query-id
    :options {:text "Подходящих счетов не найдено"}})
 
 (def ^:private successful-changes-msg
@@ -415,10 +413,8 @@
                (escape-markdown-v2 "Введите /cancel, чтобы выйти из режима калькуляции и ввести данные вручную.")])
     {:reply-markup inline-calculator-markup}))
 
-(defn- get-invalid-input-notification
-  [callback-query-id]
+(def ^:private invalid-input-notification
   {:type :callback
-   :callback-query-id callback-query-id
    :options {:text "Ошибка в выражении! Вычисление невозможно."}})
 
 (defn- get-added-to-new-group-msg
@@ -1594,9 +1590,9 @@
                                       {:transition [:settings state-transition-name]
                                        :params {:accounts eligible-accs
                                                 :txt select-account-txt
-                                                :extra-buttons [back-button]}}
-                                      msg-id)
-       (respond! (get-no-eligible-accounts-notification callback-query-id))))))
+                                                :extra-buttons [back-button]}})
+       (respond! (assoc no-eligible-accounts-notification
+                   :callback-query-id callback-query-id))))))
 
 (defn- proceed-with-account-renaming!
   [chat-id {user-id :id :as user} acc-to-rename]
@@ -2082,8 +2078,8 @@
               (proceed-with-group! chat-id first-name))
             (do
               (log/debugf "Invalid user input: \"%s\"" parsed-val)
-              (respond! (assoc (get-invalid-input-notification callback-query-id)
-                          :chat-id chat-id))
+              (respond! (assoc invalid-input-notification
+                          :callback-query-id callback-query-id))
 
               (when-not (is-user-input-error? chat-id)
                 (update-user-input-error-status! chat-id true)
