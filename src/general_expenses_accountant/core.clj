@@ -573,10 +573,6 @@
     (chats/update! upd-chat) ;; TODO: Check if the update actually happened.
     new-state))
 
-(defn- can-write-to-user?
-  [user-id]
-  (not= :initial (get-chat-state user-id)))
-
 ;; - ACCOUNTS
 
 (defn- ->general-account
@@ -604,10 +600,6 @@
    :created created
    :members (set members)})
 
-(defn- get-accounts-next-id
-  [chat-id]
-  (-> (get-chat-data chat-id) :accounts :last-id inc))
-
 (defn- is-account-revoked?
   [acc]
   (contains? acc :revoked))
@@ -616,6 +608,8 @@
   [acc]
   (not (is-account-revoked? acc)))
 
+;; - CHATS > ACCOUNTS
+
 (defn- get-accounts-of-type
   ([chat-data acc-type]
    (map val (get-in chat-data [:accounts acc-type])))
@@ -623,11 +617,16 @@
    (cond->> (get-accounts-of-type chat-data acc-type)
             (some? ?filter-pred) (filter ?filter-pred))))
 
+;; TODO: This fn is used improperly. Get rid of it and fix the client code.
 (defn- get-account-ids-of-type
-  [acc-type chat-data]
+  [chat-data acc-type]
   (map key (get-in chat-data [:accounts acc-type])))
 
-;; - ACCOUNTS > GENERAL
+(defn- get-accounts-next-id
+  [chat-data]
+  (-> chat-data :accounts :last-id inc))
+
+;; - CHATS > ACCOUNTS > GENERAL
 
 (defn- get-current-general-account
   "Retrieves the current (the one that will be used) account of 'general' type
@@ -657,10 +656,7 @@
          (update-chat-data!
            chat-id
            (fn [chat-data]
-             (let [real-chat-id (get-real-chat-id chat-id)
-                   next-id (get-accounts-next-id real-chat-id)
-
-                   old-gen-acc (get-current-general-account chat-data)
+             (let [old-gen-acc (get-current-general-account chat-data)
                    old-members (->> (get-accounts-of-type chat-data
                                                           :acc-type/personal
                                                           is-account-active?)
@@ -683,7 +679,8 @@
                      ;; IMPLEMENTATION NOTE:
                      ;; Here the chat 'members-count' have to already be updated!
                      (if (is-chat-for-group-accounting? cd)
-                       (let [acc-name (:name old-gen-acc default-general-acc-name)
+                       (let [next-id (get-accounts-next-id cd)
+                             acc-name (:name old-gen-acc default-general-acc-name)
                              new-general-acc (->general-account
                                                next-id acc-name created-dt new-members)]
                          (-> cd
@@ -695,7 +692,7 @@
                    add-new-general-acc-fn))))]
      (get-current-general-account updated-chat-data))))
 
-;; - ACCOUNTS > PERSONAL
+;; - CHATS > ACCOUNTS > PERSONAL
 
 (defn- find-personal-account-by-name
   [chat-data acc-name]
@@ -743,8 +740,7 @@
            (update-chat-data!
              chat-id
              (fn [chat-data]
-               (let [real-chat-id (get-real-chat-id chat-id)
-                     next-id (get-accounts-next-id real-chat-id)
+               (let [next-id (get-accounts-next-id chat-data)
 
                      upd-accounts-next-id-fn
                      (fn [cd]
@@ -795,7 +791,7 @@
         (get-personal-account updated-chat-data {:user-id ?user-id
                                                  :name (or new-name ?acc-name)})))))
 
-;; - ACCOUNTS > GROUP
+;; - CHATS > ACCOUNTS > GROUP
 
 (defn- find-group-accounts
   [chat-data members]
@@ -817,8 +813,7 @@
         (update-chat-data!
           chat-id
           (fn [chat-data]
-            (let [real-chat-id (get-real-chat-id chat-id)
-                  next-id (get-accounts-next-id real-chat-id)
+            (let [next-id (get-accounts-next-id chat-data)
 
                   upd-accounts-next-id-fn
                   (fn [cd]
@@ -834,86 +829,27 @@
                   add-new-group-acc-fn))))]
     (get-latest-group-account updated-chat-data members)))
 
-;; - USER INPUT
-
-(defn- get-user-input
-  [chat-data]
-  (get chat-data :user-input))
-
-(defn- update-user-input!
-  [chat-id {:keys [type data] :as _operation}]
-  (let [append-digit
-        (fn [old-val]
-          (if (or (nil? old-val)
-                  (empty? old-val))
-            (when (not= "0" data) data)
-            (str (or old-val "") data)))
-        append-ar-op
-        (fn [old-val]
-          (if (or (nil? old-val)
-                  (empty? old-val))
-            old-val ;; do not allow
-            (let [last-char (-> old-val
-                                str/trim
-                                last
-                                str)]
-              (if (contains? cd-ar-ops-set
-                             last-char)
-                old-val ;; do not allow
-                (str (or old-val "")
-                     " " data " ")))))
-        cancel
-        (fn [old-val]
-          (let [trimmed (str/trim old-val)]
-            (-> trimmed
-                (subs 0 (dec (count trimmed)))
-                str/trim)))
-        clear
-        (constantly nil)
-
-        updated-chat-data
-        (update-chat-data!
-          chat-id
-          (fn [chat-data]
-            (let [old-val (get chat-data :user-input)
-                  new-val ((case type
-                             :append-digit append-digit
-                             :append-ar-op append-ar-op
-                             :cancel cancel
-                             :clear clear) old-val)]
-              (assoc chat-data :user-input new-val))))]
-    (get-user-input updated-chat-data)))
-
-(defn- is-user-input-error?
-  [chat-id]
-  (when (does-chat-exist? chat-id)
-    (true? (get (get-chat-data chat-id) :user-error))))
-
-(defn- update-user-input-error-status!
-  [chat-id val]
-  (let [boolean-val (boolean val)]
-    (assoc-in-chat-data! chat-id [:user-error] boolean-val)
-    boolean-val))
-
-(defn- get-user-input-data
-  [chat-data user-id input-name]
-  (get-in chat-data [:input user-id input-name]))
-
-(defn- set-user-input-data!
-  [chat-id user-id input-name input-data]
-  (if (nil? input-data)
-    (update-chat-data! chat-id
-                       update-in [:input user-id] dissoc input-name)
-    (update-chat-data! chat-id
-                       assoc-in [:input user-id input-name] input-data)))
-
 ;; - CHATS > GROUP CHAT
+
+(defn- get-chat-title
+  [chat-data]
+  (:title chat-data))
+
+(defn- set-chat-title!
+  [chat-id chat-title]
+  (assoc-in-chat-data! chat-id [:title] chat-title))
+
+;; - CHATS > GROUP CHAT > EXPENSE ITEMS
 
 (defn- get-group-chat-expense-items
   [chat-id]
   (let [chat-data (get-chat-data chat-id)]
     ;; TODO: Sort them according popularity.
     (get-in chat-data [:expenses :items])))
+
+;; TODO: Implement the "expense items"-related business logic here.
+
+;; - CHATS > GROUP CHAT > ACCOUNTS
 
 (def ^:private all-account-types
   [:acc-type/personal :acc-type/group :acc-type/general])
@@ -980,7 +916,7 @@
                   (is-group-acc-member? acc chat-id user-id))))))
 
 (defn- can-reinstate-account?
-  []
+  [_chat-id _user-id]
   (fn [acc]
     (is-account-revoked? acc)))
 
@@ -988,7 +924,7 @@
   [group-chat-data acc-type acc-id]
   (get-in group-chat-data [:accounts acc-type acc-id]))
 
-(defn- is-group-chat-eligible?
+(defn- is-group-chat-eligible-for-selection?
   [chat-id user-id]
   (let [group-chat-data (get-chat-data chat-id)
         pers-acc-id (get-personal-account-id group-chat-data {:user-id user-id})
@@ -1015,7 +951,7 @@
     (create-general-account! chat-id datetime member-opts)
     changed-pers-acc-id))
 
-;; - BOT MESSAGES
+;; - CHATS > GROUP CHAT > BOT MESSAGES
 
 (defn- get-bot-msg-id
   [chat-id msg-keys]
@@ -1053,7 +989,27 @@
                   chat-data)))))]
     (get-bot-msg-state updated-chat-data msg-id)))
 
+;; - CHATS > GROUP CHAT > USER INPUT
+
+(defn- get-user-input-data
+  [chat-data user-id input-name]
+  (get-in chat-data [:input user-id input-name]))
+
+(defn- set-user-input-data!
+  [chat-id user-id input-name input-data]
+  (if (nil? input-data)
+    (update-chat-data! chat-id
+                       update-in [:input user-id] dissoc input-name)
+    (update-chat-data! chat-id
+                       assoc-in [:input user-id input-name] input-data)))
+
 ;; - CHATS > PRIVATE CHAT
+
+(defn- can-write-to-user?
+  [user-id]
+  (let [chat-state (get-chat-state user-id)]
+    (not (or (nil? chat-state)
+             (= :initial chat-state)))))
 
 (defn- get-private-chat-groups
   [chat-data]
@@ -1074,9 +1030,85 @@
      (get-private-chat-groups updated-chat-data))))
 
 (defn- ->group-ref
-  [group-chat-id]
+  [group-chat-id group-chat-title]
   {:id group-chat-id
-   :title (-> group-chat-id get-chat-data :title)})
+   :title group-chat-title})
+
+;; - CHATS > PRIVATE CHAT > USER INPUT
+
+(defn- get-user-input
+  [chat-data]
+  (get chat-data :user-input))
+
+(defn- update-user-input!
+  [chat-id {:keys [type data] :as _operation}]
+  (let [append-digit
+        (fn [old-val]
+          (if (or (nil? old-val)
+                  (empty? old-val))
+            (when (not= "0" data) data)
+            (str (or old-val "") data)))
+        append-ar-op
+        (fn [old-val]
+          (if (or (nil? old-val)
+                  (empty? old-val))
+            old-val ;; do not allow
+            (let [last-char (-> old-val
+                                str/trim
+                                last
+                                str)]
+              (if (contains? cd-ar-ops-set
+                             last-char)
+                old-val ;; do not allow
+                (str (or old-val "")
+                     " " data " ")))))
+        cancel
+        (fn [old-val]
+          (let [trimmed (str/trim old-val)]
+            (-> trimmed
+                (subs 0 (dec (count trimmed)))
+                str/trim)))
+        clear
+        (constantly nil)
+
+        updated-chat-data
+        (update-chat-data!
+          chat-id
+          (fn [chat-data]
+            (let [old-val (get chat-data :user-input)
+                  new-val ((case type
+                             :append-digit append-digit
+                             :append-ar-op append-ar-op
+                             :cancel cancel
+                             :clear clear) old-val)]
+              (assoc chat-data :user-input new-val))))]
+    (get-user-input updated-chat-data)))
+
+(defn- is-user-input-error?
+  [chat-id]
+  (when (does-chat-exist? chat-id)
+    (true? (get (get-chat-data chat-id) :user-error))))
+
+(defn- update-user-input-error-status!
+  [chat-id val]
+  (let [boolean-val (boolean val)]
+    (assoc-in-chat-data! chat-id [:user-error] boolean-val)
+    boolean-val))
+
+;; - CHATS > SUPERGROUP CHAT
+
+(defn- migrate-group-chat-to-supergroup!
+  [chat-id migrate-to-chat-id]
+  (let [new-chat (setup-new-supergroup-chat! migrate-to-chat-id chat-id)
+        chat-data (if (some? new-chat)
+                    (:data new-chat)
+                    (get-chat-data chat-id))
+        group-users (-> chat-data
+                        (get :user-account-mapping)
+                        keys)]
+    ;; NB: Here we iterate only real users, and this is exactly what we need.
+    (doseq [user-id group-users]
+      (update-private-chat-groups! user-id chat-id migrate-to-chat-id))))
 
 
 ;; STATES & STATE TRANSITIONS
@@ -1367,7 +1399,7 @@
                                        :params {:reason data-persistence-error}}))
       (else
         (let [pers-accs-count (count (get-account-ids-of-type
-                                       :acc-type/personal group-chat-data))
+                                       group-chat-data :acc-type/personal))
               payer-acc-name (when-not (or (= pers-accs-count 1)
                                            (= payer-acc-id debtor-acc-id))
                                (:name (get-group-chat-account
@@ -1392,11 +1424,13 @@
         (proceed-and-respond! chat-id {:transition [:chat-type/private :select-account]
                                        :params {:accounts other-accounts
                                                 :txt select-payer-account-txt}}))
+
       (empty? active-accounts)
       (do
         (log/error "No eligible accounts to select a debtor account from")
         (proceed-and-respond! chat-id {:transition [:chat-type/private :notify-input-failure]
                                        :params {:reason no-debtor-account-error}}))
+
       :else
       (let [debtor-acc (first active-accounts)]
         (log/debug "Debtor account auto-selected:" debtor-acc)
@@ -1416,20 +1450,24 @@
 (defn- proceed-with-group!
   [chat-id first-name]
   (let [is-eligible? (fn [group-chat-id]
-                       (is-group-chat-eligible? group-chat-id chat-id))
+                       (is-group-chat-eligible-for-selection? group-chat-id chat-id))
         groups (->> (get-chat-data chat-id)
                     get-private-chat-groups
                     (filter is-eligible?))]
     (cond
       (< 1 (count groups))
-      (let [group-refs (map ->group-ref groups)]
+      (let [group-refs (->> groups
+                            (map #(vector % (-> % get-chat-data get-chat-title)))
+                            (map #(apply ->group-ref %)))]
         (proceed-and-respond! chat-id {:transition [:chat-type/private :select-group]
                                        :params {:group-refs group-refs}}))
+
       (empty? groups)
       (do
         (log/error "No eligible groups to record expenses to")
         (proceed-and-respond! chat-id {:transition [:chat-type/private :notify-input-failure]
                                        :params {:reason no-group-to-record-error}}))
+
       :else
       (let [group-chat-id (first groups)]
         (log/debug "Group chat auto-selected:" group-chat-id)
@@ -1493,14 +1531,15 @@
   [chat-id left-chat-member]
   (update-chat-data! chat-id
                      update :members-count dec)
-  (let [user-id (:id left-chat-member)
-        pers-acc (get-personal-account (get-chat-data chat-id) {:user-id user-id})]
+  (let [chat-data (get-chat-data chat-id)
+        user-id (:id left-chat-member)
+        pers-acc (get-personal-account chat-data {:user-id user-id})]
     ;; TODO: Double check why the 'pers-acc' doesn't get revoked.
     (change-personal-and-related-accounts! chat-id
                                            pers-acc
                                            {:revoke? true
                                             :datetime (get-datetime-in-tg-format)})
-    (report-removed-from-chat! user-id (:title chat-data))))
+    (report-removed-from-chat! user-id (get-chat-title chat-data))))
 
 (defn- proceed-with-account-type-selection!
   [chat-id msg-id state-transition-name]
@@ -1688,7 +1727,17 @@
 
   ;; - BOT COMMANDS
 
-  ; Each bot has to handle '/start' and '/help' commands.
+  ; group chats
+
+  (tg-client/command-fn
+    "help"
+    (fn [{chat :chat :as message}]
+      (when (= :chat-type/group (:chat-type message))
+        (cmd-group-help! chat)
+        op-succeed)))
+
+  ; private chats
+
   (tg-client/command-fn
     "start"
     (fn [{user :from chat :chat :as message}]
@@ -1717,13 +1766,6 @@
         (cmd-private-cancel! chat)
         op-succeed)))
 
-  (tg-client/command-fn
-    "help"
-    (fn [{chat :chat :as message}]
-      (when (= :chat-type/group (:chat-type message))
-        (cmd-group-help! chat)
-        op-succeed)))
-
   ;; - INLINE QUERIES
 
   (m-hlr/inline-fn
@@ -1742,6 +1784,8 @@
   (m-hlr/callback-fn
     (fn [callback-query]
       (log/debug "Callback query:" callback-query)))
+
+  ; group chats
 
   (m-hlr/callback-fn
     (fn [{{msg-id :message_id {chat-id :id} :chat} :message
@@ -1785,7 +1829,7 @@
                             cd-accounts-reinstate #(proceed-with-account-selection!
                                                      chat-id msg-id callback-query-id
                                                      :reinstate-account
-                                                     (can-reinstate-account?))
+                                                     (can-reinstate-account? chat-id user-id))
                             nil)]
           (handler-fn)
           op-succeed))))
@@ -1956,6 +2000,8 @@
           (proceed-and-replace-response! chat-id msg-id event)
           op-succeed))))
 
+  ; private chats
+
   (m-hlr/callback-fn
     (fn [{{first-name :first_name} :from
           {{chat-id :id} :chat} :message
@@ -2107,6 +2153,8 @@
 
   ;; - PLAIN MESSAGES
 
+  ; group chats
+
   (m-hlr/message-fn
     (fn [{{chat-id :id :as chat} :chat
           new-chat-members :new_chat_members
@@ -2143,17 +2191,15 @@
                  (= :waiting (:chat-state message))
                  (is-reply-to-bot? chat-id message :name-request-msg-id))
         ;; NB: Here the 'user-id' exists for sure, since it is the User's response.
-        (let [group-chat-id (get-real-chat-id chat-id)
-              new-chat (setup-new-private-chat! user-id group-chat-id)]
-          (when (nil? new-chat)
-            (update-private-chat-groups! user-id group-chat-id)))
+        (when-some [_new-chat (setup-new-private-chat! user-id chat-id)]
+          (update-private-chat-groups! user-id chat-id))
 
         (if (create-personal-account! chat-id text date user-id msg-id)
           (report-added-to-new-chat! user-id chat-title)
           (update-personal-account! chat-id {:user-id user-id} {:new-name text}))
 
         (let [chat-data (get-chat-data chat-id)
-              pers-accs-count (count (get-account-ids-of-type :acc-type/personal chat-data))
+              pers-accs-count (count (get-account-ids-of-type chat-data :acc-type/personal))
               uncreated-count (get-number-of-missing-personal-accounts chat-data pers-accs-count)]
           (if (> uncreated-count 0)
             (send-accounts-left-notification! chat-id uncreated-count)
@@ -2220,7 +2266,7 @@
       (when (and (= :chat-type/group (:chat-type message))
                  (some? new-chat-title))
         (log/debugf "Chat %s title was changed to '%s'" chat-id new-chat-title)
-        (assoc-in-chat-data! chat-id [:title] new-chat-title)
+        (set-chat-title! chat-id new-chat-title)
         op-succeed)))
 
   (m-hlr/message-fn
@@ -2230,17 +2276,10 @@
       (when (and (= :chat-type/group (:chat-type message))
                  (some? migrate-to-chat-id))
         (log/debugf "Group %s has been migrated to a supergroup %s" chat-id migrate-to-chat-id)
-        (let [new-chat (setup-new-supergroup-chat! migrate-to-chat-id chat-id)
-              chat-data (if (some? new-chat)
-                          (:data new-chat)
-                          (get-chat-data chat-id))
-              group-users (-> chat-data
-                              (get :user-account-mapping)
-                              keys)]
-          ;; NB: Here we iterate only real users, and this is exactly what we need.
-          (doseq [user-id group-users]
-            (update-private-chat-groups! user-id chat-id migrate-to-chat-id)))
+        (migrate-group-chat-to-supergroup! chat-id migrate-to-chat-id)
         op-succeed)))
+
+  ; private chats
 
   (m-hlr/message-fn
     (fn [{text :text
@@ -2268,7 +2307,7 @@
         (proceed-with-account! chat-id)
         op-succeed)))
 
-  ; A "match-all catch-through" case.
+  ;; NB: A "match-all catch-through" case. Excessive list of parameters is for clarity.
   (m-hlr/message-fn
     (fn [{msg-id :message_id _date :date _text :text
           {_user-id :id _first-name :first_name _last-name :last_name
