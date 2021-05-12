@@ -1283,6 +1283,7 @@
 ;; TODO: Combine them into a single façade fn w/ a set of opts
 ;;       (:replace true, :response-handler, :async true, etc.)?
 
+;; TODO: Re-implement as a 'multimethod' with 3 _different_ implementations!
 ;; TODO: Re-implement it in asynchronous fashion, with logging the feedback.
 (defn- respond!
   "Uniformly responds to the user action, whether it a message, inline or callback query.
@@ -1326,6 +1327,7 @@
     (respond-attentively! (assoc (:message result) :chat-id chat-id)
                           tg-response-handler-fn)))
 
+;; TODO: Re-implement reusing the common part extracted from the 'respond!' multimethod!
 (defn- replace-response!
   "Uniformly replaces the existing response to the user, either by update or delete+send.
    NB: Properly wrapped in try-catch and logged to highlight the exact HTTP client error."
@@ -1469,6 +1471,9 @@
 ;; TODO: Abstract away the "selecting N of {M; optional ALL}, M>=N>0" scenario.
 
 ; group chats
+
+;; TODO: It would be super cool to have all these abstracted away to "plain data" + a single fn,
+;;       akin to how it was made for 'proceed-and-respond!' and 'handle-chat-state-transition!'.
 
 (defn- send-group-chat-intro!
   [chat-id chat-members-count first-name]
