@@ -72,7 +72,7 @@
 ;;                            the bot there to track their general expenses.
 ;; The only difference between the two is that an account of a ':general' type
 ;; is automatically created for a group accounting and what format is used for
-;; notification messages.
+;; new expense notification messages.
 
 (def ^:private min-chat-members-for-group-accounting
   "The number of users in a group chat (including the bot itself)
@@ -88,18 +88,16 @@
 ;;         This bot was not intended for a full-featured accounting.
 (defn- is-chat-for-group-accounting?
   "Determines the use case for a chat by the number of its members."
-  [chat-data]
-  (let [chat-members-count (:members-count chat-data)]
-    (and (some? chat-members-count) ;; a private chat with the bot
-         (>= chat-members-count min-chat-members-for-group-accounting))))
+  [chat-members-count]
+  (and (some? chat-members-count) ;; a private chat with the bot
+       (>= chat-members-count min-chat-members-for-group-accounting)))
 
 (defn- get-number-of-missing-personal-accounts
   "Returns the number of missing personal accounts in a group chat,
    which have to be created before the group chat is ready for the
    general expenses accounting."
-  [chat-data number-of-existing-personal-accounts]
-  (let [chat-members-count (:members-count chat-data)]
-    (- chat-members-count number-of-existing-personal-accounts 1)))
+  [chat-members-count number-of-existing-personal-accounts]
+  (- chat-members-count number-of-existing-personal-accounts 1))
 
 
 ;; MESSAGE TEMPLATES & CALLBACK DATA
@@ -211,11 +209,13 @@
 ;;       - take the ':language_code' of the chat initiator (no personal settings)
 ;;       - externalize texts, keep only their keys (to get them via 'l10n')
 (defn- get-introduction-msg
-  [{:keys [chat-members-count first-name]}]
+  [chat-members-count first-name]
   {:type :text
-   :text (apply format "Привет, %s! Я — бот-бухгалтер. И я призван помочь %s с учётом ваших общих расходов.\n
+   :text (apply format "Привет, %s! Я — бот-бухгалтер. И я призван помочь %s с учётом %s общих расходов.\n
 Для того, чтобы начать работу, просто %s на следующее сообщение."
-                (if (= chat-members-count 1) [first-name "тебе" "ответь"] ["народ" "вам" "ответьте каждый"]))})
+                (if (= chat-members-count 2)
+                  [first-name "тебе" "любых" "ответь"]
+                  ["народ" "вам" "ваших" "ответьте каждый"]))})
 
 (defn- get-settings-msg
   [first-time?]
@@ -617,11 +617,6 @@
    (cond->> (get-accounts-of-type chat-data acc-type)
             (some? ?filter-pred) (filter ?filter-pred))))
 
-;; TODO: This fn is used improperly. Get rid of it and fix the client code.
-(defn- get-account-ids-of-type
-  [chat-data acc-type]
-  (map key (get-in chat-data [:accounts acc-type])))
-
 (defn- get-accounts-next-id
   [chat-data]
   (-> chat-data :accounts :last-id inc))
@@ -678,7 +673,7 @@
                    (fn [cd]
                      ;; IMPLEMENTATION NOTE:
                      ;; Here the chat 'members-count' have to already be updated!
-                     (if (is-chat-for-group-accounting? cd)
+                     (if (is-chat-for-group-accounting? (:members-count cd))
                        (let [next-id (get-accounts-next-id cd)
                              acc-name (:name old-gen-acc default-general-acc-name)
                              new-general-acc (->general-account
@@ -1398,8 +1393,9 @@
         (proceed-and-respond! chat-id {:transition [:chat-type/private :notify-input-failure]
                                        :params {:reason data-persistence-error}}))
       (else
-        (let [pers-accs-count (count (get-account-ids-of-type
-                                       group-chat-data :acc-type/personal))
+        (let [pers-accs-count (->> {:acc-types [:acc-type/personal]}
+                                   (get-group-chat-accounts chat-id)
+                                   count)
               payer-acc-name (when-not (or (= pers-accs-count 1)
                                            (= payer-acc-id debtor-acc-id))
                                (:name (get-group-chat-account
@@ -1480,8 +1476,7 @@
 
 (defn- send-group-chat-intro!
   [chat-id chat-members-count first-name]
-  (let [intro-msg (get-introduction-msg {:chat-members-count chat-members-count
-                                         :first-name first-name})]
+  (let [intro-msg (get-introduction-msg chat-members-count first-name)]
     (respond! (assoc intro-msg :chat-id chat-id))))
 
 (defn- send-accounts-left-notification!
@@ -2198,9 +2193,12 @@
           (report-added-to-new-chat! user-id chat-title)
           (update-personal-account! chat-id {:user-id user-id} {:new-name text}))
 
-        (let [chat-data (get-chat-data chat-id)
-              pers-accs-count (count (get-account-ids-of-type chat-data :acc-type/personal))
-              uncreated-count (get-number-of-missing-personal-accounts chat-data pers-accs-count)]
+        (let [pers-accs-count (->> {:acc-types [:acc-type/personal]}
+                                   (get-group-chat-accounts chat-id)
+                                   count)
+              uncreated-count (get-number-of-missing-personal-accounts
+                                (:members-count (get-chat-data chat-id))
+                                pers-accs-count)]
           (if (> uncreated-count 0)
             (send-accounts-left-notification! chat-id uncreated-count)
             (do
