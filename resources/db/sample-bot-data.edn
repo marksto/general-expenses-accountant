@@ -28,7 +28,10 @@
                     :bot-messages {:name-request-msg-id 2
 
                                    ;; user-specific
-                                   :to-user {1200000000 {:request-new-name-msg-id 10}}}
+                                   :to-user {1200000000 {:request-new-name-msg-id 10}}
+
+                                   ;; message state (for navigation)
+                                   :states {1 [:settings :initial]}}
 
                     ;; user input/temporary values
                     :input {1200000000 {:rename-account {:account-type :acc-type/personal
