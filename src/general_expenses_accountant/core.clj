@@ -240,6 +240,10 @@
   {:type :callback
    :options {:text "С этим сообщением уже взаимодействуют"}})
 
+(def ^:private ignored-callback-query-notification
+  {:type :callback
+   :options {:text "Запрос не может быть обработан"}})
+
 (defn- get-accounts-mgmt-options-msg
   [accounts-by-type]
   {:type :text
@@ -1759,20 +1763,22 @@
      (log/debugf (str "Ignored: " ~msg) ~@args)
      op-succeed))
 
-;; TODO: Implement an 'immediate response'.
-;;
-;; Telegram is able to handle the following response form:
-;; {
-;;   "method": "sendMessage",
-;;   "chat_id": body.message.chat.id,
-;;   "reply_to_message_id": body.message.message_id,
-;;   "text": "..."
-;; };
-;;
-;; NB: This have to be combined with an Event-Driven model,
-;;     i.e. in case of long-term request processing the bot
-;;;    should immediately respond with sending the 'typing'
-;;     chat action (see /sendChatAction specs).
+(defn- cb-succeed
+  [callback-query-id]
+  (tg-api/build-immediate-response "answerCallbackQuery"
+                                   {:callback_query_id callback-query-id}))
+
+(defn- cb-ignored
+  [callback-query-id]
+  (tg-api/build-immediate-response "answerCallbackQuery"
+                                   (assoc ignored-callback-query-notification
+                                     :callback_query_id callback-query-id)))
+
+;; TODO: This have to be combined with an Event-Driven model,
+;;       i.e. in case of long-term request processing the bot
+;;       should immediately respond with sending the 'typing'
+;;       chat action (use "sendChatAction" method and see the
+;;       /sendChatAction specs for the request parameters).
 
 
 ;; BOT API
@@ -1895,7 +1901,7 @@
               (proceed-and-replace-response! chat-id msg-id
                                              {:transition [:settings :manage-accounts]
                                               :params {:accounts-by-type accounts-by-type}}))))
-        op-succeed)))
+        (cb-succeed callback-query-id))))
 
   (m-hlr/callback-fn
     (fn [{callback-query-id :id
@@ -1928,7 +1934,7 @@
                                 nil)]
               (do
                 (respond!)
-                op-succeed)
+                (cb-succeed callback-query-id))
               (release-message-lock! chat-id user-id msg-id)))))))
 
   (m-hlr/callback-fn
@@ -1948,10 +1954,11 @@
                                                  cd-account-type-prefix "")
                 acc-type (keyword "acc-type" acc-type-name)]
             (proceed-with-account-creation! chat-id acc-type user)))
-        op-succeed)))
+        (cb-succeed callback-query-id))))
 
   (m-hlr/callback-fn
-    (fn [{{user-id :id :as user} :from
+    (fn [{callback-query-id :id
+          {user-id :id :as user} :from
           {msg-id :message_id {chat-id :id} :chat} :message
           callback-btn-data :data
           :as callback-query}]
@@ -1968,12 +1975,13 @@
           (set-user-input-data! chat-id user-id :create-account input-data)
           (when-not can-proceed?
             (proceed-with-account-naming! chat-id user)))
-        op-succeed)))
+        (cb-succeed callback-query-id))))
 
   ;; TODO: Implement an 'undo' button processing: remove the last added member.
 
   (m-hlr/callback-fn
-    (fn [{user :from
+    (fn [{callback-query-id :id
+          user :from
           {msg-id :message_id {chat-id :id} :chat} :message
           callback-btn-data :data
           :as callback-query}]
@@ -1983,7 +1991,7 @@
                  (= cd-done callback-btn-data))
         ;; TODO: Replace the 'msg-id' w/ a text listing all selected members.
         (proceed-with-account-naming! chat-id user)
-        op-succeed)))
+        (cb-succeed callback-query-id))))
 
   (m-hlr/callback-fn
     (fn [{callback-query-id :id
@@ -2003,7 +2011,7 @@
             (let [chat-data (get-chat-data chat-id)
                   account-to-rename (data->account callback-btn-data chat-data)]
               (proceed-with-account-renaming! chat-id user account-to-rename))))
-        op-succeed)))
+        (cb-succeed callback-query-id))))
 
   (m-hlr/callback-fn
     (fn [{callback-query-id :id
@@ -2030,7 +2038,7 @@
 
             (restore-group-chat-intro! chat-id user-id msg-id)
             (send-changes-success-notification! chat-id)))
-        op-succeed)))
+        (cb-succeed callback-query-id))))
 
   (m-hlr/callback-fn
     (fn [{callback-query-id :id
@@ -2059,7 +2067,7 @@
 
             (restore-group-chat-intro! chat-id user-id msg-id)
             (send-changes-success-notification! chat-id)))
-        op-succeed)))
+        (cb-succeed callback-query-id))))
 
   (m-hlr/callback-fn
     (fn [{callback-query-id :id
@@ -2077,7 +2085,7 @@
 
             (proceed-and-replace-response! chat-id msg-id
                                            {:transition [:settings :manage-expense-items]})))
-        op-succeed)))
+        (cb-succeed callback-query-id))))
 
   ;; TODO: Implement handlers for ':expense-items-mgmt'.
 
@@ -2097,7 +2105,7 @@
 
             (proceed-and-replace-response! chat-id msg-id
                                            {:transition [:settings :manage-shares]})))
-        op-succeed)))
+        (cb-succeed callback-query-id))))
 
   ;; TODO: Implement handlers for ':shares-mgmt'.
 
@@ -2125,12 +2133,13 @@
                 (proceed-and-replace-response! chat-id msg-id
                                                {:transition [:settings :manage-accounts]
                                                 :params {:accounts-by-type accounts-by-type}})))))
-        op-succeed)))
+        (cb-succeed callback-query-id))))
 
   ; private chats
 
   (m-hlr/callback-fn
-    (fn [{{first-name :first_name} :from
+    (fn [{callback-query-id :id
+          {first-name :first_name} :from
           {{chat-id :id} :chat} :message
           callback-btn-data :data
           :as callback-query}]
@@ -2141,10 +2150,11 @@
               group-chat-id (nums/parse-int group-chat-id-str)]
           (assoc-in-chat-data! chat-id [:group] group-chat-id)
           (proceed-with-expense-details! chat-id group-chat-id first-name))
-        op-succeed)))
+        (cb-succeed callback-query-id))))
 
   (m-hlr/callback-fn
-    (fn [{{{chat-id :id} :chat} :message
+    (fn [{callback-query-id :id
+          {{chat-id :id} :chat} :message
           callback-btn-data :data
           :as callback-query}]
       (when (and (= :chat-type/private (:chat-type callback-query))
@@ -2153,10 +2163,11 @@
         (let [expense-item (str/replace-first callback-btn-data cd-expense-item-prefix "")]
           (assoc-in-chat-data! chat-id [:expense-item] expense-item)
           (proceed-with-account! chat-id))
-        op-succeed)))
+        (cb-succeed callback-query-id))))
 
   (m-hlr/callback-fn
-    (fn [{{{chat-id :id} :chat} :message
+    (fn [{callback-query-id :id
+          {{chat-id :id} :chat} :message
           callback-btn-data :data
           :as callback-query}]
       (when (and (= :chat-type/private (:chat-type callback-query))
@@ -2166,10 +2177,11 @@
               group-chat-data (get-chat-data group-chat-id)
               debtor-acc (data->account callback-btn-data group-chat-data)]
           (proceed-with-adding-new-expense! chat-id debtor-acc))
-        op-succeed)))
+        (cb-succeed callback-query-id))))
 
   (m-hlr/callback-fn
-    (fn [{{msg-id :message_id {chat-id :id} :chat} :message
+    (fn [{callback-query-id :id
+          {msg-id :message_id {chat-id :id} :chat} :message
           callback-btn-data :data
           :as callback-query}]
       (when (and (= :chat-type/private (:chat-type callback-query))
@@ -2188,7 +2200,7 @@
             (when (not= old-user-input new-user-input)
               (replace-response! (assoc (get-interactive-input-msg new-user-input)
                                    :chat-id chat-id :msg-id msg-id))))
-          op-succeed))))
+          (cb-succeed callback-query-id)))))
 
   (m-hlr/callback-fn
     (fn [{callback-query-id :id
@@ -2220,16 +2232,14 @@
                 (update-user-input-error-status! chat-id true)
                 (replace-response! (assoc (get-calculation-failure-msg parsed-val)
                                      :chat-id chat-id :msg-id msg-id))))))
-        op-succeed)))
-
-  ;; TODO: Add a universal callback response for all intentionally ignored,
-  ;;       i.e. unprocessed, queries ("Запрос не может быть обработан").
+        (cb-succeed callback-query-id))))
 
   (m-hlr/callback-fn
     (fn [{callback-query-id :id _user :from _msg :message _msg-id :inline_message_id
           _chat-instance :chat_instance callback-btn-data :data
           :as _callback-query}]
-      (ignore "callback query id=%s, data=%s" callback-query-id callback-btn-data)))
+      (ignore "callback query id=%s, data=%s" callback-query-id callback-btn-data)
+      (cb-ignored callback-query-id)))
 
   ;; - CHAT MEMBER STATUS UPDATES
 

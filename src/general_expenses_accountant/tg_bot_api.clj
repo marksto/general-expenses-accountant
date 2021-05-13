@@ -62,6 +62,23 @@
 
 ;; AVAILABLE METHODS
 
+(defn build-immediate-response
+  "From the Telegram Bot API docs: \"If you're using webhooks, you can perform
+   a request to the Bot API while sending an answer to the webhook ... Specify
+   the method to be invoked in the 'method' parameter of the request.\".
+
+   An example of an immediate request that the Telegram API is able to handle:
+
+   {:method \"sendMessage\",
+    :chat_id chat-id,
+    :reply_to_message_id msg-id,
+    :text \"An ordinary reply message text.\"}
+
+   This technique helps to reduce the number of requests to the Bot API server
+   and, as a consequence, reduces the response time of the client's UI."
+  [method-name request]
+  (merge {:method method-name} request))
+
 ; /sendMessage
 ;
 ; Use this method to send text messages. On success, the sent Message is returned.
