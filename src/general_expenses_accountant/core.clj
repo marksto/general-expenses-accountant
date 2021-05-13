@@ -134,7 +134,7 @@
 (def ^:private back-button-text "<< назад")
 (def ^:private undo-button-text "Отмена")
 (def ^:private done-button-text "Готово")
-(def ^:private default-general-acc-name "общие")
+(def ^:private default-general-acc-name "общие расходы")
 (def ^:private account-types-names {:acc-type/personal "Личный*" ;; TODO: Make this '*' optional.
                                     :acc-type/group "Групповой"
                                     :acc-type/general "Общий"})
@@ -240,7 +240,7 @@
 
 (def ^:private message-already-in-use-notification
   {:type :callback
-   :options {:text "Другой пользователь взаимодействует с сообщением"}})
+   :options {:text "С этим сообщением уже взаимодействуют"}})
 
 (defn- get-accounts-mgmt-options-msg
   [accounts-by-type]
@@ -1004,6 +1004,7 @@
                      update-in [:input] dissoc user-id))
 
 (defn- release-message-lock!
+  "Releases the \"input lock\" acquired by the user for the message in chat."
   [chat-id user-id msg-id]
   (update-chat-data!
     chat-id
@@ -1014,11 +1015,18 @@
           chat-data))))
   nil)
 
-(defn- acquire-message-lock! ;; TODO: Rewrite the docstring.
-  "The user input data should also store the 'msg-id' of the current message
-   and we should use it as a kind of \"input lock\" so that other users cannot
-   \"intercept\" the current user's input. Also, this data will be auto-erased
-   when the user leaves/is removed from the chat, to no longer block others."
+(defn- acquire-message-lock!
+  "Acquires an \"input lock\" for a specific message in chat and the specified
+   user, but only if the message has not yet been locked by another user.
+
+   IMPLEMENTATION NOTE:
+   The chat data stores IDs of all locked message for each member in ':input',
+   so that none of the users can intercept the input of another and interfere
+   with it. These locks are time-limited — to protect against forgetful users'
+   inactivity.
+   Moreover, since the user-specific input data is auto-erased when the user
+   leaves/is removed from the chat, these message locks will also be released
+   automatically, and immediately."
   [chat-id user-id msg-id]
   (let [updated-chat-data
         (update-chat-data!
