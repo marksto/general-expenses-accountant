@@ -1643,12 +1643,12 @@
   (let [personal-accs (set (get-group-chat-accounts chat-id
                                                     {:acc-types [:acc-type/personal]}))
         selected-accs (set already-selected-account-members)
-        remaining-accs (set/difference personal-accs selected-accs)]
-    (when (seq remaining-accs)
-      (let [member-selection-msg (get-new-member-selection-msg remaining-accs)]
-        (replace-response! {:chat-id chat-id
-                            :msg-id msg-id
-                            :text member-selection-msg})))))
+        remaining-accs (set/difference personal-accs selected-accs)
+        accounts-remain? (seq remaining-accs)]
+    (when accounts-remain?
+      (replace-response! (assoc (get-new-member-selection-msg remaining-accs)
+                           :chat-id chat-id :msg-id msg-id)))
+    accounts-remain?))
 
 (defn- proceed-with-account-selection!
   ([chat-id msg-id callback-query-id
@@ -1964,10 +1964,10 @@
               new-member (data->account callback-btn-data chat-data)
               input-data (-> (get-user-input-data chat-data user-id :create-account)
                              (update :account-members conj new-member))
-              acc-members (:account-members input-data)]
+              can-proceed? (proceed-with-account-member-selection!
+                             chat-id msg-id (:account-members input-data))]
           (set-user-input-data! chat-id user-id :create-account input-data)
-          (when-not
-            (proceed-with-account-member-selection! chat-id msg-id acc-members)
+          (when-not can-proceed?
             (proceed-with-account-naming! chat-id user)))
         op-succeed)))
 
@@ -2188,9 +2188,8 @@
           (let [old-user-input (get-user-input (get-chat-data chat-id))
                 new-user-input (update-user-input! chat-id non-terminal-operation)]
             (when (not= old-user-input new-user-input)
-              (replace-response! {:chat-id chat-id
-                                  :msg-id msg-id
-                                  :text (get-interactive-input-msg new-user-input)})))
+              (replace-response! (assoc (get-interactive-input-msg new-user-input)
+                                   :chat-id chat-id :msg-id msg-id))))
           op-succeed))))
 
   (m-hlr/callback-fn
