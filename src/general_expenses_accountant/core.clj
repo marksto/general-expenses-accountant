@@ -2253,8 +2253,7 @@
               (proceed-with-personal-accounts-creation! chat-id nil))
             (do
               (log/debugf "The chat=%s already exists" chat-id)
-              (when (= :waiting (:chat-state my-chat-member-updated))
-                (proceed-with-new-group-chat-finalization! chat-id))))
+              (proceed-with-new-group-chat-finalization! chat-id)))
           op-succeed)
         (ignore "bot chat member status update dated %s in chat=%s" date chat-id))))
 
@@ -2309,7 +2308,7 @@
           :as message}]
       ;; TODO: Figure out how to proceed if someone accidentally closes the reply.
       (when (and (= :chat-type/group (:chat-type message))
-                 (= :waiting (:chat-state message))
+                 ;(= :waiting (:chat-state message)) ;; TODO: May conflict w/ new acc/renaming. Check & fix.
                  (is-reply-to-bot? chat-id message :name-request-msg-id))
         ;; NB: Here the 'user-id' exists for sure, since it is the User's response.
         (when-some [_new-chat (setup-new-private-chat! user-id chat-id)]
@@ -2338,6 +2337,7 @@
           {chat-id :id} :chat
           :as message}]
       (when (and (= :chat-type/group (:chat-type message))
+                 ;(= :waiting (:chat-state message)) ;; TODO: May conflict w/ new chat members. Check & fix.
                  (is-reply-to-bot? chat-id message
                                    [:to-user user-id :request-acc-name-msg-id]))
         ;; NB: Here the 'user-id' exists for sure, since it is the User's response.
@@ -2365,6 +2365,7 @@
           {chat-id :id} :chat
           :as message}]
       (when (and (= :chat-type/group (:chat-type message))
+                 ;(= :waiting (:chat-state message)) ;; TODO: May conflict w/ new chat members. Check & fix.
                  (is-reply-to-bot? chat-id message
                                    [:to-user user-id :request-rename-msg-id]))
         ;; NB: Here the 'user-id' exists for sure, since it is the User's response.
