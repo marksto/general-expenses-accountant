@@ -544,35 +544,30 @@
 
 (defn- get-chat-state
   "Returns the state of the given chat.
-   NB: Be aware that calling that function, e.g. during a state change,
-       can cause a race condition (RC) and result in an obsolete value."
-  [chat-id]
-  (get (get-chat-data chat-id) :state))
+   NB: Be aware that calling this function, e.g. during a state change,
+       may cause a race condition (RC) and result in an obsolete value."
+  [chat-data]
+  (get chat-data :state))
 
 (defn- change-chat-state!
-  "Returns the new state of the chat if it was set, or 'nil' otherwise." ;; TODO: This does not hold true. Update.
   [chat-id chat-states new-state]
   {:pre [(does-chat-exist? chat-id)]}
-  (let [real-chat-id (get-real-chat-id chat-id)
-        bot-data (update-bot-data!
-                   (fn [bot-data]
-                     (let [curr-state (get-chat-state chat-id)
-                           possible-new-states (or (-> chat-states curr-state :to)
-                                                   (-> chat-states curr-state))]
-                       (if (contains? possible-new-states new-state)
-                         (let [state-init-fn (-> chat-states new-state :init-fn)]
-                           (as-> bot-data $
-                                 (if (some? state-init-fn)
-                                   (update-in $ [real-chat-id :data] state-init-fn)
-                                   $)
-                                 (assoc-in $ [real-chat-id :data :state] new-state)))
-                         (do
-                           (log/errorf "Failed to change state to '%s' for chat=%s with current state '%s'"
-                                       new-state chat-id curr-state)
-                           bot-data)))))
-        upd-chat (get bot-data real-chat-id)]
-    (chats/update! upd-chat) ;; TODO: Check if the update actually happened.
-    new-state))
+  (let [updated-chat-data
+        (update-chat-data!
+          chat-id
+          (fn [chat-data]
+            (let [curr-state (get-chat-state chat-data)
+                  possible-new-states (or (-> chat-states curr-state :to)
+                                          (-> chat-states curr-state))]
+              (if (contains? possible-new-states new-state)
+                (let [state-init-fn (-> chat-states new-state :init-fn)]
+                  (cond-> (assoc chat-data :state new-state)
+                          (some? state-init-fn) (state-init-fn)))
+                (do
+                  (log/errorf "Failed to change state to '%s' for chat=%s with current state '%s'"
+                              new-state chat-id curr-state)
+                  chat-data)))))]
+    (get-chat-state updated-chat-data)))
 
 ;; - ACCOUNTS
 
@@ -1045,7 +1040,7 @@
 
 (defn- can-write-to-user?
   [user-id]
-  (let [chat-state (get-chat-state user-id)]
+  (let [chat-state (-> user-id get-chat-data get-chat-state)]
     (not (or (nil? chat-state)
              (= :initial chat-state)))))
 
@@ -1698,7 +1693,7 @@
 
 (defn- cmd-private-calc!
   [{chat-id :id :as chat}]
-  (when (= :input (get-chat-state chat-id))
+  (when (= :input (-> chat-id get-chat-data get-chat-state))
     (log/debug "Calculator opened in a private chat:" chat)
     (proceed-and-respond! chat-id {:transition [:chat-type/private :show-calculator]})))
 
@@ -1780,16 +1775,17 @@
           msg (case upd-type
                 :message (:message upd)
                 :callback_query (-> upd :callback_query :message)
-                nil)]
+                nil)
+          chat-data (or (get-chat-data (:id chat))
+                        (get-chat-data (:id (:chat msg))))]
       (cond-> nil
               (some? chat)
               (merge {:chat-type (cond
                                    (tg-api/is-private? chat) :chat-type/private
                                    (tg-api/is-group? chat) :chat-type/group)
-                      :chat-state (get-chat-state (:id chat))})
+                      :chat-state (get-chat-state chat-data)})
               (some? msg)
-              (merge {:msg-state (get-bot-msg-state (get-chat-data (-> msg :chat :id))
-                                                    (:message_id msg))}))))
+              (merge {:msg-state (get-bot-msg-state chat-data (:message_id msg))}))))
 
   ;; - BOT COMMANDS
 
