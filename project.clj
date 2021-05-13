@@ -57,6 +57,9 @@
                                   "-Dclojure.spec.compile-asserts=false"]
                        :main general-expenses-accountant.main
                        :omit-source true
-                       :uberjar-name "gea-bot-standalone.jar"}}
+                       :uberjar-name "gea-bot-standalone.jar"
+
+                       ;; temporarily use H2 in production environment
+                       :dependencies [[com.h2database/h2 "1.4.200"]]}}
 
   :repl-options {:init-ns general-expenses-accountant.core})

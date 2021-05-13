@@ -1,6 +1,6 @@
 (ns general-expenses-accountant.db
   (:require [clojure.string :as str]
-            [clojure.java.jdbc :refer [IResultSetReadColumn ISQLValue]]
+            [clojure.java.jdbc :as jdbc :refer [IResultSetReadColumn ISQLValue]]
 
             [hikari-cp.core :as cp]
             [honeysql.core :as sql]
@@ -21,11 +21,48 @@
            [java.util.concurrent TimeUnit]
            [org.postgresql.util PGobject PGTimestamp]))
 
+;; TEMP - 1. Initializing the DB
+
+(def ^:private db-schema-for-h2
+  ;; NB: Heroku runs the SQL below to create a user and database for you.
+  "CREATE USER user_name PASSWORD 'password';
+   ALTER USER user_name ADMIN TRUE;
+   GRANT ALL ON SCHEMA PUBLIC TO user_name;
+
+   CREATE DOMAIN IF NOT EXISTS TIMESTAMPTZ AS TIMESTAMP;
+   CREATE DOMAIN IF NOT EXISTS JSONB AS JSON;")
+
+(defn- create-db-schema
+  [db db-name]
+  (as-> db-schema-for-h2 $
+        (str/replace $ #"user_name" (config/get-prop :db-user))
+        (str/replace $ #"password" (config/get-prop :db-password))
+        (str/replace $ #"database_name" db-name)
+        (try
+          (jdbc/execute! db [$] {:transaction? false})
+          (println "Successfully created the DB\n")
+          (catch Exception e
+            (println (str "Failed to create the DB schema. Exception:\n" e))
+            (System/exit 1)))))
+
+(defn do-create-db-schema!
+  []
+  (let [db-url (config/get-prop :database-url)
+        db-name (-> db-url
+                    (str/split #";")
+                    first
+                    (str/split #"[:/]")
+                    last)]
+    (println (str "Creating the DB '" db-name "'..."))
+    (create-db-schema db-url db-name)))
+
+
 ;; SETTING-UP
 
 (defn- get-datasource-options
   []
   (let [jdbc-url (config/get-prop :database-url)
+        ??? (log/error "jdbc-url ->" jdbc-url)
         jdbc-url-parts (re-find (re-matcher #"(jdbc:)?(.+)://([^/]+/(.+))" jdbc-url))
         db-name (last jdbc-url-parts)]
     {:auto-commit true
@@ -122,6 +159,12 @@
   "Called by the `lein reinit-db` via alias."
   []
   (reinit-db))
+
+;; TEMP - 2. Running the DB migrations
+
+(defn do-migrate-db!
+  []
+  (migrate-db))
 
 
 ;; CUSTOM TYPES

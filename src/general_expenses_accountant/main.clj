@@ -27,7 +27,9 @@
    for a case when the app's JAR is not executed directly."
   [& args]
   (config/load-and-validate! args "dev/config.edn")
+  (db/do-create-db-schema!)
   (db/init!)
+  (db/do-migrate-db!)
   (let [token (config/get-prop :bot-api-token)]
     (if (config/in-dev?)
       (tg-client/setup-long-polling! token bot-api)
