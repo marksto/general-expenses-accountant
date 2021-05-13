@@ -8,9 +8,7 @@
              [api :as m-api]
              [handlers :as m-hlr]]
             [slingshot.slingshot :as slingshot]
-            [taoensso
-             [encore :as encore]
-             [timbre :as log]]
+            [taoensso.timbre :as log]
 
             [general-expenses-accountant.config :as config]
             [general-expenses-accountant.domain.chat :as chats]
@@ -1912,8 +1910,7 @@
           (try-with-message-lock-or-send-notification!
             chat-id user-id msg-id callback-query-id
 
-            (encore/when-let [handler-fn
-                              (condp = callback-btn-data
+            (if-let [respond! (condp = callback-btn-data
                                 cd-accounts-create #(proceed-with-account-type-selection!
                                                       chat-id msg-id :select-acc-type)
                                 cd-accounts-rename #(proceed-with-account-selection!
@@ -1929,8 +1926,10 @@
                                                          :reinstate-account
                                                          (can-reinstate-account? chat-id user-id))
                                 nil)]
-              (handler-fn)
-              op-succeed))))))
+              (do
+                (respond!)
+                op-succeed)
+              (release-message-lock! chat-id user-id msg-id)))))))
 
   (m-hlr/callback-fn
     (fn [{callback-query-id :id
@@ -2116,17 +2115,16 @@
           (try-with-message-lock-or-send-notification!
             chat-id user-id msg-id callback-query-id
 
-            (encore/when-let [state-transition-name (second (:msg-state callback-query))]
-              (case state-transition-name
-                (:initial ;; for when something went wrong
-                  :accounts-mgmt :expense-items-mgmt :shares-mgmt)
-                (restore-group-chat-intro! chat-id user-id msg-id)
+            (case (second (:msg-state callback-query))
+              (:initial ;; for when something went wrong
+                :accounts-mgmt :expense-items-mgmt :shares-mgmt)
+              (restore-group-chat-intro! chat-id user-id msg-id)
 
-                (:account-type-selection :account-renaming :account-revocation :account-reinstatement)
-                (let [accounts-by-type (get-group-chat-accounts-by-type chat-id)]
-                  (proceed-and-replace-response! chat-id msg-id
-                                                 {:transition [:settings :manage-accounts]
-                                                  :params {:accounts-by-type accounts-by-type}}))))))
+              (:account-type-selection :account-renaming :account-revocation :account-reinstatement)
+              (let [accounts-by-type (get-group-chat-accounts-by-type chat-id)]
+                (proceed-and-replace-response! chat-id msg-id
+                                               {:transition [:settings :manage-accounts]
+                                                :params {:accounts-by-type accounts-by-type}})))))
         op-succeed)))
 
   ; private chats
