@@ -61,3 +61,11 @@ A stuck build can be cancelled manually by running the following:
 heroku plugins:install heroku-builds
 heroku builds:cancel BUILD_UUID -a APP_NAME
 ```
+
+## H2-related setup
+
+```
+heroku config:set DATABASE_URL="jdbc:h2:file:/tmp/gen_exp_acc;MODE=PostgreSQL;DATABASE_TO_UPPER=FALSE"
+heroku config:set DB_USER=test
+heroku config:set DB_PASSWORD=test
+```
