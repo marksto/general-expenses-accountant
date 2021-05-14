@@ -1,3 +1,2 @@
-{:up   ["CREATE DOMAIN chat_type AS VARCHAR(10)
-         CHECK (VALUE IN ('private', 'group', 'supergroup'));"]
- :down ["DROP DOMAIN chat_type;"]}
+{:up   ["CREATE DOMAIN CHAT_TYPE AS VARCHAR(10) CHECK (VALUE IN ('private', 'group', 'supergroup'));"]
+ :down ["DROP DOMAIN CHAT_TYPE;"]}

@@ -1,10 +1,10 @@
 {:up   ["CREATE TABLE IF NOT EXISTS tlog (
-           id bigserial PRIMARY KEY,
-           created_at timestamptz,
-           chat_id bigint NOT NULL,
-           payer_acc_id int NOT NULL,
-           debtor_acc_id int NOT NULL,
-           expense_amount decimal NOT NULL,
-           expense_details text NOT NULL
+           id BIGSERIAL PRIMARY KEY,
+           created_at TIMESTAMPTZ,
+           chat_id BIGINT NOT NULL,
+           payer_acc_id INT NOT NULL,
+           debtor_acc_id INT NOT NULL,
+           expense_amount DECIMAL NOT NULL,
+           expense_details TEXT NOT NULL
          );"]
  :down ["DROP TABLE IF EXISTS tlog;"]}

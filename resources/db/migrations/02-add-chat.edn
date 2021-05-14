@@ -1,8 +1,8 @@
 {:up   ["CREATE TABLE IF NOT EXISTS chat (
-           id bigint NOT NULL PRIMARY KEY,
-           created_at timestamptz,
-           updated_at timestamptz,
-           type chat_type NOT NULL,
-           data jsonb NOT NULL
+           id BIGINT NOT NULL PRIMARY KEY,
+           created_at TIMESTAMPTZ,
+           updated_at TIMESTAMPTZ,
+           type CHAT_TYPE NOT NULL,
+           data JSONB NOT NULL
          );"]
  :down ["DROP TABLE IF EXISTS chat;"]}
