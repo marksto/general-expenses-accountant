@@ -646,48 +646,46 @@
        (first gen-accs)))))
 
 (defn- create-general-account!
-  ([chat-id created-dt]
-   (create-general-account! chat-id created-dt nil))
-  ([chat-id created-dt {:keys [remove-member add-member] :as _opts}]
-   (let [updated-chat-data
-         (update-chat-data!
-           chat-id
-           (fn [chat-data]
-             (let [old-gen-acc (get-current-general-account chat-data)
-                   old-members (->> (get-accounts-of-type chat-data
-                                                          :acc-type/personal
-                                                          is-account-active?)
-                                    (map :id)
-                                    set)
-                   new-members (cond-> old-members
-                                       (some? add-member) (conj add-member)
-                                       (some? remove-member) (disj remove-member))
+  [chat-id created-dt & {:keys [remove-member add-member] :as _opts}]
+  (let [updated-chat-data
+        (update-chat-data!
+          chat-id
+          (fn [chat-data]
+            (let [old-gen-acc (get-current-general-account chat-data)
+                  old-members (->> (get-accounts-of-type chat-data
+                                                         :acc-type/personal
+                                                         is-account-active?)
+                                   (map :id)
+                                   set)
+                  new-members (cond-> old-members
+                                      (some? add-member) (conj add-member)
+                                      (some? remove-member) (disj remove-member))
 
-                   upd-old-general-acc-fn
-                   (fn [cd]
-                     (if (some? old-gen-acc)
-                       (assoc-in cd
-                                 [:accounts :acc-type/general (:id old-gen-acc) :revoked]
-                                 created-dt)
-                       cd))
+                  upd-old-general-acc-fn
+                  (fn [cd]
+                    (if (some? old-gen-acc)
+                      (assoc-in cd
+                                [:accounts :acc-type/general (:id old-gen-acc) :revoked]
+                                created-dt)
+                      cd))
 
-                   add-new-general-acc-fn
-                   (fn [cd]
-                     ;; IMPLEMENTATION NOTE:
-                     ;; Here the chat 'members-count' have to already be updated!
-                     (if (is-chat-for-group-accounting? (:members-count cd))
-                       (let [next-id (get-accounts-next-id cd)
-                             acc-name (:name old-gen-acc default-general-acc-name)
-                             new-general-acc (->general-account
-                                               next-id acc-name created-dt new-members)]
-                         (-> cd
-                             (assoc-in [:accounts :last-id] next-id)
-                             (assoc-in [:accounts :acc-type/general next-id] new-general-acc)))
-                       cd))]
-               (-> chat-data
-                   upd-old-general-acc-fn
-                   add-new-general-acc-fn))))]
-     (get-current-general-account updated-chat-data))))
+                  add-new-general-acc-fn
+                  (fn [cd]
+                    ;; IMPLEMENTATION NOTE:
+                    ;; Here the chat 'members-count' have to already be updated!
+                    (if (is-chat-for-group-accounting? (:members-count cd))
+                      (let [next-id (get-accounts-next-id cd)
+                            acc-name (:name old-gen-acc default-general-acc-name)
+                            new-general-acc (->general-account
+                                              next-id acc-name created-dt new-members)]
+                        (-> cd
+                            (assoc-in [:accounts :last-id] next-id)
+                            (assoc-in [:accounts :acc-type/general next-id] new-general-acc)))
+                      cd))]
+              (-> chat-data
+                  upd-old-general-acc-fn
+                  add-new-general-acc-fn))))]
+    (get-current-general-account updated-chat-data)))
 
 ;; - CHATS > ACCOUNTS > PERSONAL
 
@@ -726,38 +724,37 @@
 
 ;; TODO: Rename optional args in all other fns to start w/ '?...' as well.
 (defn- create-personal-account!
-  ([chat-id acc-name created-dt]
-   (create-personal-account! chat-id acc-name created-dt nil nil))
-  ([chat-id acc-name created-dt ?user-id ?first-msg-id]
-   ;; TODO: Add some check for the 'acc-name' uniqueness and an account name re-request flow.
-   (when (or (nil? ?user-id)
-             (let [pers-acc (get-personal-account (get-chat-data chat-id) {:user-id ?user-id})] ;; petty RC
-               (or (nil? pers-acc) (is-account-revoked? pers-acc))))
-     (let [updated-chat-data
-           (update-chat-data!
-             chat-id
-             (fn [chat-data]
-               (let [next-id (get-accounts-next-id chat-data)
+  [chat-id acc-name created-dt & {?user-id :user-id ?first-msg-id :first-msg-id :as _opts}]
+  ;; TODO: Add some check for the 'acc-name' uniqueness and an account name re-request flow.
+  (when (or (nil? ?user-id)
+            (let [pers-acc (get-personal-account (get-chat-data chat-id) {:user-id ?user-id})] ;; petty RC
+              (or (nil? pers-acc) (is-account-revoked? pers-acc))))
+    (let [updated-chat-data
+          (update-chat-data!
+            chat-id
+            (fn [chat-data]
+              (let [next-id (get-accounts-next-id chat-data)
 
-                     upd-accounts-next-id-fn
-                     (fn [cd]
-                       (assoc-in cd [:accounts :last-id] next-id))
+                    upd-accounts-next-id-fn
+                    (fn [cd]
+                      (assoc-in cd [:accounts :last-id] next-id))
 
-                     add-new-personal-acc-fn
-                     (fn [cd]
-                       (let [pers-acc (->personal-account
-                                        next-id acc-name created-dt
-                                        ?user-id ?first-msg-id)]
-                         (cond-> (assoc-in cd [:accounts :acc-type/personal next-id] pers-acc)
-                                 (some? ?user-id) (set-personal-account-id ?user-id next-id))))]
-                 (-> chat-data
-                     upd-accounts-next-id-fn
-                     add-new-personal-acc-fn))))]
-       (get-personal-account updated-chat-data {:user-id ?user-id :name acc-name})))))
+                    add-new-personal-acc-fn
+                    (fn [cd]
+                      (let [pers-acc (->personal-account
+                                       next-id acc-name created-dt
+                                       ?user-id ?first-msg-id)]
+                        (cond-> (assoc-in cd [:accounts :acc-type/personal next-id] pers-acc)
+                                (some? ?user-id) (set-personal-account-id ?user-id next-id))))]
+                (-> chat-data
+                    upd-accounts-next-id-fn
+                    add-new-personal-acc-fn))))]
+      (get-personal-account updated-chat-data {:user-id ?user-id :name acc-name}))))
 
 (defn- update-personal-account!
-  [chat-id {?user-id :user-id ?acc-name :name :as ids}
-   {:keys [new-name revoke? reinstate? datetime] :as _opts}]
+  [chat-id
+   {?user-id :user-id ?acc-name :name :as ids}
+   {:keys [new-name revoke? reinstate? datetime] :as _upd}]
   (let [pers-acc-id (get-personal-account-id (get-chat-data chat-id) ids)] ;; petty RC
     (when (some? pers-acc-id)
       (let [updated-chat-data
@@ -938,8 +935,9 @@
                             (.intValue (biginteger (nth account-path 1))))))
 
 (defn- change-personal-and-related-accounts!
-  [chat-id acc-to-change {:keys [revoke? reinstate? datetime] :as opts}]
-  (let [changed-pers-acc (update-personal-account! chat-id acc-to-change opts)
+  [chat-id acc-to-change
+   {:keys [revoke? reinstate? datetime] :as upd}]
+  (let [changed-pers-acc (update-personal-account! chat-id acc-to-change upd)
         changed-pers-acc-id (:id changed-pers-acc)
         member-opts (cond
                       (true? revoke?) {:remove-member changed-pers-acc-id}
@@ -1603,8 +1601,7 @@
         user-id (:id left-chat-member)
         pers-acc (get-personal-account chat-data {:user-id user-id})]
     ;; TODO: Double check why the 'pers-acc' doesn't get revoked.
-    (change-personal-and-related-accounts! chat-id
-                                           pers-acc
+    (change-personal-and-related-accounts! chat-id pers-acc
                                            {:revoke? true
                                             :datetime (get-datetime-in-tg-format)})
     (drop-user-input-data! chat-id user-id)
@@ -2329,7 +2326,8 @@
         (when-some [_new-chat (setup-new-private-chat! user-id chat-id)]
           (update-private-chat-groups! user-id chat-id))
 
-        (if (create-personal-account! chat-id text date user-id msg-id)
+        (if (create-personal-account! chat-id text date
+                                      :user-id user-id :first-msg-id msg-id)
           (report-added-to-new-chat! user-id chat-title)
           (update-personal-account! chat-id {:user-id user-id} {:new-name text}))
 
