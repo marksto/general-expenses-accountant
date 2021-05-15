@@ -573,8 +573,9 @@
                                           (-> chat-states curr-state))]
               (if (contains? possible-new-states new-state)
                 (let [state-init-fn (-> chat-states new-state :init-fn)]
-                  (cond-> (assoc chat-data :state new-state)
-                          (some? state-init-fn) (state-init-fn)))
+                  (cond-> chat-data
+                          (some? state-init-fn) (state-init-fn)
+                          :and-most-importantly (assoc :state new-state)))
                 (do
                   (log/errorf "Failed to change state to '%s' for chat=%s with current state '%s'"
                               new-state chat-id curr-state)
