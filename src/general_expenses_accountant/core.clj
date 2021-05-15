@@ -481,6 +481,8 @@
   [chat-id]
   (contains? (get-bot-data) chat-id))
 
+(def ^:private default-chat-state :initial)
+
 (defn- setup-new-chat!
   [chat-id new-chat]
   (when-not (does-chat-exist? chat-id) ;; petty RC
@@ -491,7 +493,7 @@
 (defn- setup-new-group-chat!
   [chat-id chat-title chat-members-count]
   (setup-new-chat! chat-id {:type :chat-type/group
-                            :data {:state :initial
+                            :data {:state default-chat-state
                                    :title chat-title
                                    :members-count chat-members-count
                                    :accounts {:last-id -1}}}))
@@ -504,7 +506,7 @@
 (defn- setup-new-private-chat!
   [chat-id group-chat-id]
   (setup-new-chat! chat-id {:type :chat-type/private,
-                            :data {:state :initial
+                            :data {:state default-chat-state
                                    :groups #{group-chat-id}}}))
 
 (defn- get-real-chat-id
@@ -549,11 +551,15 @@
     (:data upd-chat)))
 
 (defn- get-chat-state
-  "Returns the state of the given chat.
+  "Determines the state of the given chat. Returns 'nil' in case the group chat
+   or user is unknown (the input is 'nil') and a valid default in case there is
+   no preset state.
+
    NB: Be aware that calling this function, e.g. during a state change,
        may cause a race condition (RC) and result in an obsolete value."
   [chat-data]
-  (get chat-data :state))
+  (get chat-data :state
+       (when (some? chat-data) default-chat-state)))
 
 (defn- change-chat-state!
   [chat-id chat-states new-state]
@@ -1053,8 +1059,8 @@
 (defn- can-write-to-user?
   [user-id]
   (let [chat-state (-> user-id get-chat-data get-chat-state)]
-    (not (or (nil? chat-state)
-             (= :initial chat-state)))))
+    (and (some? chat-state)
+         (not= default-chat-state chat-state))))
 
 (defn- get-private-chat-groups
   [chat-data]
