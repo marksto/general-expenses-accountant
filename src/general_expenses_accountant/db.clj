@@ -23,11 +23,46 @@
 
 ;; SETTING-UP
 
+(def ^:private heroku-db-url-re
+  #"postgres://(?<username>.+):(?<password>.+)@(?<host>.+):(?<port>[0-9]+)/(?<dbname>.+)")
+
+(def ^:private jdbc-url-re
+  #"(jdbc:)?(?<adapter>[^:]+).*://(?<host>.+):(?<port>[0-9]+)/(?<dbname>[^?]+)(\?(user(name)?=(?<username>[^&]+))?(&password=(?<password>[^&]+))?)?")
+
+(defn- parse-db-url*
+  [db-url-re db-url]
+  (let [matcher (re-matcher db-url-re db-url)
+        get-group (fn [^String name] (.group matcher name))]
+    (when (.matches matcher)
+      {:adapter (get-group "adapter")
+       :username (get-group "username")
+       :password (get-group "password")
+       :host (get-group "host")
+       :port (get-group "port")
+       :db-name (get-group "dbname")})))
+
+(defn parse-db-url
+  "The DATABASE_URL for the Heroku Postgres add-on follows the naming convention:
+   postgres://<username>:<password>@<host>:<port>/<dbname>
+
+   However the Postgres JDBC driver uses the following convention:
+   jdbc:postgresql://<host>:<port>/<dbname>?user=<username>&password=<password>
+
+   Due to this difference (notice the extra 'ql' at the end of 'jdbc:postgresql')
+   we need to hardcode the scheme to 'jdbc:postgresql'.
+
+   Most clients will connect over SSL by default, but on occasion it is necessary
+   to set the 'sslmode=require' parameter on a Postgres connection. We should add
+   this parameter in code rather than edit the config var directly."
+  [db-url]
+  {:pre [(some? db-url)]}
+  (or (parse-db-url* jdbc-url-re db-url)
+      (some-> (parse-db-url* heroku-db-url-re db-url)
+              (assoc :adapter "postgresql"))))
+
 (defn- get-datasource-options
   []
-  (let [jdbc-url (config/get-prop :database-url)
-        jdbc-url-parts (re-find (re-matcher #"(jdbc:)?(.+)://([^/]+/(.+))" jdbc-url))
-        db-name (last jdbc-url-parts)]
+  (let [db-info (parse-db-url (config/get-prop :database-url))]
     {:auto-commit true
      :read-only false
      :connection-timeout (.toMillis TimeUnit/SECONDS 30)
@@ -37,10 +72,14 @@
      :minimum-idle 1
      :maximum-pool-size (config/get-prop :max-db-conn)
      :pool-name "db-pool"
-     :jdbc-url jdbc-url
-     :username (config/get-prop :db-user)
-     :password (config/get-prop :db-password)
-     :database-name db-name}))
+     :adapter (:adapter db-info)
+     :username (or (:username db-info)
+                   (config/get-prop :db-user))
+     :password (or (:password db-info)
+                   (config/get-prop :db-password))
+     :database-name (:db-name db-info)
+     :server-name (:host db-info)
+     :port-number (:port db-info)}))
 
 (defonce datasource
          (delay (cp/make-datasource (get-datasource-options))))
