@@ -50,14 +50,29 @@
 
 ; Chat Member
 
+(def active-chat-member-statuses
+  #{"member" "administrator" "creator" "restricted"})
+
+(def inactive-chat-member-statuses
+  #{"left" "kicked"})
+
 (defn has-joined?
   [{{old-status :status :as old-chat-member} :old_chat_member
     {new-status :status :as new-chat-member} :new_chat_member
     :as _chat-member-updated}]
   (and (some? old-chat-member)
        (some? new-chat-member)
-       (= "member" new-status)
-       (contains? #{"left" "kicked"} old-status)))
+       (contains? inactive-chat-member-statuses old-status)
+       (contains? active-chat-member-statuses new-status)))
+
+(defn has-left?
+  [{{old-status :status :as old-chat-member} :old_chat_member
+    {new-status :status :as new-chat-member} :new_chat_member
+    :as _chat-member-updated}]
+  (and (some? old-chat-member)
+       (some? new-chat-member)
+       (contains? active-chat-member-statuses old-status)
+       (contains? inactive-chat-member-statuses new-status)))
 
 
 ;; AVAILABLE METHODS

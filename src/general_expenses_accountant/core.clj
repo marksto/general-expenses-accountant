@@ -496,6 +496,7 @@
                             :data {:state default-chat-state
                                    :title chat-title
                                    :members-count chat-members-count
+                                   :is-bot-member true
                                    :accounts {:last-id -1}}}))
 
 (defn- setup-new-supergroup-chat!
@@ -1345,6 +1346,7 @@
 ;;       (:replace true, :response-handler, :async true, etc.)?
 
 ;; TODO: Re-implement as a 'multimethod' with 3 _different_ implementations!
+;; TODO: As a precondition, check if ':is-bot-member' is true for 'chat-id'.
 ;; TODO: Re-implement it in asynchronous fashion, with logging the feedback.
 (defn- respond!
   "Uniformly responds to the user action, whether it a message, inline or callback query.
@@ -1389,6 +1391,7 @@
                           tg-response-handler-fn)))
 
 ;; TODO: Re-implement reusing the common part extracted from the 'respond!' multimethod!
+;; TODO: As a precondition, check if ':is-bot-member' is true for 'chat-id'.
 (defn- replace-response!
   "Uniformly replaces the existing response to the user, either by update or delete+send.
    NB: Properly wrapped in try-catch and logged to highlight the exact HTTP client error."
@@ -1581,7 +1584,7 @@
      :params {:chat-members ?new-chat-members}}
     #(->> % :message_id (set-bot-msg-id! chat-id :name-request-msg-id))))
 
-(defn- proceed-with-new-group-chat-finalization!
+(defn- proceed-with-group-chat-finalization!
   [chat-id]
   ;; NB: Tries to create a new version of the "general account"
   ;;     even if the group chat already existed before.
@@ -2253,24 +2256,38 @@
           {_new-user :user _new-status :status :as _new-chat-member} :new_chat_member
           :as my-chat-member-updated}]
       (log/debug "Bot chat member status updated in:" chat)
-      ;; TODO: Process an event of the bot leaving the chat.
-      (if (tg-api/has-joined? my-chat-member-updated)
+      (cond
+        (tg-api/has-joined? my-chat-member-updated)
         (let [token (config/get-prop :bot-api-token)
               chat-members-count (tg-client/get-chat-members-count token chat-id)
               new-chat (setup-new-group-chat! chat-id chat-title chat-members-count)]
           (if (some? new-chat)
             (do
               (send-group-chat-intro! chat-id chat-members-count first-name)
-              ;; NB: It would be nice to update the list of personal
-              ;;     accounts with new ones for those users who have
-              ;;     joined the group chat during the bot's absence,
-              ;;     but this is not feasible, since existing chats
-              ;;     may not be in ':waiting' state at this point.
               (proceed-with-personal-accounts-creation! chat-id nil))
             (do
               (log/debugf "The chat=%s already exists" chat-id)
-              (proceed-with-new-group-chat-finalization! chat-id)))
+              (update-chat-data! chat-id
+                                 assoc :members-count chat-members-count)
+              (update-chat-data! chat-id
+                                 assoc :is-bot-member true)
+              ;; NB: It would be nice to update the list of personal
+              ;;     accounts with new ones for those users who have
+              ;;     joined the group chat during the bot's absence.
+              (proceed-with-personal-accounts-creation! chat-id nil)
+              (proceed-with-group-chat-finalization! chat-id)))
           op-succeed)
+
+        (tg-api/has-left? my-chat-member-updated)
+        (do
+          (update-chat-data! chat-id
+                             update :members-count dec)
+          (update-chat-data! chat-id
+                             assoc :is-bot-member false)
+          ;; TODO: What else do we need to perform here?
+          op-succeed)
+
+        :else
         (ignore "bot chat member status update dated %s in chat=%s" date chat-id))))
 
   (tg-client/chat-member-status-fn

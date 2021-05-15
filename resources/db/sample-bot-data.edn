@@ -23,6 +23,7 @@
              :data {:state :initial
                     :title "Family expenses"
                     :members-count 3
+                    :is-bot-member true
 
                     ;; messages to delete/check replies to
                     :bot-messages {:name-request-msg-id 2
