@@ -28,6 +28,7 @@
   [& args]
   (config/load-and-validate! args "dev/config.edn")
   (db/init!)
+  (db/migrate-db!)
   (let [token (config/get-prop :bot-api-token)]
     (if (config/in-dev?)
       (tg-client/setup-long-polling! token bot-api)
@@ -53,9 +54,9 @@
 (defn finalize
   []
   (log/info (l10n/tr :en :finishing))
-  (db/close!)
   (when (config/in-dev?)
-    (tg-client/stop-long-polling!)))
+    (tg-client/stop-long-polling!))
+  (db/close!))
 
 (defn -main [& args]
   (apply initialize args)

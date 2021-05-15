@@ -64,12 +64,7 @@
     (System/exit 2)))
 
 
-;; 3. Running the DB migrations
-
-(db/migrate-db)
-
-
-;; 4. Preparing for REPL-driven development
+;; 3. Preparing for REPL-driven development
 
 (in-ns 'general-expenses-accountant.core)
 

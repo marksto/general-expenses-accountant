@@ -92,12 +92,19 @@
 
 (defn init!
   []
-  (db/set-default-db-connection! (get-db-spec))
-  (db/set-default-automatically-convert-dashes-and-underscores! true))
+  (try
+    (db/set-default-db-connection! (get-db-spec))
+    (db/set-default-automatically-convert-dashes-and-underscores! true)
+    (catch Exception e
+      (log/error e {:event ::db-init-failed})
+      (System/exit 1))))
 
 (defn close!
   []
-  (cp/close-datasource @datasource))
+  (try
+    (cp/close-datasource @datasource)
+    (catch Exception e
+      (log/error e {:event ::db-close-failed}))))
 
 
 (models/set-root-namespace! 'general-expenses-accountant.domain)
@@ -112,7 +119,7 @@
    :migrations (rt-jdbc/load-resources "db/migrations")})
 
 
-(defn migrate-db
+(defn migrate-db!
   "Uses 'ragtime' to apply DB migration scripts."
   []
   (try
@@ -126,7 +133,7 @@
       (log/error e {:event ::migration-failed})
       (System/exit 1))))
 
-(defn rollback-db
+(defn rollback-db!
   "Uses 'ragtime' to apply DB migration rollback scripts."
   []
   (try
@@ -140,27 +147,27 @@
       (log/error e {:event ::migration-rollback-failed})
       (System/exit 1))))
 
-(defn reinit-db
+(defn reinit-db!
   "Clears DB and recreates it using 'ragtime'."
   []
-  (rollback-db)
-  (migrate-db))
+  (rollback-db!)
+  (migrate-db!))
 
 
 (defn lein-migrate-db
   "Called by the `lein migrate-db` via alias."
   []
-  (migrate-db))
+  (migrate-db!))
 
 (defn lein-rollback-db
   "Called by the `lein rollback-db` via alias."
   []
-  (rollback-db))
+  (rollback-db!))
 
 (defn lein-reinit-db
   "Called by the `lein reinit-db` via alias."
   []
-  (reinit-db))
+  (reinit-db!))
 
 
 ;; CUSTOM TYPES
