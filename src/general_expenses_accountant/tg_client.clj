@@ -46,6 +46,7 @@
   [token upd-handler]
   (reset! *updates-channel
           (try
+            (log/info "Starting Telegram polling...") ;; TODO: Move to Morse.
             (m-poll/start token upd-handler)
             (catch Exception _
               ;; will be processed later
