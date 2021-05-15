@@ -1,15 +1,21 @@
 (ns dev.user
   (:require [clojure.java.jdbc :as sql]
-            [clojure.string :as str]
+            [clojure.string :as str]))
 
-            [general-expenses-accountant.config :as config]))
+;; 0. Loading DEV config
 
 (println (str "Working in " (System/getProperty "user.dir") "\n"))
+
+(load "../../src/general_expenses_accountant/config")
+(alias 'config 'general-expenses-accountant.config)
 
 (config/load-and-validate! [] "dev/config.edn")
 
 
 ;; 1. Initializing the DB
+
+(load "../../src/general_expenses_accountant/db")
+(alias 'db 'general-expenses-accountant.db)
 
 (def db-schema
   (clojure.core/slurp "dev/resources/db/init-db-schema.sql"))
@@ -20,11 +26,13 @@
     (empty? (sql/query db [query-str]))))
 
 (defn create-db-schema
-  [db db-name]
+  [db db-info]
   (as-> db-schema $
-        (str/replace $ #"user_name" (config/get-prop :db-user))
-        (str/replace $ #"password" (config/get-prop :db-password))
-        (str/replace $ #"database_name" db-name)
+        (str/replace $ #"user_name" (or (:username db-info)
+                                        (config/get-prop :db-user)))
+        (str/replace $ #"password" (or (:password db-info)
+                                       (config/get-prop :db-password)))
+        (str/replace $ #"database_name" (:db-name db-info))
         (try
           (sql/execute! db [$] {:transaction? false})
           (println "Successfully created the DB\n")
@@ -33,19 +41,21 @@
             (System/exit 1)))))
 
 (let [db-url (config/get-prop :database-url)
-      db-name (last (str/split db-url #"/"))
-      db (str/replace db-url db-name "")]
-  (if (db-does-not-exist? db db-name)
+      db-info (db/parse-db-url db-url)
+      db-name (:db-name db-info)]
+  (if (db-does-not-exist? db-url db-name)
     (do
       (println (str "Creating the DB '" db-name "'..."))
-      (create-db-schema db db-name))
+      (create-db-schema db-url db-info))
     (println (str "The DB '" db-name "' already exists\n"))))
 
 
 ;; 2. Starting the app
 
 (load "../../src/general_expenses_accountant/main")
-(def server (general-expenses-accountant.main/-main))
+(alias 'app 'general-expenses-accountant.main)
+
+(def server (app/-main))
 
 (if (:started (bean server))
   (println (str "Successfully started the " server "\n"))
@@ -56,8 +66,7 @@
 
 ;; 3. Running the DB migrations
 
-(load "../../src/general_expenses_accountant/db")
-(general-expenses-accountant.db/migrate-db)
+(db/migrate-db)
 
 
 ;; 4. Preparing for REPL-driven development
