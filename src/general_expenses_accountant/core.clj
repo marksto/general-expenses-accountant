@@ -1583,12 +1583,9 @@
 
 (defn- proceed-with-new-group-chat-finalization!
   [chat-id]
-  (let [personal-accs (get-group-chat-accounts chat-id
-                                               {:acc-types [:acc-type/personal]})
-        last-created (->> personal-accs (apply max-key :created) :created)]
-    ;; NB: Tries to create a new version of the general account
-    ;;     even if the group chat already existed before.
-    (create-general-account! chat-id last-created))
+  ;; NB: Tries to create a new version of the "general account"
+  ;;     even if the group chat already existed before.
+  (create-general-account! chat-id (get-datetime-in-tg-format))
   (proceed-and-respond! chat-id {:transition [:chat-type/group :declare-readiness]
                                  :params {:bot-username (get @*bot-user :username)}})
   ;; TODO: Send the settings conditionally, depending on whether it is the first time.
