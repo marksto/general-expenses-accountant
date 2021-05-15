@@ -946,10 +946,10 @@
   (let [changed-pers-acc (update-personal-account! chat-id acc-to-change upd)
         changed-pers-acc-id (:id changed-pers-acc)
         member-opts (cond
-                      (true? revoke?) {:remove-member changed-pers-acc-id}
-                      (true? reinstate?) {:add-member changed-pers-acc-id})]
+                      (true? revoke?) [:remove-member changed-pers-acc-id]
+                      (true? reinstate?) [:add-member changed-pers-acc-id])]
     ;; TODO: Update group accs of which the 'changed-pers-acc-id' is a member.
-    (create-general-account! chat-id datetime member-opts)
+    (apply create-general-account! chat-id datetime member-opts)
     changed-pers-acc-id))
 
 ;; - CHATS > GROUP CHAT > BOT MESSAGES
