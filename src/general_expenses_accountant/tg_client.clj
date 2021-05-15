@@ -65,6 +65,7 @@
   to our bot over this time, then making the same call again;
   this way is fine for a local debugging/testing purposes."
   [token upd-handler]
+  ;; TODO: First, 'get-webhook-info'. Then, save the 'url', if any, and restore it upon 'stop-long-polling!'.
   (m-api/set-webhook token "") ;; polling won't work if a webhook is set up
 
   (start-long-polling! token upd-handler)
