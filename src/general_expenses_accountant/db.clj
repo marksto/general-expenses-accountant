@@ -27,12 +27,16 @@
   #"postgres://(?<username>.+):(?<password>.+)@(?<host>.+):(?<port>[0-9]+)/(?<dbname>.+)")
 
 (def ^:private jdbc-url-re
-  #"(jdbc:)?(?<adapter>[^:]+).*://(?<host>.+):(?<port>[0-9]+)/(?<dbname>[^?]+)(\?(user(name)?=(?<username>[^&]+))?(&password=(?<password>[^&]+))?)?")
+  #"(jdbc:)?(?<adapter>[^:]+).*://(?<host>[^:]+):(?<port>[0-9]+)/(?<dbname>[^?]+)(\?(user(name)?=(?<username>[^&]+))?(&password=(?<password>[^&]+))?)?")
 
 (defn- parse-db-url*
   [db-url-re db-url]
   (let [matcher (re-matcher db-url-re db-url)
-        get-group (fn [^String name] (.group matcher name))]
+        get-group (fn [^String name]
+                    (try
+                      (.group matcher name)
+                      (catch Exception _
+                        nil)))]
     (when (.matches matcher)
       {:adapter (get-group "adapter")
        :username (get-group "username")
