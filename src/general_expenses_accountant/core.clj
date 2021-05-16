@@ -8,7 +8,9 @@
              [api :as m-api]
              [handlers :as m-hlr]]
             [slingshot.slingshot :as slingshot]
-            [taoensso.timbre :as log]
+            [taoensso
+             [encore :as encore]
+             [timbre :as log]]
 
             [general-expenses-accountant.config :as config]
             [general-expenses-accountant.domain.chat :as chats]
@@ -1606,10 +1608,9 @@
   [chat-id left-chat-member]
   (update-chat-data! chat-id
                      update :members-count dec)
-  (let [chat-data (get-chat-data chat-id)
-        user-id (:id left-chat-member)
-        pers-acc (get-personal-account chat-data {:user-id user-id})]
-    ;; TODO: Double check why the 'pers-acc' doesn't get revoked.
+  (encore/when-let [chat-data (get-chat-data chat-id)
+                    user-id (:id left-chat-member)
+                    pers-acc (get-personal-account chat-data {:user-id user-id})]
     (change-personal-and-related-accounts! chat-id pers-acc
                                            {:revoke? true
                                             :datetime (get-datetime-in-tg-format)})
