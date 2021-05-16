@@ -535,8 +535,9 @@
         bot-data (apply update-bot-data!
                         update-in [real-chat-id :data] upd-fn upd-fn-args)
         upd-chat (get bot-data real-chat-id)]
-    (chats/update! upd-chat) ;; TODO: Check if the update actually happened.
-    (:data upd-chat)))
+    (if (chats/update! upd-chat)
+      (:data upd-chat)
+      (throw (IllegalStateException. (str "Failed to save updated chat:" upd-chat))))))
 
 (defn- assoc-in-chat-data!
   [chat-id [key & ks] value]
@@ -548,8 +549,9 @@
                                      dissoc (last full-path))
                    (update-bot-data! assoc-in full-path value))
         upd-chat (get bot-data real-chat-id)]
-    (chats/update! upd-chat) ;; TODO: Check if the update actually happened.
-    (:data upd-chat)))
+    (if (chats/update! upd-chat)
+      (:data upd-chat)
+      (throw (IllegalStateException. (str "Failed to save updated chat:" upd-chat))))))
 
 (defn- get-chat-state
   "Determines the state of the given chat. Returns 'nil' in case the group chat
