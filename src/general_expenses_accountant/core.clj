@@ -522,7 +522,6 @@
                             :data {:state default-chat-state
                                    :title chat-title
                                    :members-count chat-members-count
-                                   :is-bot-member true
                                    :accounts {:last-id -1}}}))
 
 (defn- setup-new-supergroup-chat!
@@ -1199,9 +1198,12 @@
 (def ^:private group-chat-states
   {:initial #{:waiting}
    :waiting #{:waiting
-              :ready}
+              :ready
+              :evicted}
    :ready #{:waiting
-            :ready}})
+            :ready
+            :evicted}
+   :evicted #{:waiting}})
 
 (def ^:private private-chat-states
   {:initial #{:input}
@@ -1247,7 +1249,9 @@
                         :message-fn get-bot-readiness-msg
                         :message-params [:bot-username]}
     :notify-changes-success {:to-state :ready
-                             :message successful-changes-msg}}
+                             :message successful-changes-msg}
+
+    :mark-evicted {:to-state :evicted}}
 
    :chat-type/private
    {:request-amount {:to-state :input
@@ -1374,7 +1378,7 @@
 ;;       (:replace true, :response-handler, :async true, etc.)?
 
 ;; TODO: Re-implement as a 'multimethod' with 3 _different_ implementations!
-;; TODO: As a precondition, check if ':is-bot-member' is true for 'chat-id'.
+;; TODO: As a precondition, check if chat w/ 'chat-id' has ':evicted' state.
 ;; TODO: Re-implement it in asynchronous fashion, with logging the feedback.
 (defn- respond!
   "Uniformly responds to the user action, whether it a message, inline or callback query.
@@ -1419,7 +1423,7 @@
                           tg-response-handler-fn)))
 
 ;; TODO: Re-implement reusing the common part extracted from the 'respond!' multimethod!
-;; TODO: As a precondition, check if ':is-bot-member' is true for 'chat-id'.
+;; TODO: As a precondition, check if chat w/ 'chat-id' has ':evicted' state.
 (defn- replace-response!
   "Uniformly replaces the existing response to the user, either by update or delete+send.
    NB: Properly wrapped in try-catch and logged to highlight the exact HTTP client error."
@@ -1622,6 +1626,11 @@
 (defn- send-changes-success-notification!
   [chat-id]
   (respond! (assoc successful-changes-msg :chat-id chat-id)))
+
+
+(defn- proceed-with-bot-eviction!
+  [chat-id]
+  (handle-chat-state-transition! chat-id {:transition [:chat-type/group :mark-evicted]}))
 
 (defn- proceed-with-personal-accounts-creation!
   [chat-id ?new-chat-members]
@@ -2374,8 +2383,6 @@
               (log/debugf "The chat=%s already exists" chat-id)
               (update-chat-data! chat-id
                                  assoc :members-count chat-members-count)
-              (update-chat-data! chat-id
-                                 assoc :is-bot-member true)
               ;; NB: It would be nice to update the list of personal
               ;;     accounts with new ones for those users who have
               ;;     joined the group chat during the bot's absence.
@@ -2387,9 +2394,7 @@
         (do
           (update-chat-data! chat-id
                              update :members-count dec)
-          (update-chat-data! chat-id
-                             assoc :is-bot-member false)
-          ;; TODO: What else do we need to perform here?
+          (proceed-with-bot-eviction! chat-id)
           op-succeed)
 
         :else
