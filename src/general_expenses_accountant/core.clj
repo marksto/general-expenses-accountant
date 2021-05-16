@@ -1885,7 +1885,8 @@
                                    (tg-api/is-group? chat) :chat-type/group)
                       :chat-state (get-chat-state chat-data)})
               (some? msg)
-              (merge {:msg-state (get-bot-msg-state chat-data (:message_id msg))}))))
+              (merge (when-let [msg-state (get-bot-msg-state chat-data (:message_id msg))]
+                       {:msg-state msg-state})))))
 
   ;; - BOT COMMANDS
 
