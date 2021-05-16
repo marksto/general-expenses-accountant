@@ -130,10 +130,12 @@
 (def ^:private cd-clear "<-")
 (def ^:private cd-enter "OK")
 
+
 ;; TODO: Proper localization (with fn).
 (def ^:private back-button-text "<< назад")
 (def ^:private undo-button-text "Отмена")
 (def ^:private done-button-text "Готово")
+(def ^:private unknown-failure-text "Что-то пошло не так.")
 (def ^:private default-general-acc-name "общие расходы")
 (def ^:private account-types-names {:acc-type/personal "Личный*" ;; TODO: Make this '*' optional.
                                     :acc-type/group "Групповой"
@@ -144,6 +146,7 @@
 (def ^:private data-persistence-error "Ошибка при сохранении данных. Пожалуйста, повторите попытку позже.")
 (def ^:private no-debtor-account-error "Нет возможности выбрать счёт для данного расхода.")
 (def ^:private no-group-to-record-error "Нет возможности выбрать группу для записи расходов.")
+
 
 (defn- escape-markdown-v2
   "A minor part of the Markdown V2 escaping features that is absolutely necessary."
@@ -203,6 +206,27 @@
 
 (def ^:private back-button
   (tg-api/build-inline-kbd-btn back-button-text :callback_data cd-back))
+
+
+(defn- get-retry-commands-msg
+  [commands]
+  {:type :text
+   :text (format
+           (str unknown-failure-text " Пожалуйста, повторите %s %s %s.")
+           (if (next commands) "команды" "команду")
+           (->> commands
+                (map (partial str "/"))
+                (str/join ", "))
+           (if (next commands) "по-отдельности" "через какое-то время"))})
+
+(def ^:private retry-resend-message-msg
+  {:type :text
+   :text (str unknown-failure-text " Пожалуйста, отправьте сообщение снова.")})
+
+(def ^:private retry-callback-query-notification
+  {:type :callback
+   :options {:text (str unknown-failure-text " Пожалуйста, повторите действие.")}})
+
 
 ; group chats
 
@@ -1423,6 +1447,24 @@
 
 ;; - SPECIFIC ACTIONS
 
+(defn- send-retry-command!
+  [{{chat-id :id} :chat :as message}]
+  (let [commands-to-retry (tg-client/get-commands {:message message})]
+    (respond! (assoc (get-retry-commands-msg commands-to-retry) :chat-id chat-id))))
+
+(defn- send-retry-message!
+  [{{chat-id :id} :chat :as _message}]
+  (respond! (assoc retry-resend-message-msg :chat-id chat-id)))
+
+(defn- send-retry-callback-query!
+  [{callback-query-id :id :as _callback-query}]
+  (respond! (assoc retry-callback-query-notification
+              :callback-query-id callback-query-id)))
+
+(defn- notify-of-inconsistent-chat-state!
+  [_arg]
+  '(notify-bot-admin)) ;; TODO: Implement Admin notifications feature.
+
 ; private chats
 
 (defn- report-added-to-new-chat!
@@ -1434,6 +1476,7 @@
   [user-id chat-title]
   (when (can-write-to-user? user-id)
     (respond! (assoc (get-removed-from-group-msg chat-title) :chat-id user-id))))
+
 
 (defn- proceed-with-adding-new-expense!
   [chat-id debtor-acc]
@@ -1692,6 +1735,7 @@
     #(->> % :message_id
           (set-bot-msg-id! chat-id [:to-user user-id :request-rename-msg-id]))))
 
+
 (defmacro do-when-chat-is-ready-or-send-notification!
   [chat-state callback-query-id & body]
   `(if (= :ready ~chat-state)
@@ -1701,8 +1745,8 @@
 (defmacro try-with-message-lock-or-send-notification!
   [chat-id user-id msg-id callback-query-id & body]
   `(if (acquire-message-lock! ~chat-id ~user-id ~msg-id)
-    (do ~@body)
-    (send-message-already-in-use-notification! ~callback-query-id)))
+     (do ~@body)
+     (send-message-already-in-use-notification! ~callback-query-id)))
 
 ;; - COMMANDS ACTIONS
 
@@ -1763,6 +1807,7 @@
 
 ;; NB: Any non-nil will do.
 (def ^:private op-succeed {:ok true})
+(def ^:private op-failed {:ok false})
 
 (defmacro ^:private ignore
   [msg & args]
@@ -1796,6 +1841,18 @@
 ; - No more than 20 messages per minute in one group,
 ; - No more than 30 messages per second in total.
 
+(defmacro handle-with-care!
+  [bindings & handler-body-and-care-fn]
+  (let [body (butlast handler-body-and-care-fn)
+        care-fn (last handler-body-and-care-fn)]
+    `(fn [arg#]
+       (try
+         ((fn ~bindings ~@body) arg#)
+         (catch Exception e#
+           (log/error e# "Failed to handle an incoming update:" arg#)
+           (~care-fn arg#)
+           op-failed)))))
+
 (tg-client/defhandler
   handler
 
@@ -1827,47 +1884,59 @@
 
   (tg-client/command-fn
     "help"
-    (fn [{chat :chat :as message}]
+    (handle-with-care!
+      [{chat :chat :as message}]
       (when (= :chat-type/group (:chat-type message))
         (cmd-group-help! chat)
-        op-succeed)))
+        op-succeed)
+      send-retry-command!))
 
   (tg-client/command-fn
     "settings"
-    (fn [{chat :chat :as message}]
+    (handle-with-care!
+      [{chat :chat :as message}]
       (when (= :chat-type/group (:chat-type message))
         (cmd-group-settings! chat)
-        op-succeed)))
+        op-succeed)
+      send-retry-command!))
 
   ; private chats
 
   (tg-client/command-fn
     "start"
-    (fn [{user :from chat :chat :as message}]
+    (handle-with-care!
+      [{user :from chat :chat :as message}]
       (when (= :chat-type/private (:chat-type message))
         (cmd-private-start! chat user)
-        op-succeed)))
+        op-succeed)
+      send-retry-command!))
 
   (tg-client/command-fn
     "help"
-    (fn [{chat :chat :as message}]
+    (handle-with-care!
+      [{chat :chat :as message}]
       (when (= :chat-type/private (:chat-type message))
         (cmd-private-help! chat)
-        op-succeed)))
+        op-succeed)
+      send-retry-command!))
 
   (tg-client/command-fn
     "calc"
-    (fn [{chat :chat :as message}]
+    (handle-with-care!
+      [{chat :chat :as message}]
       (when (and (= :chat-type/private (:chat-type message))
                  (cmd-private-calc! chat))
-        op-succeed)))
+        op-succeed)
+      send-retry-command!))
 
   (tg-client/command-fn
     "cancel"
-    (fn [{chat :chat :as message}]
+    (handle-with-care!
+      [{chat :chat :as message}]
       (when (= :chat-type/private (:chat-type message))
         (cmd-private-cancel! chat)
-        op-succeed)))
+        op-succeed)
+      send-retry-command!))
 
   ;; - INLINE QUERIES
 
@@ -1891,11 +1960,12 @@
   ; group chats
 
   (m-hlr/callback-fn
-    (fn [{callback-query-id :id
-          {user-id :id} :from
-          {msg-id :message_id {chat-id :id} :chat} :message
-          callback-btn-data :data
-          :as callback-query}]
+    (handle-with-care!
+      [{callback-query-id :id
+        {user-id :id} :from
+        {msg-id :message_id {chat-id :id} :chat} :message
+        callback-btn-data :data
+        :as callback-query}]
       (when (and (= :chat-type/group (:chat-type callback-query))
                  (= [:settings :initial] (:msg-state callback-query))
                  (= cd-accounts callback-btn-data))
@@ -1908,14 +1978,16 @@
               (proceed-and-replace-response! chat-id msg-id
                                              {:transition [:settings :manage-accounts]
                                               :params {:accounts-by-type accounts-by-type}}))))
-        (cb-succeed callback-query-id))))
+        (cb-succeed callback-query-id))
+      send-retry-callback-query!))
 
   (m-hlr/callback-fn
-    (fn [{callback-query-id :id
-          {user-id :id} :from
-          {msg-id :message_id {chat-id :id} :chat} :message
-          callback-btn-data :data
-          :as callback-query}]
+    (handle-with-care!
+      [{callback-query-id :id
+        {user-id :id} :from
+        {msg-id :message_id {chat-id :id} :chat} :message
+        callback-btn-data :data
+        :as callback-query}]
       (when (and (= :chat-type/group (:chat-type callback-query))
                  (= [:settings :accounts-mgmt] (:msg-state callback-query)))
         (do-when-chat-is-ready-or-send-notification!
@@ -1942,14 +2014,16 @@
               (do
                 (respond!)
                 (cb-succeed callback-query-id))
-              (release-message-lock! chat-id user-id msg-id)))))))
+              (release-message-lock! chat-id user-id msg-id)))))
+      send-retry-callback-query!))
 
   (m-hlr/callback-fn
-    (fn [{callback-query-id :id
-          {user-id :id :as user} :from
-          {msg-id :message_id {chat-id :id} :chat} :message
-          callback-btn-data :data
-          :as callback-query}]
+    (handle-with-care!
+      [{callback-query-id :id
+        {user-id :id :as user} :from
+        {msg-id :message_id {chat-id :id} :chat} :message
+        callback-btn-data :data
+        :as callback-query}]
       (when (and (= :chat-type/group (:chat-type callback-query))
                  (= [:settings :account-type-selection] (:msg-state callback-query))
                  (str/starts-with? callback-btn-data cd-account-type-prefix))
@@ -1961,14 +2035,16 @@
                                                  cd-account-type-prefix "")
                 acc-type (keyword "acc-type" acc-type-name)]
             (proceed-with-account-creation! chat-id acc-type user)))
-        (cb-succeed callback-query-id))))
+        (cb-succeed callback-query-id))
+      send-retry-callback-query!))
 
   (m-hlr/callback-fn
-    (fn [{callback-query-id :id
-          {user-id :id :as user} :from
-          {msg-id :message_id {chat-id :id} :chat} :message
-          callback-btn-data :data
-          :as callback-query}]
+    (handle-with-care!
+      [{callback-query-id :id
+        {user-id :id :as user} :from
+        {msg-id :message_id {chat-id :id} :chat} :message
+        callback-btn-data :data
+        :as callback-query}]
       ;; TODO: Think out if this message also requires (by design) state mgmt.
       (when (and (= :chat-type/group (:chat-type callback-query))
                  (= :waiting (:chat-state callback-query))
@@ -1982,30 +2058,34 @@
           (set-user-input-data! chat-id user-id :create-account input-data)
           (when-not can-proceed?
             (proceed-with-account-naming! chat-id user)))
-        (cb-succeed callback-query-id))))
+        (cb-succeed callback-query-id))
+      send-retry-callback-query!))
 
   ;; TODO: Implement an 'undo' button processing: remove the last added member.
 
   (m-hlr/callback-fn
-    (fn [{callback-query-id :id
-          user :from
-          {msg-id :message_id {chat-id :id} :chat} :message
-          callback-btn-data :data
-          :as callback-query}]
+    (handle-with-care!
+      [{callback-query-id :id
+        user :from
+        {msg-id :message_id {chat-id :id} :chat} :message
+        callback-btn-data :data
+        :as callback-query}]
       ;; TODO: Think out if this message also requires (by design) state mgmt.
       (when (and (= :chat-type/group (:chat-type callback-query))
                  (= :waiting (:chat-state callback-query))
                  (= cd-done callback-btn-data))
         ;; TODO: Replace the 'msg-id' w/ a text listing all selected members.
         (proceed-with-account-naming! chat-id user)
-        (cb-succeed callback-query-id))))
+        (cb-succeed callback-query-id))
+      send-retry-callback-query!))
 
   (m-hlr/callback-fn
-    (fn [{callback-query-id :id
-          {user-id :id :as user} :from
-          {msg-id :message_id {chat-id :id} :chat} :message
-          callback-btn-data :data
-          :as callback-query}]
+    (handle-with-care!
+      [{callback-query-id :id
+        {user-id :id :as user} :from
+        {msg-id :message_id {chat-id :id} :chat} :message
+        callback-btn-data :data
+        :as callback-query}]
       (when (and (= :chat-type/group (:chat-type callback-query))
                  (= [:settings :account-renaming] (:msg-state callback-query))
                  (str/starts-with? callback-btn-data cd-account-prefix))
@@ -2018,14 +2098,16 @@
             (let [chat-data (get-chat-data chat-id)
                   account-to-rename (data->account callback-btn-data chat-data)]
               (proceed-with-account-renaming! chat-id user account-to-rename))))
-        (cb-succeed callback-query-id))))
+        (cb-succeed callback-query-id))
+      send-retry-callback-query!))
 
   (m-hlr/callback-fn
-    (fn [{callback-query-id :id
-          {user-id :id} :from
-          {msg-id :message_id {chat-id :id} :chat} :message
-          callback-btn-data :data
-          :as callback-query}]
+    (handle-with-care!
+      [{callback-query-id :id
+        {user-id :id} :from
+        {msg-id :message_id {chat-id :id} :chat} :message
+        callback-btn-data :data
+        :as callback-query}]
       (when (and (= :chat-type/group (:chat-type callback-query))
                  (= [:settings :account-revocation] (:msg-state callback-query))
                  (str/starts-with? callback-btn-data cd-account-prefix))
@@ -2045,14 +2127,16 @@
 
             (restore-group-chat-intro! chat-id user-id msg-id)
             (send-changes-success-notification! chat-id)))
-        (cb-succeed callback-query-id))))
+        (cb-succeed callback-query-id))
+      send-retry-callback-query!))
 
   (m-hlr/callback-fn
-    (fn [{callback-query-id :id
-          {user-id :id} :from
-          {msg-id :message_id {chat-id :id} :chat} :message
-          callback-btn-data :data
-          :as callback-query}]
+    (handle-with-care!
+      [{callback-query-id :id
+        {user-id :id} :from
+        {msg-id :message_id {chat-id :id} :chat} :message
+        callback-btn-data :data
+        :as callback-query}]
       (when (and (= :chat-type/group (:chat-type callback-query))
                  (= [:settings :account-reinstatement] (:msg-state callback-query))
                  (str/starts-with? callback-btn-data cd-account-prefix))
@@ -2074,14 +2158,16 @@
 
             (restore-group-chat-intro! chat-id user-id msg-id)
             (send-changes-success-notification! chat-id)))
-        (cb-succeed callback-query-id))))
+        (cb-succeed callback-query-id))
+      send-retry-callback-query!))
 
   (m-hlr/callback-fn
-    (fn [{callback-query-id :id
-          {user-id :id} :from
-          {msg-id :message_id {chat-id :id} :chat} :message
-          callback-btn-data :data
-          :as callback-query}]
+    (handle-with-care!
+      [{callback-query-id :id
+        {user-id :id} :from
+        {msg-id :message_id {chat-id :id} :chat} :message
+        callback-btn-data :data
+        :as callback-query}]
       (when (and (= :chat-type/group (:chat-type callback-query))
                  (= [:settings :initial] (:msg-state callback-query))
                  (= cd-expense-items callback-btn-data))
@@ -2092,16 +2178,18 @@
 
             (proceed-and-replace-response! chat-id msg-id
                                            {:transition [:settings :manage-expense-items]})))
-        (cb-succeed callback-query-id))))
+        (cb-succeed callback-query-id))
+      send-retry-callback-query!))
 
   ;; TODO: Implement handlers for ':expense-items-mgmt'.
 
   (m-hlr/callback-fn
-    (fn [{callback-query-id :id
-          {user-id :id} :from
-          {msg-id :message_id {chat-id :id} :chat} :message
-          callback-btn-data :data
-          :as callback-query}]
+    (handle-with-care!
+      [{callback-query-id :id
+        {user-id :id} :from
+        {msg-id :message_id {chat-id :id} :chat} :message
+        callback-btn-data :data
+        :as callback-query}]
       (when (and (= :chat-type/group (:chat-type callback-query))
                  (= [:settings :initial] (:msg-state callback-query))
                  (= cd-shares callback-btn-data))
@@ -2112,16 +2200,18 @@
 
             (proceed-and-replace-response! chat-id msg-id
                                            {:transition [:settings :manage-shares]})))
-        (cb-succeed callback-query-id))))
+        (cb-succeed callback-query-id))
+      send-retry-callback-query!))
 
   ;; TODO: Implement handlers for ':shares-mgmt'.
 
   (m-hlr/callback-fn
-    (fn [{callback-query-id :id
-          {user-id :id} :from
-          {msg-id :message_id {chat-id :id} :chat} :message
-          callback-btn-data :data
-          :as callback-query}]
+    (handle-with-care!
+      [{callback-query-id :id
+        {user-id :id} :from
+        {msg-id :message_id {chat-id :id} :chat} :message
+        callback-btn-data :data
+        :as callback-query}]
       (when (and (= :chat-type/group (:chat-type callback-query))
                  (= :settings (first (:msg-state callback-query)))
                  (= cd-back callback-btn-data))
@@ -2140,16 +2230,18 @@
                 (proceed-and-replace-response! chat-id msg-id
                                                {:transition [:settings :manage-accounts]
                                                 :params {:accounts-by-type accounts-by-type}})))))
-        (cb-succeed callback-query-id))))
+        (cb-succeed callback-query-id))
+      send-retry-callback-query!))
 
   ; private chats
 
   (m-hlr/callback-fn
-    (fn [{callback-query-id :id
-          {first-name :first_name} :from
-          {{chat-id :id} :chat} :message
-          callback-btn-data :data
-          :as callback-query}]
+    (handle-with-care!
+      [{callback-query-id :id
+        {first-name :first_name} :from
+        {{chat-id :id} :chat} :message
+        callback-btn-data :data
+        :as callback-query}]
       (when (and (= :chat-type/private (:chat-type callback-query))
                  (= :group-selection (:chat-state callback-query))
                  (str/starts-with? callback-btn-data cd-group-chat-prefix))
@@ -2157,26 +2249,30 @@
               group-chat-id (nums/parse-int group-chat-id-str)]
           (assoc-in-chat-data! chat-id [:group] group-chat-id)
           (proceed-with-expense-details! chat-id group-chat-id first-name))
-        (cb-succeed callback-query-id))))
+        (cb-succeed callback-query-id))
+      send-retry-callback-query!))
 
   (m-hlr/callback-fn
-    (fn [{callback-query-id :id
-          {{chat-id :id} :chat} :message
-          callback-btn-data :data
-          :as callback-query}]
+    (handle-with-care!
+      [{callback-query-id :id
+        {{chat-id :id} :chat} :message
+        callback-btn-data :data
+        :as callback-query}]
       (when (and (= :chat-type/private (:chat-type callback-query))
                  (= :expense-detailing (:chat-state callback-query))
                  (str/starts-with? callback-btn-data cd-expense-item-prefix))
         (let [expense-item (str/replace-first callback-btn-data cd-expense-item-prefix "")]
           (assoc-in-chat-data! chat-id [:expense-item] expense-item)
           (proceed-with-account! chat-id))
-        (cb-succeed callback-query-id))))
+        (cb-succeed callback-query-id))
+      send-retry-callback-query!))
 
   (m-hlr/callback-fn
-    (fn [{callback-query-id :id
-          {{chat-id :id} :chat} :message
-          callback-btn-data :data
-          :as callback-query}]
+    (handle-with-care!
+      [{callback-query-id :id
+        {{chat-id :id} :chat} :message
+        callback-btn-data :data
+        :as callback-query}]
       (when (and (= :chat-type/private (:chat-type callback-query))
                  (= :account-selection (:chat-state callback-query))
                  (str/starts-with? callback-btn-data cd-account-prefix))
@@ -2184,13 +2280,15 @@
               group-chat-data (get-chat-data group-chat-id)
               debtor-acc (data->account callback-btn-data group-chat-data)]
           (proceed-with-adding-new-expense! chat-id debtor-acc))
-        (cb-succeed callback-query-id))))
+        (cb-succeed callback-query-id))
+      send-retry-callback-query!))
 
   (m-hlr/callback-fn
-    (fn [{callback-query-id :id
-          {msg-id :message_id {chat-id :id} :chat} :message
-          callback-btn-data :data
-          :as callback-query}]
+    (handle-with-care!
+      [{callback-query-id :id
+        {msg-id :message_id {chat-id :id} :chat} :message
+        callback-btn-data :data
+        :as callback-query}]
       (when (and (= :chat-type/private (:chat-type callback-query))
                  (= :interactive-input (:chat-state callback-query)))
         (when-let [non-terminal-operation (condp apply [callback-btn-data]
@@ -2207,14 +2305,16 @@
             (when (not= old-user-input new-user-input)
               (replace-response! (assoc (get-interactive-input-msg new-user-input)
                                    :chat-id chat-id :msg-id msg-id))))
-          (cb-succeed callback-query-id)))))
+          (cb-succeed callback-query-id)))
+      send-retry-callback-query!))
 
   (m-hlr/callback-fn
-    (fn [{callback-query-id :id
-          {first-name :first_name} :from
-          {msg-id :message_id {chat-id :id} :chat} :message
-          callback-btn-data :data
-          :as callback-query}]
+    (handle-with-care!
+      [{callback-query-id :id
+        {first-name :first_name} :from
+        {msg-id :message_id {chat-id :id} :chat} :message
+        callback-btn-data :data
+        :as callback-query}]
       (when (and (= :chat-type/private (:chat-type callback-query))
                  (= :interactive-input (:chat-state callback-query))
                  (= cd-enter callback-btn-data))
@@ -2239,7 +2339,8 @@
                 (update-user-input-error-status! chat-id true)
                 (replace-response! (assoc (get-calculation-failure-msg parsed-val)
                                      :chat-id chat-id :msg-id msg-id))))))
-        (cb-succeed callback-query-id))))
+        (cb-succeed callback-query-id))
+      send-retry-callback-query!))
 
   (m-hlr/callback-fn
     (fn [{callback-query-id :id _user :from _msg :message _msg-id :inline_message_id
@@ -2251,13 +2352,14 @@
   ;; - CHAT MEMBER STATUS UPDATES
 
   (tg-client/bot-chat-member-status-fn
-    (fn [{{chat-id :id _type :type chat-title :title _username :username :as chat} :chat
-          {_user-id :id first-name :first_name _last-name :last_name
-           _username :username _is-bot :is_bot _lang :language_code :as _user} :from
-          date :date
-          {_old-user :user _old-status :status :as _old-chat-member} :old_chat_member
-          {_new-user :user _new-status :status :as _new-chat-member} :new_chat_member
-          :as my-chat-member-updated}]
+    (handle-with-care!
+      [{{chat-id :id _type :type chat-title :title _username :username :as chat} :chat
+        {_user-id :id first-name :first_name _last-name :last_name
+         _username :username _is-bot :is_bot _lang :language_code :as _user} :from
+        date :date
+        {_old-user :user _old-status :status :as _old-chat-member} :old_chat_member
+        {_new-user :user _new-status :status :as _new-chat-member} :new_chat_member
+        :as my-chat-member-updated}]
       (log/debug "Bot chat member status updated in:" chat)
       (cond
         (tg-api/has-joined? my-chat-member-updated)
@@ -2291,7 +2393,8 @@
           op-succeed)
 
         :else
-        (ignore "bot chat member status update dated %s in chat=%s" date chat-id))))
+        (ignore "bot chat member status update dated %s in chat=%s" date chat-id))
+      notify-of-inconsistent-chat-state!))
 
   (tg-client/chat-member-status-fn
     (fn [{{chat-id :id _type :type _chat-title :title _username :username :as chat} :chat
@@ -2312,25 +2415,29 @@
   ; group chats
 
   (m-hlr/message-fn
-    (fn [{{chat-id :id :as chat} :chat
-          new-chat-members :new_chat_members
-          :as _message}]
+    (handle-with-care!
+      [{{chat-id :id :as chat} :chat
+        new-chat-members :new_chat_members
+        :as _message}]
       (when (some? new-chat-members)
         (log/debug "New chat members in chat:" chat)
         (let [new-chat-members (filter #(not (:is_bot %)) new-chat-members)]
           (when (seq new-chat-members)
             (proceed-with-new-chat-members! chat-id new-chat-members)
-            op-succeed)))))
+            op-succeed)))
+      notify-of-inconsistent-chat-state!))
 
   (m-hlr/message-fn
-    (fn [{{chat-id :id :as chat} :chat
-          left-chat-member :left_chat_member
-          :as _message}]
+    (handle-with-care!
+      [{{chat-id :id :as chat} :chat
+        left-chat-member :left_chat_member
+        :as _message}]
       (when (some? left-chat-member)
         (log/debug "Chat member left chat:" chat)
         (when-not (:is_bot left-chat-member)
           (proceed-with-left-chat-member! chat-id left-chat-member)
-          op-succeed))))
+          op-succeed))
+      notify-of-inconsistent-chat-state!))
 
   (m-hlr/message-fn
     (fn [{msg-id :message_id group-chat-created :group_chat_created :as _message}]
@@ -2338,10 +2445,11 @@
         (ignore "message id=%s" msg-id))))
 
   (m-hlr/message-fn
-    (fn [{msg-id :message_id date :date text :text
-          {user-id :id} :from
-          {chat-id :id chat-title :title} :chat
-          :as message}]
+    (handle-with-care!
+      [{msg-id :message_id date :date text :text
+        {user-id :id} :from
+        {chat-id :id chat-title :title} :chat
+        :as message}]
       ;; TODO: Figure out how to proceed if someone accidentally closes the reply.
       (when (and (= :chat-type/group (:chat-type message))
                  ;(= :waiting (:chat-state message)) ;; TODO: May conflict w/ new acc/renaming. Check & fix.
@@ -2365,14 +2473,16 @@
             (send-accounts-left-notification! chat-id uncreated-count)
             (do
               (set-bot-msg-id! chat-id :name-request-msg-id nil)
-              (proceed-with-new-group-chat-finalization! chat-id))))
-        op-succeed)))
+              (proceed-with-group-chat-finalization! chat-id))))
+        op-succeed)
+      send-retry-message!))
 
   (m-hlr/message-fn
-    (fn [{date :date text :text
-          {user-id :id} :from
-          {chat-id :id} :chat
-          :as message}]
+    (handle-with-care!
+      [{date :date text :text
+        {user-id :id} :from
+        {chat-id :id} :chat
+        :as message}]
       (when (and (= :chat-type/group (:chat-type message))
                  ;(= :waiting (:chat-state message)) ;; TODO: May conflict w/ new chat members. Check & fix.
                  (is-reply-to-bot? chat-id message
@@ -2394,13 +2504,15 @@
 
           (proceed-and-respond!
             chat-id {:transition [:chat-type/group :notify-changes-success]}))
-        op-succeed)))
+        op-succeed)
+      send-retry-message!))
 
   (m-hlr/message-fn
-    (fn [{text :text
-          {user-id :id} :from
-          {chat-id :id} :chat
-          :as message}]
+    (handle-with-care!
+      [{text :text
+        {user-id :id} :from
+        {chat-id :id} :chat
+        :as message}]
       (when (and (= :chat-type/group (:chat-type message))
                  ;(= :waiting (:chat-state message)) ;; TODO: May conflict w/ new chat members. Check & fix.
                  (is-reply-to-bot? chat-id message
@@ -2419,35 +2531,41 @@
 
           (proceed-and-respond!
             chat-id {:transition [:chat-type/group :notify-changes-success]}))
-        op-succeed)))
+        op-succeed)
+      send-retry-message!))
 
   (m-hlr/message-fn
-    (fn [{{chat-id :id} :chat
-          new-chat-title :new_chat_title
-          :as message}]
+    (handle-with-care!
+      [{{chat-id :id} :chat
+        new-chat-title :new_chat_title
+        :as message}]
       (when (and (= :chat-type/group (:chat-type message))
                  (some? new-chat-title))
         (log/debugf "Chat %s title was changed to '%s'" chat-id new-chat-title)
         (set-chat-title! chat-id new-chat-title)
-        op-succeed)))
+        op-succeed)
+      notify-of-inconsistent-chat-state!))
 
   (m-hlr/message-fn
-    (fn [{{chat-id :id} :chat
-          migrate-to-chat-id :migrate_to_chat_id
-          :as message}]
+    (handle-with-care!
+      [{{chat-id :id} :chat
+        migrate-to-chat-id :migrate_to_chat_id
+        :as message}]
       (when (and (= :chat-type/group (:chat-type message))
                  (some? migrate-to-chat-id))
         (log/debugf "Group %s has been migrated to a supergroup %s" chat-id migrate-to-chat-id)
         (migrate-group-chat-to-supergroup! chat-id migrate-to-chat-id)
-        op-succeed)))
+        op-succeed)
+      notify-of-inconsistent-chat-state!))
 
   ; private chats
 
   (m-hlr/message-fn
-    (fn [{text :text
-          {first-name :first_name} :from
-          {chat-id :id} :chat
-          :as message}]
+    (handle-with-care!
+      [{text :text
+        {first-name :first_name} :from
+        {chat-id :id} :chat
+        :as message}]
       (when (and (= :chat-type/private (:chat-type message))
                  (= :input (:chat-state message)))
         (let [input (nums/parse-number text)]
@@ -2457,17 +2575,20 @@
               (assoc-in-chat-data! chat-id [:amount] input)
               (proceed-with-group! chat-id first-name)
               op-succeed)
-            (respond! (assoc invalid-input-msg :chat-id chat-id)))))))
+            (respond! (assoc invalid-input-msg :chat-id chat-id)))))
+      send-retry-message!))
 
   (m-hlr/message-fn
-    (fn [{text :text {chat-id :id} :chat
-          :as message}]
+    (handle-with-care!
+      [{text :text {chat-id :id} :chat
+        :as message}]
       (when (and (= :chat-type/private (:chat-type message))
                  (= :expense-detailing (:chat-state message)))
         (log/debugf "Expense description: \"%s\"" text)
         (assoc-in-chat-data! chat-id [:expense-desc] text)
         (proceed-with-account! chat-id)
-        op-succeed)))
+        op-succeed)
+      send-retry-message!))
 
   ;; NB: A "match-all catch-through" case. Excessive list of parameters is for clarity.
   (m-hlr/message-fn
