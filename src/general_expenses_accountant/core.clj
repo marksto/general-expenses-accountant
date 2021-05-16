@@ -1597,7 +1597,7 @@
   (proceed-and-replace-response! chat-id msg-id
                                  {:transition [:settings :restore]}))
 
-(defn- send-accounts-left-notification!
+(defn- send-accounts-creation-progress!
   [chat-id uncreated-count]
   (let [accs-left-msg (get-personal-accounts-left-msg uncreated-count)]
     (respond! (assoc accs-left-msg :chat-id chat-id))))
@@ -2470,7 +2470,7 @@
                                 (:members-count (get-chat-data chat-id))
                                 pers-accs-count)]
           (if (> uncreated-count 0)
-            (send-accounts-left-notification! chat-id uncreated-count)
+            (send-accounts-creation-progress! chat-id uncreated-count)
             (do
               (set-bot-msg-id! chat-id :name-request-msg-id nil)
               (proceed-with-group-chat-finalization! chat-id))))
