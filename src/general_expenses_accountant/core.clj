@@ -2,7 +2,7 @@
   "Bot API and business logic (core functionality)"
   (:require [clojure.set :as set]
             [clojure.string :as str]
-            [clojure.core.async :refer [<! go timeout]]
+            [clojure.core.async :refer [go chan timeout >! <! close!]]
 
             [morse
              [api :as m-api]
@@ -1374,12 +1374,78 @@
 ;; that, in turn, may result in emitting events.
 
 ;; - ABSTRACT ACTIONS
-;; TODO: Combine them into a single façade fn w/ a set of opts
-;;       (:replace true, :response-handler, :async true, etc.)?
 
-;; TODO: Re-implement as a 'multimethod' with 3 _different_ implementations!
-;; TODO: As a precondition, check if chat w/ 'chat-id' has ':evicted' state.
-;; TODO: Re-implement it in asynchronous fashion, with logging the feedback.
+(defmulti ^:private send!
+          (fn [_token _ids response _opts] (:type response)))
+
+(defmethod send! :text
+  [token {:keys [chat-id msg-id] :as _ids}
+   {:keys [text options] :as _response} {:keys [replace?] :as _opts}]
+  ;; NB: Looks for the 'replace?' among the passed options to replace
+  ;;     the existing response message rather than sending a new one.
+  (if-not replace?
+    (m-api/send-text token chat-id options text)
+    (m-api/edit-text token chat-id msg-id options text)))
+
+(defmethod send! :inline
+  [token {:keys [inline-query-id] :as _ids}
+   {:keys [results options] :as _response} _opts]
+  (m-api/answer-inline token inline-query-id options results))
+
+(defmethod send! :callback
+  [token {:keys [callback-query-id] :as _ids}
+   {:keys [options] :as _response} _opts]
+  (tg-client/answer-callback-query token callback-query-id options))
+
+;; TODO: As a precondition, check if the chat with 'chat-id' is not in ':evicted' state.
+(defn- respond!*
+  "Uniformly responds to the user action, whether it a message, inline or callback query,
+   or some event (e.g. service message or chat member status update). By default, this fn
+   awaits the feedback (Telegram's response) synchronously and returns a pre-defined code,
+   ':finished-sync'.
+
+   Options are key-value pairs and may be one of:
+   :response-handler
+     The fn used to handle the Telegram's response (in case of success)
+   :async?
+     An indicator to make the whole process asynchronous (causes the fn
+     to return immediately with the ':launched-async' code)
+   and possibly other API method-specific values.
+
+   NB: Properly wrapped in try-catch and logged to highlight the exact HTTP client error."
+  [ids response & {:keys [response-handler async?] :as options}]
+  (let [token (config/get-prop :bot-api-token)
+        send-response-fn (fn []
+                           (try
+                             (send! token ids response options)
+                             (catch Throwable t
+                               ;; TODO: Add 'response' to the 'failed-responses' queue for the bot Admin
+                               ;;       to be able to manually handle it later. Is this feature needed?
+                               (log/errorf t "Failed to respond to %s with %s" ids response)
+                               :error)))
+        handle-tg-response-fn (fn [tg-response]
+                                (log/debug "Telegram returned:" tg-response)
+                                (try
+                                  (when (and (some? response-handler)
+                                             (true? (:ok tg-response)))
+                                    (response-handler (:result tg-response)))
+                                  (catch Exception e
+                                    (log/error e "Failed to handler the response from Telegram"))))
+        handle-when-not-error (fn [res]
+                                (when-not (= :error res)
+                                  (handle-tg-response-fn res)))]
+    (if (true? async?)
+      (letfn [(with-one-off-channel [req-fn handle-fn]
+                (let [resp-chan (chan)]
+                  (go (handle-fn (<! resp-chan))
+                      (close! resp-chan))
+                  (go (>! resp-chan (req-fn)))))]
+        (with-one-off-channel send-response-fn handle-when-not-error)
+        :launched-async)
+      (do
+        (handle-when-not-error (send-response-fn))
+        :finished-sync))))
+
 (defn- respond!
   "Uniformly responds to the user action, whether it a message, inline or callback query.
    NB: Properly wrapped in try-catch and logged to highlight the exact HTTP client error."
@@ -1394,7 +1460,6 @@
       (log/debug "Telegram returned:" tg-response)
       tg-response)
     (catch Exception e
-      ;; TODO: Add 'response' to a 'failed-responses' queue to be able to manually handle it later?
       (log/error e "Failed to respond with:" response))))
 
 (defn- proceed-and-respond!
