@@ -1398,7 +1398,7 @@
   (tg-client/answer-callback-query token callback-query-id options))
 
 ;; TODO: As a precondition, check if the chat with 'chat-id' is not in ':evicted' state.
-(defn- respond!*
+(defn- respond!
   "Uniformly responds to the user action, whether it a message, inline or callback query,
    or some event (e.g. service message or chat member status update). By default, this fn
    awaits the feedback (Telegram's response) synchronously and returns a pre-defined code,
@@ -1446,89 +1446,38 @@
         (handle-when-not-error (send-response-fn))
         :finished-sync))))
 
-(defn- respond!
-  "Uniformly responds to the user action, whether it a message, inline or callback query.
-   NB: Properly wrapped in try-catch and logged to highlight the exact HTTP client error."
-  [{:keys [type chat-id text inline-query-id results callback-query-id options]
-    :as response}]
-  (try
-    (let [token (config/get-prop :bot-api-token)
-          tg-response (case type
-                        :text (m-api/send-text token chat-id options text)
-                        :inline (m-api/answer-inline token inline-query-id options results)
-                        :callback (tg-client/answer-callback-query token callback-query-id options))]
-      (log/debug "Telegram returned:" tg-response)
-      tg-response)
-    (catch Exception e
-      (log/error e "Failed to respond with:" response))))
-
 (defn- proceed-and-respond!
-  "Continues the course of transitions between states and sends a message
-   in response to a user (or a group)."
-  [chat-id event]
-  (let [result (handle-chat-state-transition! chat-id event)]
-    (respond! (assoc (:message result) :chat-id chat-id))))
-
-;; TODO: Re-implement it in asynchronous fashion (or adding it as option).
-(defn- respond-attentively!
-  "Responds and synchronously awaits for a feedback (Telegram's response)
-   which is then processed by the provided handler function."
-  [response tg-response-handler-fn]
-  (let [tg-response (respond! response)]
-    (when (:ok tg-response)
-      (tg-response-handler-fn (:result tg-response)))))
-
-(defn- proceed-and-respond-attentively!
-  "Continues the course of transitions between states, sends a message in
-   response to a user (or a group), and awaits for a feedback (Telegram's
-   response) which is then processed by the provided handler function."
-  [chat-id event tg-response-handler-fn]
-  (let [result (handle-chat-state-transition! chat-id event)]
-    (respond-attentively! (assoc (:message result) :chat-id chat-id)
-                          tg-response-handler-fn)))
-
-;; TODO: Re-implement reusing the common part extracted from the 'respond!' multimethod!
-;; TODO: As a precondition, check if chat w/ 'chat-id' has ':evicted' state.
-(defn- replace-response!
-  "Uniformly replaces the existing response to the user, either by update or delete+send.
-   NB: Properly wrapped in try-catch and logged to highlight the exact HTTP client error."
-  [{:keys [chat-id msg-id text options via-delete?]
-    :as response-update}]
-  (try
-    (let [token (config/get-prop :bot-api-token)
-          tg-response (if (true? via-delete?)
-                        (do
-                          (m-api/delete-text token chat-id msg-id)
-                          (m-api/send-text token chat-id options text))
-                        (m-api/edit-text token chat-id msg-id options text))]
-      (log/debug "Telegram returned:" tg-response)
-      tg-response)
-    (catch Exception e
-      (log/error e "Failed to replace response with:" response-update))))
+  "Continues the course of transitions between the states of the chat and sends
+   a message (answers an inline/callback query) in response to a user/an event."
+  [chat-id event & options]
+  (encore/when-let [result (handle-chat-state-transition! chat-id event)
+                    response (:message result)] ;; TODO: Better naming.
+    (apply respond! {:chat-id chat-id} response (flatten (seq options)))))
 
 (defn- proceed-and-replace-response!
-  "Continues the course of transitions between states of some existing response
-   message with the specified 'msg-id' and replaces its content."
-  [chat-id msg-id msg-event]
-  (let [result (handle-msg-state-transition! chat-id msg-id msg-event)]
-    (replace-response!
-      (assoc (:message result) :chat-id chat-id :msg-id msg-id))))
+  "Continues the course of transitions between the states of the extant message
+   in some chat and replaces its content in response to a user/an event."
+  [chat-id msg-id msg-event & options]
+  (encore/when-let [result (handle-msg-state-transition! chat-id msg-id msg-event)
+                    response (:message result)] ;; TODO: Better naming.
+    (apply respond! {:chat-id chat-id :msg-id msg-id} response (flatten (seq options)))))
 
 ;; - SPECIFIC ACTIONS
 
 (defn- send-retry-command!
   [{{chat-id :id} :chat :as message}]
   (let [commands-to-retry (tg-client/get-commands {:message message})]
-    (respond! (assoc (get-retry-commands-msg commands-to-retry) :chat-id chat-id))))
+    (respond! {:chat-id chat-id}
+              (get-retry-commands-msg commands-to-retry))))
 
 (defn- send-retry-message!
   [{{chat-id :id} :chat :as _message}]
-  (respond! (assoc retry-resend-message-msg :chat-id chat-id)))
+  (respond! {:chat-id chat-id} retry-resend-message-msg))
 
 (defn- send-retry-callback-query!
   [{callback-query-id :id :as _callback-query}]
-  (respond! (assoc retry-callback-query-notification
-              :callback-query-id callback-query-id)))
+  (respond! {:callback-query-id callback-query-id}
+            retry-callback-query-notification))
 
 (defn- notify-of-inconsistent-chat-state!
   [_arg]
@@ -1539,12 +1488,14 @@
 (defn- report-added-to-new-chat!
   [user-id chat-title]
   (when (can-write-to-user? user-id)
-    (respond! (assoc (get-added-to-new-group-msg chat-title) :chat-id user-id))))
+    (respond! {:chat-id user-id}
+              (get-added-to-new-group-msg chat-title))))
 
 (defn- report-removed-from-chat!
   [user-id chat-title]
   (when (can-write-to-user? user-id)
-    (respond! (assoc (get-removed-from-group-msg chat-title) :chat-id user-id))))
+    (respond! {:chat-id user-id}
+              (get-removed-from-group-msg chat-title))))
 
 
 (defn- proceed-with-adding-new-expense!
@@ -1584,7 +1535,7 @@
                                                    expense-details
                                                    payer-acc-name
                                                    debtor-acc-name)]
-          (respond! (assoc new-expense-msg :chat-id group-chat-id)))
+          (respond! {:chat-id group-chat-id} new-expense-msg))
         (proceed-and-respond! chat-id {:transition [:chat-type/private :notify-input-success]})))))
 
 ;; TODO: Abstract this away — "selecting 1 of N, with a special case for N=1".
@@ -1658,7 +1609,7 @@
 (defn- send-group-chat-intro!
   [chat-id chat-members-count first-name]
   (let [intro-msg (get-introduction-msg chat-members-count first-name)]
-    (respond! (assoc intro-msg :chat-id chat-id))))
+    (respond! {:chat-id chat-id} intro-msg)))
 
 (defn- restore-group-chat-intro!
   [chat-id user-id msg-id]
@@ -1669,28 +1620,28 @@
 (defn- send-accounts-creation-progress!
   [chat-id uncreated-count]
   (let [accs-left-msg (get-personal-accounts-left-msg uncreated-count)]
-    (respond! (assoc accs-left-msg :chat-id chat-id))))
+    (respond! {:chat-id chat-id} accs-left-msg)))
 
 (defn- send-group-chat-settings!
   [chat-id first-time?]
   (let [settings-msg (get-settings-msg first-time?)]
-    (respond-attentively!
-      (assoc settings-msg :chat-id chat-id)
-      #(change-bot-msg-state!* chat-id :settings (:message_id %) :initial))))
+    (respond! {:chat-id chat-id} settings-msg
+              :response-handler
+              #(change-bot-msg-state!* chat-id :settings (:message_id %) :initial))))
 
 (defn- send-waiting-for-user-input-notification!
   [callback-query-id]
-  (respond! (assoc waiting-for-user-input-notification
-              :callback-query-id callback-query-id)))
+  (respond! {:callback-query-id callback-query-id}
+            waiting-for-user-input-notification))
 
 (defn- send-message-already-in-use-notification!
   [callback-query-id]
-  (respond! (assoc message-already-in-use-notification
-              :callback-query-id callback-query-id)))
+  (respond! {:callback-query-id callback-query-id}
+            message-already-in-use-notification))
 
 (defn- send-changes-success-notification!
   [chat-id]
-  (respond! (assoc successful-changes-msg :chat-id chat-id)))
+  (respond! {:chat-id chat-id} successful-changes-msg))
 
 
 (defn- proceed-with-bot-eviction!
@@ -1699,10 +1650,11 @@
 
 (defn- proceed-with-personal-accounts-creation!
   [chat-id ?new-chat-members]
-  (proceed-and-respond-attentively!
+  (proceed-and-respond!
     chat-id
     {:transition [:chat-type/group :request-acc-names]
      :params {:chat-members ?new-chat-members}}
+    :response-handler
     #(->> % :message_id (set-bot-msg-id! chat-id :name-request-msg-id))))
 
 (defn- proceed-with-group-chat-finalization!
@@ -1744,10 +1696,11 @@
 
 (defn- proceed-with-account-naming!
   [chat-id {user-id :id :as user}]
-  (proceed-and-respond-attentively!
+  (proceed-and-respond!
     chat-id
     {:transition [:chat-type/group :request-acc-name]
      :params {:user user}}
+    :response-handler
     #(->> % :message_id
           (set-bot-msg-id! chat-id [:to-user user-id :request-acc-name-msg-id]))))
 
@@ -1772,8 +1725,9 @@
         remaining-accs (set/difference personal-accs selected-accs)
         accounts-remain? (seq remaining-accs)]
     (when accounts-remain?
-      (replace-response! (assoc (get-new-member-selection-msg remaining-accs)
-                           :chat-id chat-id :msg-id msg-id)))
+      (respond! {:chat-id chat-id :msg-id msg-id}
+                (get-new-member-selection-msg remaining-accs)
+                :replace? true))
     accounts-remain?))
 
 (defn- proceed-with-account-selection!
@@ -1793,19 +1747,20 @@
                                        :params {:accounts eligible-accs
                                                 :txt select-account-txt
                                                 :extra-buttons [back-button]}})
-       (respond! (assoc no-eligible-accounts-notification
-                   :callback-query-id callback-query-id))))))
+       (respond! {:callback-query-id callback-query-id}
+                 no-eligible-accounts-notification)))))
 
 (defn- proceed-with-account-renaming!
   [chat-id {user-id :id :as user} acc-to-rename]
   (let [input-data {:account-type (:type acc-to-rename)
                     :account-id (:id acc-to-rename)}]
     (set-user-input-data! chat-id user-id :rename-account input-data))
-  (proceed-and-respond-attentively!
+  (proceed-and-respond!
     chat-id
     {:transition [:chat-type/group :request-acc-new-name]
      :params {:user user
               :acc-name (:name acc-to-rename)}}
+    :response-handler
     #(->> % :message_id
           (set-bot-msg-id! chat-id [:to-user user-id :request-rename-msg-id]))))
 
@@ -1837,8 +1792,8 @@
 (defn- cmd-private-help!
   [{chat-id :id :as chat}]
   (log/debug "Help requested in a private chat:" chat)
-  (respond! {:type :text
-             :chat-id chat-id
+  (respond! {:chat-id chat-id}
+            {:type :text
              :text "Help is on the way!"}))
 
 (defn- cmd-private-calc!
@@ -1858,8 +1813,8 @@
 (defn- cmd-group-help!
   [{chat-id :id :as chat}]
   (log/debug "Help requested in a group chat:" chat)
-  (respond! {:type :text
-             :chat-id chat-id
+  (respond! {:chat-id chat-id}
+            {:type :text
              :text "Help is on the way!"}))
 
 (defn- cmd-group-settings!
@@ -2378,8 +2333,9 @@
           (let [old-user-input (get-user-input (get-chat-data chat-id))
                 new-user-input (update-user-input! chat-id non-terminal-operation)]
             (when (not= old-user-input new-user-input)
-              (replace-response! (assoc (get-interactive-input-msg new-user-input)
-                                   :chat-id chat-id :msg-id msg-id))))
+              (respond! {:chat-id chat-id :msg-id msg-id}
+                        (get-interactive-input-msg new-user-input)
+                        :replace? true)))
           (cb-succeed callback-query-id)))
       send-retry-callback-query!))
 
@@ -2401,19 +2357,21 @@
               (assoc-in-chat-data! chat-id [:amount] parsed-val)
 
               (update-user-input-error-status! chat-id false)
-              (replace-response! (assoc (get-calculation-success-msg parsed-val)
-                                   :chat-id chat-id :msg-id msg-id))
+              (respond! {:chat-id chat-id :msg-id msg-id}
+                        (get-calculation-success-msg parsed-val)
+                        :replace? true)
 
               (proceed-with-group! chat-id first-name))
             (do
               (log/debugf "Invalid user input: \"%s\"" parsed-val)
-              (respond! (assoc invalid-input-notification
-                          :callback-query-id callback-query-id))
+              (respond! {:callback-query-id callback-query-id}
+                        invalid-input-notification)
 
               (when-not (is-user-input-error? chat-id)
                 (update-user-input-error-status! chat-id true)
-                (replace-response! (assoc (get-calculation-failure-msg parsed-val)
-                                     :chat-id chat-id :msg-id msg-id))))))
+                (respond! {:chat-id chat-id :msg-id msg-id}
+                          (get-calculation-failure-msg parsed-val)
+                          :replace? true)))))
         (cb-succeed callback-query-id))
       send-retry-callback-query!))
 
@@ -2646,7 +2604,7 @@
               (assoc-in-chat-data! chat-id [:amount] input)
               (proceed-with-group! chat-id first-name)
               op-succeed)
-            (respond! (assoc invalid-input-msg :chat-id chat-id)))))
+            (respond! {:chat-id chat-id} invalid-input-msg))))
       send-retry-message!))
 
   (m-hlr/message-fn
