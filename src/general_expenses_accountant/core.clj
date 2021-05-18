@@ -421,7 +421,7 @@
       (tg-api/build-inline-kbd-btn "←" :callback_data cd-clear)
       (tg-api/build-inline-kbd-btn "OK" :callback_data cd-enter)]]))
 
-(defn- new-expense-msg
+(defn- new-expense-msg ;; TODO: Poor naming. Rename or throw away.
   ([text]
    (new-expense-msg text nil))
   ([text extra-opts]
@@ -1397,6 +1397,7 @@
    {:keys [options] :as _response} _opts]
   (tg-client/answer-callback-query token callback-query-id options))
 
+;; TODO: Provide 'on-success' + 'on-failure' handler pair instead of 'response-handler'.
 ;; TODO: As a precondition, check if the chat with 'chat-id' is not in ':evicted' state.
 (defn- respond!
   "Uniformly responds to the user action, whether it a message, inline or callback query,
@@ -1605,6 +1606,7 @@
 
 ;; TODO: It would be super cool to have all these abstracted away to "plain data" + a single fn,
 ;;       akin to how it was made for 'proceed-and-respond!' and 'handle-chat-state-transition!'.
+;;       The design should be similar to the Lupapiste's web handlers with their 'in-/outjects'.
 
 (defn- send-group-chat-intro!
   [chat-id chat-members-count first-name]
