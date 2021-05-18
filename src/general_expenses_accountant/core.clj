@@ -1195,6 +1195,21 @@
 
 ;; TODO: Re-write with an existing state machine (FSM) library.
 
+(defn- handle-state-transition!
+  [event state-transitions change-state-fn]
+  (let [transition (get-in state-transitions (:transition event))
+        response (:response transition)
+        response-fn (:response-fn transition)
+        response-params (:response-params transition)]
+    (change-state-fn (:to-state transition))
+    (cond (some? response)
+          response
+          (some? response-fn)
+          (let [param-values (or (:params event) {})]
+            (apply response-fn (map param-values response-params))))))
+
+; chat states
+
 (def ^:private group-chat-states
   {:initial #{:waiting}
    :waiting #{:waiting
@@ -1222,79 +1237,67 @@
                         :input}
    :account-selection #{:input}})
 
-(defn- change-chat-state!*
-  [chat-type chat-id new-state]
-  (let [chat-states (case chat-type
-                      :chat-type/group group-chat-states
-                      :chat-type/private private-chat-states)]
-    (change-chat-state! chat-id chat-states new-state)))
-
 (def ^:private chat-state-transitions
   {:chat-type/group
    {:request-acc-names {:to-state :waiting
-                        :message-fn get-personal-account-name-request-msg
-                        :message-params [:chat-members]}
+                        :response-fn get-personal-account-name-request-msg
+                        :response-params [:chat-members]}
 
     :request-acc-name {:to-state :waiting
-                       :message-fn get-new-account-name-request-msg
-                       :message-params [:user]}
+                       :response-fn get-new-account-name-request-msg
+                       :response-params [:user]}
     :select-group-members {:to-state :waiting
-                           :message-fn get-new-member-selection-msg
-                           :message-params [:accounts]}
+                           :response-fn get-new-member-selection-msg
+                           :response-params [:accounts]}
     :request-acc-new-name {:to-state :waiting
-                           :message-fn get-account-rename-request-msg
-                           :message-params [:user :acc-name]}
+                           :response-fn get-account-rename-request-msg
+                           :response-params [:user :acc-name]}
 
     :declare-readiness {:to-state :ready
-                        :message-fn get-bot-readiness-msg
-                        :message-params [:bot-username]}
+                        :response-fn get-bot-readiness-msg
+                        :response-params [:bot-username]}
     :notify-changes-success {:to-state :ready
-                             :message successful-changes-msg}
+                             :response successful-changes-msg}
 
     :mark-evicted {:to-state :evicted}}
 
    :chat-type/private
    {:request-amount {:to-state :input
-                     :message-fn get-private-introduction-msg
-                     :message-params [:first-name]}
+                     :response-fn get-private-introduction-msg
+                     :response-params [:first-name]}
     :show-calculator {:to-state :interactive-input
-                      :message-fn get-interactive-input-msg
-                      :message-params [:user-input]}
+                      :response-fn get-interactive-input-msg
+                      :response-params [:user-input]}
     :select-group {:to-state :group-selection
-                   :message-fn get-group-selection-msg
-                   :message-params [:group-refs]}
+                   :response-fn get-group-selection-msg
+                   :response-params [:group-refs]}
     :select-expense-item {:to-state :expense-detailing
-                          :message-fn get-expense-item-selection-msg
-                          :message-params [:expense-items]}
+                          :response-fn get-expense-item-selection-msg
+                          :response-params [:expense-items]}
     :request-expense-desc {:to-state :expense-detailing
-                           :message-fn get-expense-manual-description-msg
-                           :message-params [:first-name]}
+                           :response-fn get-expense-manual-description-msg
+                           :response-params [:first-name]}
     :select-account {:to-state :account-selection
-                     :message-fn get-account-selection-msg
-                     :message-params [:accounts :txt]}
+                     :response-fn get-account-selection-msg
+                     :response-params [:accounts :txt]}
 
     :cancel-input {:to-state :input}
     :notify-input-success {:to-state :input
-                           :message expense-added-successfully-msg}
+                           :response expense-added-successfully-msg}
     :notify-input-failure {:to-state :input
-                           :message-fn get-failed-to-add-new-expense-msg
-                           :message-params [:reason]}}})
+                           :response-fn get-failed-to-add-new-expense-msg
+                           :response-params [:reason]}}})
 
-;; TODO: Use a generalized version of this fn, 'handle-state-transition!'.
 (defn- handle-chat-state-transition!
   [chat-id event]
   (let [chat-type (first (:transition event))
-        transition (get-in chat-state-transitions (:transition event))
-        message (:message transition)
-        message-fn (:message-fn transition)
-        message-params (:message-params transition)]
-    (change-chat-state!* chat-type chat-id (:to-state transition))
-    (if (some? message)
-      {:message message}
-      (when (some? message-fn)
-        (let [param-values (or (:params event) {})]
-          {:message (apply message-fn (map param-values message-params))})))))
+        chat-states (case chat-type
+                      :chat-type/group group-chat-states
+                      :chat-type/private private-chat-states)
+        change-state-fn (partial change-chat-state! chat-id chat-states)]
+    (handle-state-transition! event chat-state-transitions change-state-fn)))
 
+; message states
 
 (def ^:private settings-msg-states
   {:initial #{:accounts-mgmt
@@ -1319,51 +1322,42 @@
 
    :shares-mgmt #{:initial}})
 
-(defn- change-bot-msg-state!*
-  [chat-id msg-type msg-id new-state]
-  (let [msg-states (case msg-type
-                     :settings settings-msg-states)]
-    (change-bot-msg-state! chat-id msg-type msg-id msg-states new-state)))
-
 (def ^:private msg-state-transitions
   {:settings
    {:manage-accounts {:to-state :accounts-mgmt
-                      :message-fn get-accounts-mgmt-options-msg
-                      :message-params [:accounts-by-type]}
+                      :response-fn get-accounts-mgmt-options-msg
+                      :response-params [:accounts-by-type]}
     :select-acc-type {:to-state :account-type-selection
-                      :message-fn get-account-type-selection-msg
-                      :message-params [:account-types :extra-buttons]}
+                      :response-fn get-account-type-selection-msg
+                      :response-params [:account-types :extra-buttons]}
     :rename-account {:to-state :account-renaming
-                     :message-fn get-account-selection-msg
-                     :message-params [:accounts :txt :extra-buttons]}
+                     :response-fn get-account-selection-msg
+                     :response-params [:accounts :txt :extra-buttons]}
     :revoke-account {:to-state :account-revocation
-                     :message-fn get-account-selection-msg
-                     :message-params [:accounts :txt :extra-buttons]}
+                     :response-fn get-account-selection-msg
+                     :response-params [:accounts :txt :extra-buttons]}
     :reinstate-account {:to-state :account-reinstatement
-                        :message-fn get-account-selection-msg
-                        :message-params [:accounts :txt :extra-buttons]}
+                        :response-fn get-account-selection-msg
+                        :response-params [:accounts :txt :extra-buttons]}
 
     :manage-expense-items {:to-state :expense-items-mgmt}
 
     :manage-shares {:to-state :shares-mgmt}
 
     :restore {:to-state :initial
-              :message (get-settings-msg false)}}})
+              :response (get-settings-msg false)}}})
 
-;; TODO: Use a generalized version of this fn, 'handle-state-transition!'.
+(defn- change-bot-msg-state!*
+  [chat-id msg-type msg-id new-state]
+  (let [msg-states (case msg-type
+                     :settings settings-msg-states)]
+    (change-bot-msg-state! chat-id msg-type msg-id msg-states new-state)))
+
 (defn- handle-msg-state-transition!
   [chat-id msg-id event]
   (let [msg-type (first (:transition event))
-        transition (get-in msg-state-transitions (:transition event))
-        message (:message transition)
-        message-fn (:message-fn transition)
-        message-params (:message-params transition)]
-    (change-bot-msg-state!* chat-id msg-type msg-id (:to-state transition))
-    (if (some? message)
-      {:message message}
-      (when (some? message-fn)
-        (let [param-values (or (:params event) {})]
-          {:message (apply message-fn (map param-values message-params))})))))
+        change-state-fn (partial change-bot-msg-state!* chat-id msg-type msg-id)]
+    (handle-state-transition! event msg-state-transitions change-state-fn)))
 
 
 ;; RECIPROCAL ACTIONS
@@ -1451,16 +1445,14 @@
   "Continues the course of transitions between the states of the chat and sends
    a message (answers an inline/callback query) in response to a user/an event."
   [chat-id event & options]
-  (encore/when-let [result (handle-chat-state-transition! chat-id event)
-                    response (:message result)] ;; TODO: Better naming.
+  (when-let [response (handle-chat-state-transition! chat-id event)]
     (apply respond! {:chat-id chat-id} response (flatten (seq options)))))
 
 (defn- proceed-and-replace-response!
   "Continues the course of transitions between the states of the extant message
    in some chat and replaces its content in response to a user/an event."
   [chat-id msg-id msg-event & options]
-  (encore/when-let [result (handle-msg-state-transition! chat-id msg-id msg-event)
-                    response (:message result)] ;; TODO: Better naming.
+  (when-let [response (handle-msg-state-transition! chat-id msg-id msg-event)]
     (apply respond! {:chat-id chat-id :msg-id msg-id} response (flatten (seq options)))))
 
 ;; - SPECIFIC ACTIONS
