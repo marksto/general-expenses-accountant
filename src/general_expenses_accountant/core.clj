@@ -7,6 +7,7 @@
             [morse
              [api :as m-api]
              [handlers :as m-hlr]]
+            [mount.core :refer [defstate]]
             [slingshot.slingshot :as slingshot]
             [taoensso
              [encore :as encore]
@@ -31,7 +32,7 @@
 ;;       should be (re)loaded from the DB on demand.
 (defonce ^:private *bot-data (atom {}))
 
-(defn init!
+(defn- init!
   []
   (let [token (config/get-prop :bot-api-token)
         bot-user (get (tg-client/get-me token) :result)]
@@ -44,6 +45,8 @@
         ids (map :id chats)]
     (log/debug "Total chats uploaded from the DB:" (count chats))
     (reset! *bot-data (zipmap ids chats))))
+
+(defstate bot :start (init!))
 
 (defn- get-bot-data
   []

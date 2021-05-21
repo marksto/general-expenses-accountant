@@ -1,4 +1,4 @@
-(ns general-expenses-accountant.web
+(ns general-expenses-accountant.web-handler
   (:require [compojure
              [core :as cmpj :refer [GET POST]]
              [route :as cmpj-route]]
@@ -61,6 +61,6 @@
   (cmpj-route/not-found
     (l10n/tr :en :not-found)))
 
-(def app
+(def handler
   (-> (wrap-defaults app-routes api-defaults)
       (wrap-json-body {:keywords? true})))

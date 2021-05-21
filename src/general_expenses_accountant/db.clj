@@ -5,6 +5,7 @@
             [hikari-cp.core :as cp]
             [honeysql.core :as sql]
             [jsonista.core :as json]
+            [mount.core :refer [defstate]]
             [ragtime
              [jdbc :as rt-jdbc]
              [repl :as rt-repl]]
@@ -85,50 +86,31 @@
      :server-name (:host db-info)
      :port-number (:port db-info)}))
 
-(defonce datasource
-         (delay (cp/make-datasource (get-datasource-options))))
-
 (defn- get-db-spec
-  []
-  {:datasource @datasource
+  [datasource]
+  {:datasource datasource
    ;; PostgreSQL-specific
    :reWriteBatchedInserts true})
-
-(defn init!
-  []
-  (try
-    (db/set-default-db-connection! (get-db-spec))
-    (db/set-default-automatically-convert-dashes-and-underscores! true)
-    (catch Exception e
-      (log/error e {:event ::db-init-failed})
-      (System/exit 1))))
-
-(defn close!
-  []
-  (try
-    (cp/close-datasource @datasource)
-    (catch Exception e
-      (log/error e {:event ::db-close-failed}))))
 
 
 (models/set-root-namespace! 'general-expenses-accountant.domain)
 
 
-;; MIGRATIONS
+;; MIGRATIONS (IN-APP/REPL)
 
 (defn- load-ragtime-config
-  []
-  {:datastore (rt-jdbc/sql-database (get-db-spec)
+  [datasource]
+  {:datastore (rt-jdbc/sql-database (get-db-spec datasource)
                                     {:migrations-table "migrations"})
    :migrations (rt-jdbc/load-resources "db/migrations")})
 
 
 (defn migrate-db!
   "Uses 'ragtime' to apply DB migration scripts."
-  []
+  [datasource]
   (try
     (log/info "Applying DB migrations...")
-    (let [output (-> (load-ragtime-config)
+    (let [output (-> (load-ragtime-config datasource)
                      rt-repl/migrate
                      with-out-str)]
       (log/info {:event ::migration-succeed
@@ -139,10 +121,10 @@
 
 (defn rollback-db!
   "Uses 'ragtime' to apply DB migration rollback scripts."
-  []
+  [datasource]
   (try
     (log/info "Rolling back DB migrations...")
-    (let [output (-> (load-ragtime-config)
+    (let [output (-> (load-ragtime-config datasource)
                      rt-repl/rollback
                      with-out-str)]
       (log/info {:event ::migration-rollback-succeed
@@ -153,25 +135,65 @@
 
 (defn reinit-db!
   "Clears DB and recreates it using 'ragtime'."
-  []
-  (rollback-db!)
-  (migrate-db!))
+  [datasource]
+  (rollback-db! datasource)
+  (migrate-db! datasource))
 
+
+;; MIGRATIONS (STANDALONE)
+
+(defmacro with-datasource
+  [workload-fn args]
+  `(do
+     (log/set-level! [["*" :info]])
+     (config/load-and-validate! ~args)
+     (let [datasource# (cp/make-datasource (get-datasource-options))]
+       (try
+         (~workload-fn datasource#)
+         (finally
+           (cp/close-datasource datasource#))))))
 
 (defn lein-migrate-db
   "Called by the `lein migrate-db` via alias."
-  []
-  (migrate-db!))
+  [& args]
+  (with-datasource migrate-db! args))
 
 (defn lein-rollback-db
   "Called by the `lein rollback-db` via alias."
-  []
-  (rollback-db!))
+  [& args]
+  (with-datasource rollback-db! args))
 
 (defn lein-reinit-db
   "Called by the `lein reinit-db` via alias."
+  [& args]
+  (with-datasource reinit-db! args))
+
+
+;; DB COMPONENT (STATE)
+
+(defn- init!
   []
-  (reinit-db!))
+  (try
+    (let [datasource (cp/make-datasource (get-datasource-options))]
+      (db/set-default-db-connection! (get-db-spec datasource))
+      (db/set-default-automatically-convert-dashes-and-underscores! true)
+
+      (migrate-db! datasource) ;; TODO: Make conditional/args-dependent?
+      datasource)
+    (catch Exception e
+      (log/error e {:event ::db-init-failed})
+      (System/exit 1))))
+
+(defn- close!
+  [datasource]
+  (try
+    (cp/close-datasource datasource)
+    (catch Exception e
+      (log/error e {:event ::db-close-failed}))))
+
+(defstate datasource
+  :start (init!)
+  :stop (close! datasource))
 
 
 ;; CUSTOM TYPES

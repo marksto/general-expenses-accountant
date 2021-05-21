@@ -1,5 +1,6 @@
 (ns general-expenses-accountant.config
   (:require [clojure.java.io :as io]
+            [mount.core :as mount :refer [defstate]]
             [omniconf.core :as cfg]
             [taoensso.timbre :as log]))
 
@@ -43,16 +44,22 @@
   (= (get-prop :env-type) dev-env))
 
 (defn load-and-validate!
-  [args file]
-  (cfg/populate-from-cmd args)
-  (cfg/populate-from-env)
+  ([]
+   (load-and-validate! []))
+  ([args]
+   (load-and-validate! args "dev/config.edn"))
+  ([args file]
+   (cfg/populate-from-cmd args)
+   (cfg/populate-from-env)
 
-  ;; here, the ':env-type' have to be determined already
-  (when (and (some? file) (in-dev?))
-    (if (.exists (io/as-file file))
-      (cfg/populate-from-file file)
-      (log/warn "Can't find local dev configuration file" file)))
+   ;; here, the ':env-type' have to be determined already
+   (when (and (some? file) (in-dev?))
+     (if (.exists (io/as-file file))
+       (cfg/populate-from-file file)
+       (log/warn "Can't find local dev configuration file" file)))
 
-  (cfg/verify
-    :quit-on-error true
-    :silent (not (in-dev?))))
+   (cfg/verify :quit-on-error true
+               :silent (not (in-dev?)))))
+
+(defstate configurator
+  :start (load-and-validate! (mount/args)))

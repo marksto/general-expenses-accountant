@@ -52,6 +52,11 @@
               ;; will be processed later
               nil))))
 
+(defn- await-for-sec
+  "Waits a bit (1 sec) just for async operations to catch up."
+  []
+  (Thread/sleep 1000))
+
 (defn- not-polling?
   []
   (let [upd-chan @*updates-channel]
@@ -71,14 +76,15 @@
   (start-long-polling! token upd-handler)
 
   ;; TODO: Make this an async task that aims to "re-spawn" the long-polling.
-  (Thread/sleep 1000) ;; await a bit...
+  (await-for-sec)
   (when (not-polling?)
     (log/fatal "Fatal error during the long-polling setup")
     (System/exit 1)))
 
 (defn stop-long-polling!
   []
-  (m-poll/stop @*updates-channel))
+  (m-poll/stop @*updates-channel)
+  (await-for-sec))
 
 
 ;; BOT API METHODS

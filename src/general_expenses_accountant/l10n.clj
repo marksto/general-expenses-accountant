@@ -2,8 +2,9 @@
   (:require [tongue.core :as tongue]))
 
 (def dicts
-  {:en {:init-fine "Initialized successfully..."
-        :finishing "The app is going to sleep..."
+  {:en {:init-fine "The app has been successfully initialized!"
+        :finishing "The app is going to sleep... Zzz..."
+        :exit-fine "The app exited successfully!"
         :processed "Bot API request processed"
         :not-found "No such API endpoint"}
    :tongue/fallback :en})

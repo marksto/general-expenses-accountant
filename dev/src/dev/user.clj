@@ -9,7 +9,7 @@
 (load "../../src/general_expenses_accountant/config")
 (alias 'config 'general-expenses-accountant.config)
 
-(config/load-and-validate! [] "dev/config.edn")
+(config/load-and-validate!)
 
 
 ;; 1. Initializing the DB
@@ -55,13 +55,7 @@
 (load "../../src/general_expenses_accountant/main")
 (alias 'app 'general-expenses-accountant.main)
 
-(def server (app/-main))
-
-(if (:started (bean server))
-  (println (str "Successfully started the " server "\n"))
-  (do
-    (println (str "Failed to start the web server"))
-    (System/exit 2)))
+(app/-main)
 
 
 ;; 3. Preparing for REPL-driven development

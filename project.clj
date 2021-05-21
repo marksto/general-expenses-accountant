@@ -35,16 +35,15 @@
 
                  [morse "0.4.3"]
 
+                 [mount "0.1.16"]
+
                  [nrepl/drawbridge "0.2.1"]
 
                  [slingshot "0.12.2"]
 
                  [tongue "0.2.10"]]
 
-  :plugins [[lein-ring "0.12.5"] ;; to run an app locally with 'lein ring server(-headless)'
-            [nrepl/drawbridge "0.2.1"]]
-  :ring {:handler general-expenses-accountant.web/app
-         :init general-expenses-accountant.main/initialize}
+  :plugins [[nrepl/drawbridge "0.2.1"]]
 
   :aliases {"migrate-db" ["run" "-m" "general-expenses-accountant.db/lein-migrate-db"]
             "rollback-db" ["run" "-m" "general-expenses-accountant.db/lein-rollback-db"]
