@@ -23,17 +23,15 @@
 
 ;; STATE
 
-(defonce ^:private *bot-user (atom nil))
-
-(defn get-bot-username
-  []
-  (get @*bot-user :username))
-
-(defstate bot-user
+(defstate ^:private bot-user
   :start (let [token (config/get-prop :bot-api-token)
                bot-user (get (tg-client/get-me token) :result)]
            (log/debug "Identified myself:" bot-user)
-           (reset! *bot-user bot-user)))
+           bot-user))
+
+(defn get-bot-username
+  []
+  (get bot-user :username))
 
 
 ;; TODO: Send the list of supported commands w/ 'setMyCommands'.
@@ -44,13 +42,11 @@
 ;;       the initial data should be truncated, e.g. by an 'updated_at'
 ;;       timestamps, and the data for chats from the incoming requests
 ;;       should be (re)loaded from the DB on demand.
-(defonce ^:private *bot-data (atom {}))
-
-(defstate bot-data
+(defstate ^:private *bot-data
   :start (let [chats (chats/select-all)
                ids (map :id chats)]
            (log/debug "Total chats uploaded from the DB:" (count chats))
-           (reset! *bot-data (zipmap ids chats))))
+           (atom (zipmap ids chats))))
 
 (defn- get-bot-data
   []
