@@ -25,6 +25,10 @@
 
 (defonce ^:private *bot-user (atom nil))
 
+(defn get-bot-username
+  []
+  (get @*bot-user :username))
+
 ;; TODO: Normally, this should be transformed into a 'cloffeine' cache
 ;;       which periodically auto-evicts the cast-off chats data. Then,
 ;;       the initial data should be truncated, e.g. by an 'updated_at'
@@ -1660,7 +1664,7 @@
   ;;     even if the group chat already existed before.
   (create-general-account! chat-id (get-datetime-in-tg-format))
   (proceed-and-respond! chat-id {:transition [:chat-type/group :declare-readiness]
-                                 :params {:bot-username (get @*bot-user :username)}})
+                                 :params {:bot-username (get-bot-username)}})
   ;; TODO: Send the settings conditionally, depending on whether it is the first time.
   (send-group-chat-settings! chat-id true))
 

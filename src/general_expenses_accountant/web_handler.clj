@@ -12,7 +12,7 @@
              [session :refer [wrap-session]]]
             [drawbridge.core :as drawbridge]
 
-            [general-expenses-accountant.core :refer [bot-api]]
+            [general-expenses-accountant.core :refer [get-bot-username bot-api]]
             [general-expenses-accountant.config :as config]
             [general-expenses-accountant.html :as html]
             [general-expenses-accountant.l10n :as l10n]))
@@ -47,7 +47,7 @@
 (cmpj/defroutes
   app-routes
   (GET "/" []
-    (html/landing (config/get-prop :bot-username)))
+    (html/landing (get-bot-username)))
 
   (cmpj/context api-path []
     (POST "/:token" {{token :token} :route-params

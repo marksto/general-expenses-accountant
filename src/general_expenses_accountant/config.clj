@@ -27,12 +27,11 @@
                              :type :string}
              :bot-url {:description "The bot URL (for a webhook)"
                        :type :string}
-             :bot-username {:description "The bot Telegram username"
-                            :type :string}
 
              :heroku-app-name {:description "Heroku app name"
                                :type :string}
-             :port {:type :number
+             :port {:description "HTTP web server port to use"
+                    :type :number
                     :default 8080}})
 
 (defn get-prop
