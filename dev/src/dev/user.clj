@@ -62,11 +62,16 @@
 
 (in-ns 'general-expenses-accountant.core)
 
+(alias 'tg-client 'general-expenses-accountant.tg-client)
+(alias 'config 'general-expenses-accountant.config)
+
+;; TODO: Better be re-written with the Mount in mind.
 (defn restart-long-polling
   []
   (tg-client/stop-long-polling!)
   (tg-client/setup-long-polling!
-    (config/get-prop :bot-api-token) bot-api))
+    (config/get-prop :bot-api-token)
+    general-expenses-accountant.core/bot-api))
 
 (comment
   ;; in case it had stopped
