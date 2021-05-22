@@ -37,7 +37,7 @@
     (tg-client/stop-long-polling!))
   (log/info (l10n/tr :en :exit-fine)))
 
-(defstate app
+(defstate ^:private app
   :start (initialize!)
   :stop (finalize!))
 

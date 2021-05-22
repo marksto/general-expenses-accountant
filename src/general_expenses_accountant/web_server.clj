@@ -33,7 +33,7 @@
       (log/info "Failed to start the web server")
       (System/exit 2))))
 
-(defstate server
+(defstate ^:private server
   :start (-> (prepare-handler-for-jetty)
              (run-jetty {:port (config/get-prop :port)
                          :join? false})

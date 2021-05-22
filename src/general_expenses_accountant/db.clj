@@ -191,7 +191,7 @@
     (catch Exception e
       (log/error e {:event ::db-close-failed}))))
 
-(defstate datasource
+(defstate ^:private datasource
   :start (init!)
   :stop (close! datasource))
 

@@ -60,5 +60,5 @@
    (cfg/verify :quit-on-error true
                :silent (not (in-dev?)))))
 
-(defstate configurator
+(defstate ^:private loader
   :start (load-and-validate! (mount/args)))
