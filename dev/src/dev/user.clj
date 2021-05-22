@@ -1,6 +1,7 @@
 (ns dev.user
   (:require [clojure.java.jdbc :as sql]
-            [clojure.string :as str]))
+            [clojure.string :as str]
+            [mount.core :as mount]))
 
 ;; 0. Loading DEV config
 
@@ -9,7 +10,7 @@
 (load "../../src/general_expenses_accountant/config")
 (alias 'config 'general-expenses-accountant.config)
 
-(config/load-and-validate!)
+(mount/start #'config/loader)
 
 
 ;; 1. Initializing the DB
@@ -53,30 +54,25 @@
 ;; 2. Starting the app
 
 (load "../../src/general_expenses_accountant/main")
-(alias 'app 'general-expenses-accountant.main)
+(alias 'main 'general-expenses-accountant.main)
 
-(app/-main)
+(mount/start-without #'config/loader)
+
+(defn restart-long-polling
+  []
+  (mount/stop #'main/app)
+  (mount/start #'main/app))
+
+(comment
+  ;; in case it had stopped
+  (restart-long-polling))
 
 
 ;; 3. Preparing for REPL-driven development
 
 (in-ns 'general-expenses-accountant.core)
 
-(alias 'tg-client 'general-expenses-accountant.tg-client)
-(alias 'config 'general-expenses-accountant.config)
-
-;; TODO: Better be re-written with the Mount in mind.
-(defn restart-long-polling
-  []
-  (tg-client/stop-long-polling!)
-  (tg-client/setup-long-polling!
-    (config/get-prop :bot-api-token)
-    general-expenses-accountant.core/bot-api))
-
 (comment
-  ;; in case it had stopped
-  (restart-long-polling)
-
   (do ;; to talk to the DB about 'chats'
     (load "../../src/general_expenses_accountant/domain/chat")
     (in-ns 'general-expenses-accountant.domain.chat)))
