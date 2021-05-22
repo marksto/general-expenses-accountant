@@ -29,6 +29,16 @@
   []
   (get @*bot-user :username))
 
+(defstate bot-user
+  :start (let [token (config/get-prop :bot-api-token)
+               bot-user (get (tg-client/get-me token) :result)]
+           (log/debug "Identified myself:" bot-user)
+           (reset! *bot-user bot-user)))
+
+
+;; TODO: Send the list of supported commands w/ 'setMyCommands'.
+
+
 ;; TODO: Normally, this should be transformed into a 'cloffeine' cache
 ;;       which periodically auto-evicts the cast-off chats data. Then,
 ;;       the initial data should be truncated, e.g. by an 'updated_at'
@@ -36,21 +46,11 @@
 ;;       should be (re)loaded from the DB on demand.
 (defonce ^:private *bot-data (atom {}))
 
-(defn- init!
-  []
-  (let [token (config/get-prop :bot-api-token)
-        bot-user (get (tg-client/get-me token) :result)]
-    (log/debug "Identified myself:" bot-user)
-    (reset! *bot-user bot-user))
-
-  ;; TODO: Send the list of supported commands w/ 'setMyCommands'.
-
-  (let [chats (chats/select-all)
-        ids (map :id chats)]
-    (log/debug "Total chats uploaded from the DB:" (count chats))
-    (reset! *bot-data (zipmap ids chats))))
-
-(defstate bot :start (init!))
+(defstate bot-data
+  :start (let [chats (chats/select-all)
+               ids (map :id chats)]
+           (log/debug "Total chats uploaded from the DB:" (count chats))
+           (reset! *bot-data (zipmap ids chats))))
 
 (defn- get-bot-data
   []
@@ -61,6 +61,7 @@
    (swap! *bot-data upd-fn))
   ([upd-fn & upd-fn-args]
    (apply swap! *bot-data upd-fn upd-fn-args)))
+
 
 ;; TODO: Get rid of this atom after debugging is complete. This is not needed for the app.
 (defonce ^:private *transactions (atom {}))
