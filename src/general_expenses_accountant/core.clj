@@ -1199,42 +1199,117 @@
 
 (def ^:private responses
   {:chat-type/group
-   {:introduction-msg {:response-fn get-introduction-msg
-                       :response-params [:chat-members-count :first-name]}
-    :personal-accounts-left-msg {:response-fn get-personal-accounts-left-msg
-                                 :response-params [:count]}
-    :settings-msg {:response-fn get-settings-msg
-                   :response-params [:first-time?]}
+   {:introduction-msg
+    {:response-fn get-introduction-msg
+     :response-params [:chat-members-count :first-name]}
 
-    :new-member-selection-msg {:response-fn get-new-member-selection-msg
-                               :response-params [:accounts]}
+    :personal-account-name-request-msg
+    {:response-fn get-personal-account-name-request-msg
+     :response-params [:chat-members]}
 
-    :successful-changes-msg {:response-fn (constantly successful-changes-msg)}
+    :personal-accounts-left-msg
+    {:response-fn get-personal-accounts-left-msg
+     :response-params [:count]}
 
-    :waiting-for-user-input-ntf {:response-fn (constantly waiting-for-user-input-notification)}
-    :message-already-in-use-ntf {:response-fn (constantly message-already-in-use-notification)}
+    :bot-readiness-msg
+    {:response-fn get-bot-readiness-msg
+     :response-params [:bot-username]}
 
-    :no-eligible-accounts-ntf {:response-fn (constantly no-eligible-accounts-notification)}}
+    :settings-msg
+    {:response-fn get-settings-msg
+     :response-params [:first-time?]}
+
+    :new-account-name-request-msg
+    {:response-fn get-new-account-name-request-msg
+     :response-params [:user]}
+
+    :new-member-selection-msg
+    {:response-fn get-new-member-selection-msg
+     :response-params [:accounts]}
+
+    :account-rename-request-msg
+    {:response-fn get-account-rename-request-msg
+     :response-params [:user :acc-name]}
+
+    :successful-changes-msg
+    {:response-fn (constantly successful-changes-msg)}
+
+    :waiting-for-user-input-notification
+    {:response-fn (constantly waiting-for-user-input-notification)}
+    :message-already-in-use-notification
+    {:response-fn (constantly message-already-in-use-notification)}
+
+    :no-eligible-accounts-notification
+    {:response-fn (constantly no-eligible-accounts-notification)}
+
+    ; message-specific
+
+    :settings
+    {:accounts-mgmt-options-msg
+     {:response-fn get-accounts-mgmt-options-msg
+      :response-params [:accounts-by-type]}
+
+     :account-type-selection-msg
+     {:response-fn get-account-type-selection-msg
+      :response-params [:account-types :extra-buttons]}
+
+     :account-selection-msg
+     {:response-fn get-account-selection-msg
+      :response-params [:accounts :txt :extra-buttons]}
+
+     :restored-settings-msg
+     {:response-fn (partial get-settings-msg false)}}}
 
    :chat-type/private
-   {:added-to-new-group-msg {:response-fn get-added-to-new-group-msg
-                             :response-params [:chat-title]}
-    :removed-from-group-msg {:response-fn get-removed-from-group-msg
-                             :response-params [:chat-title]}
+   {:private-introduction-msg
+    {:response-fn get-private-introduction-msg
+     :response-params [:first-name]}
 
-    :invalid-input-msg {:response-fn (constantly invalid-input-msg)}
-    :new-expense-msg {:response-fn get-new-expense-msg
-                      :response-params [:expense-amount :expense-details
-                                        :payer-acc-name :debtor-acc-name]}
+    :interactive-input-msg
+    {:response-fn get-interactive-input-msg
+     :response-params [:new-user-input]}
+    :calculation-success-msg
+    {:response-fn get-calculation-success-msg
+     :response-params [:parsed-val]}
+    :calculation-failure-msg
+    {:response-fn get-calculation-failure-msg
+     :response-params [:parsed-val]}
 
-    :interactive-input-msg {:response-fn get-interactive-input-msg
-                            :response-params [:new-user-input]}
-    :calculation-success-msg {:response-fn get-calculation-success-msg
-                              :response-params [:parsed-val]}
-    :calculation-failure-msg {:response-fn get-calculation-failure-msg
-                              :response-params [:parsed-val]}
+    :invalid-input-msg
+    {:response-fn (constantly invalid-input-msg)}
 
-    :invalid-input-ntf {:response-fn (constantly invalid-input-notification)}}})
+    :group-selection-msg
+    {:response-fn get-group-selection-msg
+     :response-params [:group-refs]}
+    :expense-item-selection-msg
+    {:response-fn get-expense-item-selection-msg
+     :response-params [:expense-items]}
+    :expense-manual-description-msg
+    {:response-fn get-expense-manual-description-msg
+     :response-params [:first-name]}
+    :account-selection-msg
+    {:response-fn get-account-selection-msg
+     :response-params [:accounts :txt]}
+    :new-expense-msg
+    {:response-fn get-new-expense-msg
+     :response-params [:expense-amount :expense-details
+                       :payer-acc-name :debtor-acc-name]}
+
+    :added-to-new-group-msg
+    {:response-fn get-added-to-new-group-msg
+     :response-params [:chat-title]}
+    :removed-from-group-msg
+    {:response-fn get-removed-from-group-msg
+     :response-params [:chat-title]}
+
+    :invalid-input-notification
+    {:response-fn (constantly invalid-input-notification)}
+
+    :expense-added-successfully-msg
+    {:response-fn (constantly expense-added-successfully-msg)}
+    :failed-to-add-new-expense-msg
+    {:response-fn get-failed-to-add-new-expense-msg
+     :response-params [:reason]}}})
 
 
 ;; STATES & STATE TRANSITIONS
@@ -1248,9 +1323,14 @@
 
 (defn- handle-state-transition!
   [event state-transitions change-state-fn]
-  (let [transition (get-in state-transitions (:transition event))]
+  (let [transition-keys (:transition event)
+        transition (get-in state-transitions transition-keys)
+        chat-type (first transition-keys)
+        response-keys (as-> (:response transition) $
+                            ((if (coll? $) into conj) [chat-type] $))
+        response-data (get-in responses response-keys)]
     (change-state-fn (:to-state transition))
-    (to-response transition (:param-vals event))))
+    (to-response response-data (:param-vals event))))
 
 ; chat states
 
@@ -1283,54 +1363,58 @@
 
 (def ^:private chat-state-transitions
   {:chat-type/group
-   {:request-acc-names {:to-state :waiting
-                        :response-fn get-personal-account-name-request-msg
-                        :response-params [:chat-members]}
+   {:request-acc-names
+    {:to-state :waiting
+     :response :personal-account-name-request-msg}
 
-    :request-acc-name {:to-state :waiting
-                       :response-fn get-new-account-name-request-msg
-                       :response-params [:user]}
-    :select-group-members {:to-state :waiting
-                           :response-fn get-new-member-selection-msg
-                           :response-params [:accounts]}
-    :request-acc-new-name {:to-state :waiting
-                           :response-fn get-account-rename-request-msg
-                           :response-params [:user :acc-name]}
+    :request-acc-name
+    {:to-state :waiting
+     :response :new-account-name-request-msg}
+    :select-group-members
+    {:to-state :waiting
+     :response :new-member-selection-msg}
+    :request-acc-new-name
+    {:to-state :waiting
+     :response :account-rename-request-msg}
 
-    :declare-readiness {:to-state :ready
-                        :response-fn get-bot-readiness-msg
-                        :response-params [:bot-username]}
-    :notify-changes-success {:to-state :ready
-                             :response-fn (constantly successful-changes-msg)}
+    :declare-readiness
+    {:to-state :ready
+     :response :bot-readiness-msg}
+    :notify-changes-success
+    {:to-state :ready
+     :response :successful-changes-msg}
 
-    :mark-evicted {:to-state :evicted}}
+    :mark-evicted
+    {:to-state :evicted}}
 
    :chat-type/private
-   {:request-amount {:to-state :input
-                     :response-fn get-private-introduction-msg
-                     :response-params [:first-name]}
-    :show-calculator {:to-state :interactive-input
-                      :response-fn get-interactive-input-msg
-                      :response-params [:user-input]}
-    :select-group {:to-state :group-selection
-                   :response-fn get-group-selection-msg
-                   :response-params [:group-refs]}
-    :select-expense-item {:to-state :expense-detailing
-                          :response-fn get-expense-item-selection-msg
-                          :response-params [:expense-items]}
-    :request-expense-desc {:to-state :expense-detailing
-                           :response-fn get-expense-manual-description-msg
-                           :response-params [:first-name]}
-    :select-account {:to-state :account-selection
-                     :response-fn get-account-selection-msg
-                     :response-params [:accounts :txt]}
+   {:request-amount
+    {:to-state :input
+     :response :private-introduction-msg}
+    :show-calculator
+    {:to-state :interactive-input
+     :response :interactive-input-msg}
+    :select-group
+    {:to-state :group-selection
+     :response :group-selection-msg}
+    :select-expense-item
+    {:to-state :expense-detailing
+     :response :expense-item-selection-msg}
+    :request-expense-desc
+    {:to-state :expense-detailing
+     :response :expense-manual-description-msg}
+    :select-account
+    {:to-state :account-selection
+     :response :account-selection-msg}
 
-    :cancel-input {:to-state :input}
-    :notify-input-success {:to-state :input
-                           :response-fn (constantly expense-added-successfully-msg)}
-    :notify-input-failure {:to-state :input
-                           :response-fn get-failed-to-add-new-expense-msg
-                           :response-params [:reason]}}})
+    :cancel-input
+    {:to-state :input}
+    :notify-input-success
+    {:to-state :input
+     :response :expense-added-successfully-msg}
+    :notify-input-failure
+    {:to-state :input
+     :response :failed-to-add-new-expense-msg}}})
 
 (defn- handle-chat-state-transition!
   [chat-id event]
@@ -1367,29 +1451,33 @@
    :shares-mgmt #{:initial}})
 
 (def ^:private msg-state-transitions
-  {:settings
-   {:manage-accounts {:to-state :accounts-mgmt
-                      :response-fn get-accounts-mgmt-options-msg
-                      :response-params [:accounts-by-type]}
-    :select-acc-type {:to-state :account-type-selection
-                      :response-fn get-account-type-selection-msg
-                      :response-params [:account-types :extra-buttons]}
-    :rename-account {:to-state :account-renaming
-                     :response-fn get-account-selection-msg
-                     :response-params [:accounts :txt :extra-buttons]}
-    :revoke-account {:to-state :account-revocation
-                     :response-fn get-account-selection-msg
-                     :response-params [:accounts :txt :extra-buttons]}
-    :reinstate-account {:to-state :account-reinstatement
-                        :response-fn get-account-selection-msg
-                        :response-params [:accounts :txt :extra-buttons]}
+  {:chat-type/group
+   {:settings
+    {:manage-accounts
+     {:to-state :accounts-mgmt
+      :response [:settings :accounts-mgmt-options-msg]}
+     :select-acc-type
+     {:to-state :account-type-selection
+      :response [:settings :account-type-selection-msg]}
+     :rename-account
+     {:to-state :account-renaming
+      :response [:settings :account-selection-msg]}
+     :revoke-account
+     {:to-state :account-revocation
+      :response [:settings :account-selection-msg]}
+     :reinstate-account
+     {:to-state :account-reinstatement
+      :response [:settings :account-selection-msg]}
 
-    :manage-expense-items {:to-state :expense-items-mgmt}
+     :manage-expense-items
+     {:to-state :expense-items-mgmt}
 
-    :manage-shares {:to-state :shares-mgmt}
+     :manage-shares
+     {:to-state :shares-mgmt}
 
-    :restore {:to-state :initial
-              :response-fn (partial get-settings-msg false)}}})
+     :restore
+     {:to-state :initial
+      :response [:settings :restored-settings-msg]}}}})
 
 (defn- change-bot-msg-state!*
   [chat-id msg-type msg-id new-state]
@@ -1398,10 +1486,10 @@
     (change-bot-msg-state! chat-id msg-type msg-id msg-states new-state)))
 
 (defn- handle-msg-state-transition!
-  [chat-id msg-id event]
-  (let [msg-type (first (:transition event))
+  [chat-id msg-id msg-event]
+  (let [msg-type (second (:transition msg-event))
         change-state-fn (partial change-bot-msg-state!* chat-id msg-type msg-id)]
-    (handle-state-transition! event msg-state-transitions change-state-fn)))
+    (handle-state-transition! msg-event msg-state-transitions change-state-fn)))
 
 
 ;; RECIPROCAL ACTIONS
@@ -1718,7 +1806,7 @@
   [chat-id msg-id state-transition-name]
   (proceed-with-msg-and-respond!
     {:chat-id chat-id :msg-id msg-id}
-    {:transition [:settings state-transition-name]
+    {:transition [:chat-type/group :settings state-transition-name]
      :param-vals {:account-types [:acc-type/group :acc-type/personal]
                   :extra-buttons [back-button]}}))
 
@@ -1775,12 +1863,12 @@
      (if (seq eligible-accs)
        (proceed-with-msg-and-respond!
          {:chat-id chat-id :msg-id msg-id}
-         {:transition [:settings state-transition-name]
+         {:transition [:chat-type/group :settings state-transition-name]
           :param-vals {:accounts eligible-accs
                        :txt select-account-txt
                        :extra-buttons [back-button]}})
        (respond!* {:callback-query-id callback-query-id}
-                  [:chat-type/group :no-eligible-accounts-ntf])))))
+                  [:chat-type/group :no-eligible-accounts-notification])))))
 
 (defn- proceed-with-account-renaming!
   [chat-id {user-id :id :as user} acc-to-rename]
@@ -1801,7 +1889,7 @@
   (release-message-lock! chat-id user-id msg-id)
   (proceed-with-msg-and-respond!
     {:chat-id chat-id :msg-id msg-id}
-    {:transition [:settings :restore]}))
+    {:transition [:chat-type/group :settings :restore]}))
 
 
 (defmacro do-when-chat-is-ready-or-send-notification!
@@ -1809,14 +1897,14 @@
   `(if (= :ready ~chat-state)
      (do ~@body)
      (respond!* {:callback-query-id ~callback-query-id}
-                [:chat-type/group :waiting-for-user-input-ntf])))
+                [:chat-type/group :waiting-for-user-input-notification])))
 
 (defmacro try-with-message-lock-or-send-notification!
   [chat-id user-id msg-id callback-query-id & body]
   `(if (acquire-message-lock! ~chat-id ~user-id ~msg-id)
      (do ~@body)
      (respond!* {:callback-query-id ~callback-query-id}
-                [:chat-type/group :message-already-in-use-ntf])))
+                [:chat-type/group :message-already-in-use-notification])))
 
 ;; - COMMANDS ACTIONS
 
@@ -2061,7 +2149,7 @@
             (let [accounts-by-type (get-group-chat-accounts-by-type chat-id)]
               (proceed-with-msg-and-respond!
                 {:chat-id chat-id :msg-id msg-id}
-                {:transition [:settings :manage-accounts]
+                {:transition [:chat-type/group :settings :manage-accounts]
                  :param-vals {:accounts-by-type accounts-by-type}}))))
         (cb-succeed callback-query-id))
       send-retry-callback-query!))
@@ -2263,7 +2351,7 @@
 
             (proceed-with-msg-and-respond!
               {:chat-id chat-id :msg-id msg-id}
-              {:transition [:settings :manage-expense-items]})))
+              {:transition [:chat-type/group :settings :manage-expense-items]})))
         (cb-succeed callback-query-id))
       send-retry-callback-query!))
 
@@ -2286,7 +2374,7 @@
 
             (proceed-with-msg-and-respond!
               {:chat-id chat-id :msg-id msg-id}
-              {:transition [:settings :manage-shares]})))
+              {:transition [:chat-type/group :settings :manage-shares]})))
         (cb-succeed callback-query-id))
       send-retry-callback-query!))
 
@@ -2316,7 +2404,7 @@
               (let [accounts-by-type (get-group-chat-accounts-by-type chat-id)]
                 (proceed-with-msg-and-respond!
                   {:chat-id chat-id :msg-id msg-id}
-                  {:transition [:settings :manage-accounts]
+                  {:transition [:chat-type/group :settings :manage-accounts]
                    :param-vals {:accounts-by-type accounts-by-type}})))))
         (cb-succeed callback-query-id))
       send-retry-callback-query!))
@@ -2425,7 +2513,7 @@
             (do
               (log/debugf "Invalid user input: \"%s\"" parsed-val)
               (respond!* {:callback-query-id callback-query-id}
-                         [:chat-type/private :invalid-input-ntf])
+                         [:chat-type/private :invalid-input-notification])
 
               (when-not (is-user-input-error? chat-id)
                 (update-user-input-error-status! chat-id true)
