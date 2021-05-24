@@ -1199,18 +1199,16 @@
 
 ;; TODO: Re-write with an existing state machine (FSM) library.
 
+(defn- to-response
+  [{:keys [response-fn response-params]} param-vals]
+  (when (some? response-fn)
+    (apply response-fn (map (or param-vals {}) response-params))))
+
 (defn- handle-state-transition!
   [event state-transitions change-state-fn]
-  (let [transition (get-in state-transitions (:transition event))
-        response (:response transition)
-        response-fn (:response-fn transition)
-        response-params (:response-params transition)]
+  (let [transition (get-in state-transitions (:transition event))]
     (change-state-fn (:to-state transition))
-    (cond (some? response)
-          response
-          (some? response-fn)
-          (let [param-values (or (:params event) {})]
-            (apply response-fn (map param-values response-params))))))
+    (to-response transition (:param-vals event))))
 
 ; chat states
 
@@ -1261,7 +1259,7 @@
                         :response-fn get-bot-readiness-msg
                         :response-params [:bot-username]}
     :notify-changes-success {:to-state :ready
-                             :response successful-changes-msg}
+                             :response-fn (constantly successful-changes-msg)}
 
     :mark-evicted {:to-state :evicted}}
 
@@ -1287,7 +1285,7 @@
 
     :cancel-input {:to-state :input}
     :notify-input-success {:to-state :input
-                           :response expense-added-successfully-msg}
+                           :response-fn (constantly expense-added-successfully-msg)}
     :notify-input-failure {:to-state :input
                            :response-fn get-failed-to-add-new-expense-msg
                            :response-params [:reason]}}})
@@ -1349,7 +1347,7 @@
     :manage-shares {:to-state :shares-mgmt}
 
     :restore {:to-state :initial
-              :response (get-settings-msg false)}}})
+              :response-fn (partial get-settings-msg false)}}})
 
 (defn- change-bot-msg-state!*
   [chat-id msg-type msg-id new-state]
@@ -1522,7 +1520,7 @@
         (proceed-with-chat-and-respond!
           chat-id
           {:transition [:chat-type/private :notify-input-failure]
-           :params {:reason data-persistence-error}}))
+           :param-vals {:reason data-persistence-error}}))
       (else
         (let [pers-accs-count (->> {:acc-types [:acc-type/personal]}
                                    (get-group-chat-accounts chat-id)
@@ -1553,8 +1551,8 @@
         (proceed-with-chat-and-respond!
           chat-id
           {:transition [:chat-type/private :select-account]
-           :params {:accounts other-accounts
-                    :txt select-payer-account-txt}}))
+           :param-vals {:accounts other-accounts
+                        :txt select-payer-account-txt}}))
 
       (empty? active-accounts)
       (do
@@ -1562,7 +1560,7 @@
         (proceed-with-chat-and-respond!
           chat-id
           {:transition [:chat-type/private :notify-input-failure]
-           :params {:reason no-debtor-account-error}}))
+           :param-vals {:reason no-debtor-account-error}}))
 
       :else
       (let [debtor-acc (first active-accounts)]
@@ -1574,9 +1572,9 @@
   (let [expense-items (get-group-chat-expense-items group-chat-id)
         event (if (seq expense-items)
                 {:transition [:chat-type/private :select-expense-item]
-                 :params {:expense-items expense-items}}
+                 :param-vals {:expense-items expense-items}}
                 {:transition [:chat-type/private :request-expense-desc]
-                 :params {:first-name first-name}})]
+                 :param-vals {:first-name first-name}})]
     (proceed-with-chat-and-respond! chat-id event)))
 
 ;; TODO: Abstract this away — "selecting 1 of N, with a special case for N=1".
@@ -1595,7 +1593,7 @@
         (proceed-with-chat-and-respond!
           chat-id
           {:transition [:chat-type/private :select-group]
-           :params {:group-refs group-refs}}))
+           :param-vals {:group-refs group-refs}}))
 
       (empty? groups)
       (do
@@ -1603,7 +1601,7 @@
         (proceed-with-chat-and-respond!
           chat-id
           {:transition [:chat-type/private :notify-input-failure]
-           :params {:reason no-group-to-record-error}}))
+           :param-vals {:reason no-group-to-record-error}}))
 
       :else
       (let [group-chat-id (first groups)]
@@ -1669,7 +1667,7 @@
   (proceed-with-chat-and-respond!
     chat-id
     {:transition [:chat-type/group :request-acc-names]
-     :params {:chat-members ?new-chat-members}}
+     :param-vals {:chat-members ?new-chat-members}}
     :response-handler
     #(->> % :message_id (set-bot-msg-id! chat-id :name-request-msg-id))))
 
@@ -1681,7 +1679,7 @@
   (proceed-with-chat-and-respond!
     chat-id
     {:transition [:chat-type/group :declare-readiness]
-     :params {:bot-username (get-bot-username)}})
+     :param-vals {:bot-username (get-bot-username)}})
   ;; TODO: Send the settings conditionally, depending on whether it is the first time.
   (send-group-chat-settings! chat-id true))
 
@@ -1709,15 +1707,15 @@
   (proceed-with-msg-and-respond!
     chat-id msg-id
     {:transition [:settings state-transition-name]
-     :params {:account-types [:acc-type/group :acc-type/personal]
-              :extra-buttons [back-button]}}))
+     :param-vals {:account-types [:acc-type/group :acc-type/personal]
+                  :extra-buttons [back-button]}}))
 
 (defn- proceed-with-account-naming!
   [chat-id {user-id :id :as user}]
   (proceed-with-chat-and-respond!
     chat-id
     {:transition [:chat-type/group :request-acc-name]
-     :params {:user user}}
+     :param-vals {:user user}}
     :response-handler
     #(->> % :message_id
           (set-bot-msg-id! chat-id [:to-user user-id :request-acc-name-msg-id]))))
@@ -1735,7 +1733,7 @@
       (proceed-with-chat-and-respond!
         chat-id
         {:transition [:chat-type/group :select-group-members]
-         :params {:accounts personal-accs}}))))
+         :param-vals {:accounts personal-accs}}))))
 
 (defn- proceed-with-account-member-selection!
   [chat-id msg-id already-selected-account-members]
@@ -1765,9 +1763,9 @@
        (proceed-with-msg-and-respond!
          chat-id msg-id
          {:transition [:settings state-transition-name]
-          :params {:accounts eligible-accs
-                   :txt select-account-txt
-                   :extra-buttons [back-button]}})
+          :param-vals {:accounts eligible-accs
+                       :txt select-account-txt
+                       :extra-buttons [back-button]}})
        (respond! {:callback-query-id callback-query-id}
                  no-eligible-accounts-notification)))))
 
@@ -1779,8 +1777,8 @@
   (proceed-with-chat-and-respond!
     chat-id
     {:transition [:chat-type/group :request-acc-new-name]
-     :params {:user user
-              :acc-name (:name acc-to-rename)}}
+     :param-vals {:user user
+                  :acc-name (:name acc-to-rename)}}
     :response-handler
     #(->> % :message_id
           (set-bot-msg-id! chat-id [:to-user user-id :request-rename-msg-id]))))
@@ -1809,7 +1807,7 @@
   (proceed-with-chat-and-respond!
     chat-id
     {:transition [:chat-type/private :request-amount]
-     :params {:first-name first-name}}))
+     :param-vals {:first-name first-name}}))
 
 ;; TODO: Implement proper '/help' message (w/ the list of commands, etc.).
 (defn- cmd-private-help!
@@ -2035,7 +2033,7 @@
               (proceed-with-msg-and-respond!
                 chat-id msg-id
                 {:transition [:settings :manage-accounts]
-                 :params {:accounts-by-type accounts-by-type}}))))
+                 :param-vals {:accounts-by-type accounts-by-type}}))))
         (cb-succeed callback-query-id))
       send-retry-callback-query!))
 
@@ -2290,7 +2288,7 @@
                 (proceed-with-msg-and-respond!
                   chat-id msg-id
                   {:transition [:settings :manage-accounts]
-                   :params {:accounts-by-type accounts-by-type}})))))
+                   :param-vals {:accounts-by-type accounts-by-type}})))))
         (cb-succeed callback-query-id))
       send-retry-callback-query!))
 
