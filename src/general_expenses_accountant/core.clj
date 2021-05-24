@@ -2441,21 +2441,18 @@
               chat-members-count (tg-client/get-chat-members-count token chat-id)
               new-chat (setup-new-group-chat! chat-id chat-title chat-members-count)]
           (if (some? new-chat)
-            (do
-              (respond!* {:chat-id chat-id}
-                         [:chat-type/group :introduction-msg]
-                         :param-vals {:chat-members-count chat-members-count
-                                      :first-name first-name})
-              (proceed-with-personal-accounts-creation! chat-id nil))
+            (respond!* {:chat-id chat-id}
+                       [:chat-type/group :introduction-msg]
+                       :param-vals {:chat-members-count chat-members-count
+                                    :first-name first-name})
             (do
               (log/debugf "The chat=%s already exists" chat-id)
               (update-chat-data! chat-id
-                                 assoc :members-count chat-members-count)
-              ;; NB: It would be nice to update the list of personal
-              ;;     accounts with new ones for those users who have
-              ;;     joined the group chat during the bot's absence.
-              (proceed-with-personal-accounts-creation! chat-id nil)
-              (proceed-with-group-chat-finalization! chat-id)))
+                                 assoc :members-count chat-members-count)))
+          ;; NB: It would be nice to update the list of personal
+          ;;     accounts with new ones for those users who have
+          ;;     joined the group chat during the bot's absence.
+          (proceed-with-personal-accounts-creation! chat-id nil)
           op-succeed)
 
         (tg-api/has-left? my-chat-member-updated)
