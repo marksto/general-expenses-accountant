@@ -1886,6 +1886,7 @@
 
 (defn- cb-ignored
   [callback-query-id]
+  ;; TODO: For a long-polling version, respond as usual.
   (tg-api/build-immediate-response "answerCallbackQuery"
                                    (assoc ignored-callback-query-notification
                                      :callback_query_id callback-query-id)))
