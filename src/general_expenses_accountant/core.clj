@@ -1214,7 +1214,27 @@
     :waiting-for-user-input-ntf {:response-fn (constantly waiting-for-user-input-notification)}
     :message-already-in-use-ntf {:response-fn (constantly message-already-in-use-notification)}
 
-    :no-eligible-accounts-ntf {:response-fn (constantly no-eligible-accounts-notification)}}})
+    :no-eligible-accounts-ntf {:response-fn (constantly no-eligible-accounts-notification)}}
+
+   :chat-type/private
+   {:added-to-new-group-msg {:response-fn get-added-to-new-group-msg
+                             :response-params [:chat-title]}
+    :removed-from-group-msg {:response-fn get-removed-from-group-msg
+                             :response-params [:chat-title]}
+
+    :invalid-input-msg {:response-fn (constantly invalid-input-msg)}
+    :new-expense-msg {:response-fn get-new-expense-msg
+                      :response-params [:expense-amount :expense-details
+                                        :payer-acc-name :debtor-acc-name]}
+
+    :interactive-input-msg {:response-fn get-interactive-input-msg
+                            :response-params [:new-user-input]}
+    :calculation-success-msg {:response-fn get-calculation-success-msg
+                              :response-params [:parsed-val]}
+    :calculation-failure-msg {:response-fn get-calculation-failure-msg
+                              :response-params [:parsed-val]}
+
+    :invalid-input-ntf {:response-fn (constantly invalid-input-notification)}}})
 
 
 ;; STATES & STATE TRANSITIONS
@@ -1518,17 +1538,10 @@
 
 ; private chats
 
-(defn- report-added-to-new-chat!
-  [user-id chat-title]
+(defn- report-to-user!
+  [user-id response-keys param-vals]
   (when (can-write-to-user? user-id)
-    (respond! {:chat-id user-id}
-              (get-added-to-new-group-msg chat-title))))
-
-(defn- report-removed-from-chat!
-  [user-id chat-title]
-  (when (can-write-to-user? user-id)
-    (respond! {:chat-id user-id}
-              (get-removed-from-group-msg chat-title))))
+    (respond!* {:chat-id user-id} response-keys :param-vals param-vals)))
 
 
 (defn- proceed-with-adding-new-expense!
@@ -1565,12 +1578,13 @@
                                (:name (get-group-chat-account
                                         group-chat-data :acc-type/personal payer-acc-id)))
               debtor-acc-name (when-not (= pers-accs-count 1)
-                                (:name debtor-acc))
-              new-expense-msg (get-new-expense-msg expense-amount
-                                                   expense-details
-                                                   payer-acc-name
-                                                   debtor-acc-name)]
-          (respond! {:chat-id group-chat-id} new-expense-msg))
+                                (:name debtor-acc))]
+          (respond!* {:chat-id group-chat-id}
+                     [:chat-type/private :new-expense-msg]
+                     :param-vals {:expense-amount expense-amount
+                                  :expense-details expense-details
+                                  :payer-acc-name payer-acc-name
+                                  :debtor-acc-name debtor-acc-name}))
         (proceed-with-chat-and-respond!
           {:chat-id chat-id}
           {:transition [:chat-type/private :notify-input-success]})))))
@@ -1696,7 +1710,9 @@
                                            {:revoke? true
                                             :datetime (get-datetime-in-tg-format)})
     (drop-user-input-data! chat-id user-id)
-    (report-removed-from-chat! user-id (get-chat-title chat-data))))
+    (report-to-user! user-id
+                     [:chat-type/private :removed-from-group-msg]
+                     {:chat-title (get-chat-title chat-data)})))
 
 (defn- proceed-with-account-type-selection!
   [chat-id msg-id state-transition-name]
@@ -2375,9 +2391,10 @@
           (let [old-user-input (get-user-input (get-chat-data chat-id))
                 new-user-input (update-user-input! chat-id non-terminal-operation)]
             (when (not= old-user-input new-user-input)
-              (respond! {:chat-id chat-id :msg-id msg-id}
-                        (get-interactive-input-msg new-user-input)
-                        :replace? true)))
+              (respond!* {:chat-id chat-id :msg-id msg-id}
+                         [:chat-type/private :interactive-input-msg]
+                         :param-vals {:new-user-input new-user-input}
+                         :replace? true)))
           (cb-succeed callback-query-id)))
       send-retry-callback-query!))
 
@@ -2399,21 +2416,23 @@
               (assoc-in-chat-data! chat-id [:amount] parsed-val)
 
               (update-user-input-error-status! chat-id false)
-              (respond! {:chat-id chat-id :msg-id msg-id}
-                        (get-calculation-success-msg parsed-val)
-                        :replace? true)
+              (respond!* {:chat-id chat-id :msg-id msg-id}
+                         [:chat-type/private :calculation-success-msg]
+                         :param-vals {:parsed-val parsed-val}
+                         :replace? true)
 
               (proceed-with-group! chat-id first-name))
             (do
               (log/debugf "Invalid user input: \"%s\"" parsed-val)
-              (respond! {:callback-query-id callback-query-id}
-                        invalid-input-notification)
+              (respond!* {:callback-query-id callback-query-id}
+                         [:chat-type/private :invalid-input-ntf])
 
               (when-not (is-user-input-error? chat-id)
                 (update-user-input-error-status! chat-id true)
-                (respond! {:chat-id chat-id :msg-id msg-id}
-                          (get-calculation-failure-msg parsed-val)
-                          :replace? true)))))
+                (respond!* {:chat-id chat-id :msg-id msg-id}
+                           [:chat-type/private :calculation-failure-msg]
+                           :param-vals {:parsed-val parsed-val}
+                           :replace? true)))))
         (cb-succeed callback-query-id))
       send-retry-callback-query!))
 
@@ -2531,7 +2550,9 @@
 
         (if (create-personal-account! chat-id text date
                                       :user-id user-id :first-msg-id msg-id)
-          (report-added-to-new-chat! user-id chat-title)
+          (report-to-user! user-id
+                           [:chat-type/private :added-to-new-group-msg]
+                           {:chat-title chat-title})
           (update-personal-account! chat-id {:user-id user-id} {:new-name text}))
 
         (let [pers-accs-count (->> {:acc-types [:acc-type/personal]}
@@ -2650,7 +2671,8 @@
               (assoc-in-chat-data! chat-id [:amount] input)
               (proceed-with-group! chat-id first-name)
               op-succeed)
-            (respond! {:chat-id chat-id} invalid-input-msg))))
+            (respond!* {:chat-id chat-id}
+                       [:chat-type/private :invalid-input-msg]))))
       send-retry-message!))
 
   (m-hlr/message-fn
