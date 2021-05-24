@@ -1195,6 +1195,28 @@
       (update-private-chat-groups! user-id chat-id migrate-to-chat-id))))
 
 
+;; RESPONSES
+
+(def ^:private responses
+  {:chat-type/group
+   {:introduction-msg {:response-fn get-introduction-msg
+                       :response-params [:chat-members-count :first-name]}
+    :personal-accounts-left-msg {:response-fn get-personal-accounts-left-msg
+                                 :response-params [:count]}
+    :settings-msg {:response-fn get-settings-msg
+                   :response-params [:first-time?]}
+
+    :new-member-selection-msg {:response-fn get-new-member-selection-msg
+                               :response-params [:accounts]}
+
+    :successful-changes-msg {:response-fn (constantly successful-changes-msg)}
+
+    :waiting-for-user-input-ntf {:response-fn (constantly waiting-for-user-input-notification)}
+    :message-already-in-use-ntf {:response-fn (constantly message-already-in-use-notification)}
+
+    :no-eligible-accounts-ntf {:response-fn (constantly no-eligible-accounts-notification)}}})
+
+
 ;; STATES & STATE TRANSITIONS
 
 ;; TODO: Re-write with an existing state machine (FSM) library.
@@ -1443,6 +1465,16 @@
         (handle-when-not-error (send-response-fn))
         :finished-sync))))
 
+(defn- respond!*
+  "A variant of the 'respond!' function that is used with the 'keys' of one of
+   the predefined responses, rather than with an arbitrary response value."
+  [ids response-keys & {:keys [param-vals] :as options}]
+  {:pre [(vector? response-keys)]}
+  (encore/when-let [response-data (get-in responses response-keys)
+                    response (to-response response-data param-vals)]
+    (apply respond! ids response
+           (-> options (dissoc :param-vals) seq flatten))))
+
 (defn- proceed-with-chat-and-respond!
   "Continues the course of transitions between the states of the chat and sends
    a message (answers an inline/callback query) in response to a user/an event."
@@ -1469,7 +1501,8 @@
 
 (defn- send-retry-message!
   [{{chat-id :id} :chat :as _message}]
-  (respond! {:chat-id chat-id} retry-resend-message-msg))
+  (respond! {:chat-id chat-id}
+            retry-resend-message-msg))
 
 (defn- send-retry-callback-query!
   [{callback-query-id :id :as _callback-query}]
@@ -1613,49 +1646,6 @@
 
 ; group chats
 
-;; TODO: It would be super cool to have all these abstracted away to "plain data" + a single fn,
-;;       akin to how it was made for 'proceed-and-respond!' and 'handle-chat-state-transition!'.
-;;       The design should be similar to the Lupapiste's web handlers with their 'in-/outjects'.
-
-(defn- send-group-chat-intro!
-  [chat-id chat-members-count first-name]
-  (let [intro-msg (get-introduction-msg chat-members-count first-name)]
-    (respond! {:chat-id chat-id} intro-msg)))
-
-(defn- restore-group-chat-intro!
-  [chat-id user-id msg-id]
-  (release-message-lock! chat-id user-id msg-id)
-  (proceed-with-msg-and-respond!
-    chat-id msg-id
-    {:transition [:settings :restore]}))
-
-(defn- send-accounts-creation-progress!
-  [chat-id uncreated-count]
-  (let [accs-left-msg (get-personal-accounts-left-msg uncreated-count)]
-    (respond! {:chat-id chat-id} accs-left-msg)))
-
-(defn- send-group-chat-settings!
-  [chat-id first-time?]
-  (let [settings-msg (get-settings-msg first-time?)]
-    (respond! {:chat-id chat-id} settings-msg
-              :response-handler
-              #(change-bot-msg-state!* chat-id :settings (:message_id %) :initial))))
-
-(defn- send-waiting-for-user-input-notification!
-  [callback-query-id]
-  (respond! {:callback-query-id callback-query-id}
-            waiting-for-user-input-notification))
-
-(defn- send-message-already-in-use-notification!
-  [callback-query-id]
-  (respond! {:callback-query-id callback-query-id}
-            message-already-in-use-notification))
-
-(defn- send-changes-success-notification!
-  [chat-id]
-  (respond! {:chat-id chat-id} successful-changes-msg))
-
-
 (defn- proceed-with-bot-eviction!
   [chat-id]
   (proceed-with-chat-and-respond!
@@ -1681,7 +1671,11 @@
     {:transition [:chat-type/group :declare-readiness]
      :param-vals {:bot-username (get-bot-username)}})
   ;; TODO: Send the settings conditionally, depending on whether it is the first time.
-  (send-group-chat-settings! chat-id true))
+  (respond!* {:chat-id chat-id}
+             [:chat-type/group :settings-msg]
+             :param-vals {:first-time? true}
+             :response-handler
+             #(change-bot-msg-state!* chat-id :settings (:message_id %) :initial)))
 
 (defn- proceed-with-new-chat-members!
   [chat-id new-chat-members]
@@ -1743,9 +1737,10 @@
         remaining-accs (set/difference personal-accs selected-accs)
         accounts-remain? (seq remaining-accs)]
     (when accounts-remain?
-      (respond! {:chat-id chat-id :msg-id msg-id}
-                (get-new-member-selection-msg remaining-accs)
-                :replace? true))
+      (respond!* {:chat-id chat-id :msg-id msg-id}
+                 [:chat-type/group :new-member-selection-msg]
+                 :param-vals {:accounts remaining-accs}
+                 :replace? true))
     accounts-remain?))
 
 (defn- proceed-with-account-selection!
@@ -1766,8 +1761,8 @@
           :param-vals {:accounts eligible-accs
                        :txt select-account-txt
                        :extra-buttons [back-button]}})
-       (respond! {:callback-query-id callback-query-id}
-                 no-eligible-accounts-notification)))))
+       (respond!* {:callback-query-id callback-query-id}
+                  [:chat-type/group :no-eligible-accounts-ntf])))))
 
 (defn- proceed-with-account-renaming!
   [chat-id {user-id :id :as user} acc-to-rename]
@@ -1783,18 +1778,27 @@
     #(->> % :message_id
           (set-bot-msg-id! chat-id [:to-user user-id :request-rename-msg-id]))))
 
+(defn- proceed-with-restoring-group-chat-intro!
+  [chat-id user-id msg-id]
+  (release-message-lock! chat-id user-id msg-id)
+  (proceed-with-msg-and-respond!
+    chat-id msg-id
+    {:transition [:settings :restore]}))
+
 
 (defmacro do-when-chat-is-ready-or-send-notification!
   [chat-state callback-query-id & body]
   `(if (= :ready ~chat-state)
      (do ~@body)
-     (send-waiting-for-user-input-notification! ~callback-query-id)))
+     (respond!* {:callback-query-id ~callback-query-id}
+                [:chat-type/group :waiting-for-user-input-ntf])))
 
 (defmacro try-with-message-lock-or-send-notification!
   [chat-id user-id msg-id callback-query-id & body]
   `(if (acquire-message-lock! ~chat-id ~user-id ~msg-id)
      (do ~@body)
-     (send-message-already-in-use-notification! ~callback-query-id)))
+     (respond!* {:callback-query-id ~callback-query-id}
+                [:chat-type/group :message-already-in-use-ntf])))
 
 ;; - COMMANDS ACTIONS
 
@@ -1845,7 +1849,11 @@
 (defn- cmd-group-settings!
   [{chat-id :id :as chat}]
   (log/debug "Settings requested in a group chat:" chat)
-  (send-group-chat-settings! chat-id false))
+  (respond!* {:chat-id chat-id}
+             [:chat-type/group :settings-msg]
+             :param-vals {:first-time? false}
+             :response-handler
+             #(change-bot-msg-state!* chat-id :settings (:message_id %) :initial)))
 
 
 ;; API RESPONSES
@@ -1888,6 +1896,8 @@
 
 
 ;; BOT API
+
+;; TODO: The design should be similar to the Lupapiste web handlers with their 'in-/outjects'.
 
 ;; TODO: Add a rate limiter. Use the 'limiter' from Encore? Or some full-featured RPC library?
 ; The Bots FAQ on the official Telegram website lists the following limits on server requests:
@@ -2086,7 +2096,7 @@
         (do-when-chat-is-ready-or-send-notification!
           (:chat-state callback-query) callback-query-id
 
-          (restore-group-chat-intro! chat-id user-id msg-id)
+          (proceed-with-restoring-group-chat-intro! chat-id user-id msg-id)
           (let [acc-type-name (str/replace-first callback-btn-data
                                                  cd-account-type-prefix "")
                 acc-type (keyword "acc-type" acc-type-name)]
@@ -2150,7 +2160,7 @@
           (try-with-message-lock-or-send-notification!
             chat-id user-id msg-id callback-query-id
 
-            (restore-group-chat-intro! chat-id user-id msg-id)
+            (proceed-with-restoring-group-chat-intro! chat-id user-id msg-id)
             (let [chat-data (get-chat-data chat-id)
                   account-to-rename (data->account callback-btn-data chat-data)]
               (proceed-with-account-renaming! chat-id user account-to-rename))))
@@ -2181,8 +2191,8 @@
                                                                 :datetime datetime})
                 :acc-type/group (throw (Exception. "Not implemented yet")))) ;; TODO!
 
-            (restore-group-chat-intro! chat-id user-id msg-id)
-            (send-changes-success-notification! chat-id)))
+            (proceed-with-restoring-group-chat-intro! chat-id user-id msg-id)
+            (respond!* {:chat-id chat-id} [:chat-type/group :successful-changes-msg])))
         (cb-succeed callback-query-id))
       send-retry-callback-query!))
 
@@ -2212,8 +2222,8 @@
                                                                    :datetime datetime})
                 :acc-type/group (throw (Exception. "Not implemented yet")))) ;; TODO!
 
-            (restore-group-chat-intro! chat-id user-id msg-id)
-            (send-changes-success-notification! chat-id)))
+            (proceed-with-restoring-group-chat-intro! chat-id user-id msg-id)
+            (respond!* {:chat-id chat-id} [:chat-type/group :successful-changes-msg])))
         (cb-succeed callback-query-id))
       send-retry-callback-query!))
 
@@ -2281,7 +2291,7 @@
             (case (second (:msg-state callback-query))
               (:initial ;; for when something went wrong
                 :accounts-mgmt :expense-items-mgmt :shares-mgmt)
-              (restore-group-chat-intro! chat-id user-id msg-id)
+              (proceed-with-restoring-group-chat-intro! chat-id user-id msg-id)
 
               (:account-type-selection :account-renaming :account-revocation :account-reinstatement)
               (let [accounts-by-type (get-group-chat-accounts-by-type chat-id)]
@@ -2430,7 +2440,10 @@
               new-chat (setup-new-group-chat! chat-id chat-title chat-members-count)]
           (if (some? new-chat)
             (do
-              (send-group-chat-intro! chat-id chat-members-count first-name)
+              (respond!* {:chat-id chat-id}
+                         [:chat-type/group :introduction-msg]
+                         :param-vals {:chat-members-count chat-members-count
+                                      :first-name first-name})
               (proceed-with-personal-accounts-creation! chat-id nil))
             (do
               (log/debugf "The chat=%s already exists" chat-id)
@@ -2528,7 +2541,9 @@
                                 (:members-count (get-chat-data chat-id))
                                 pers-accs-count)]
           (if (> uncreated-count 0)
-            (send-accounts-creation-progress! chat-id uncreated-count)
+            (respond!* {:chat-id chat-id}
+                       [:chat-type/group :personal-accounts-left-msg]
+                       :param-vals {:count uncreated-count})
             (do
               (set-bot-msg-id! chat-id :name-request-msg-id nil)
               (proceed-with-group-chat-finalization! chat-id))))
