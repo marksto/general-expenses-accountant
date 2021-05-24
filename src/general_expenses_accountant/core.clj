@@ -1479,7 +1479,8 @@
             retry-callback-query-notification))
 
 (defn- notify-of-inconsistent-chat-state!
-  [_arg]
+  [{{chat-id :id} :chat :as _chat-member-updated-or-message}]
+  (log/errorf "Chat=%s has entered an inconsistent state" chat-id)
   '(notify-bot-admin)) ;; TODO: Implement Admin notifications feature.
 
 ; private chats
