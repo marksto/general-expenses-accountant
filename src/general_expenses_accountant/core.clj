@@ -1964,18 +1964,20 @@
 
 ;; API RESPONSES
 
-;; IMPORTANT: The main idea of a group of handlers of any type (message, callback query, etc.)
-;;            is to organize a flow of the following nature:
-;;            - the first handler of a type have to log the incoming object
-;;            - any handler "in between" have to either:
-;;              - result in 'op-succeed' — which will stop the further processing
-;;              - result in 'nil' — which will pass the request for processing to the next handler
-;;                                  (in the order of their declaration in the 'defhandler' body)
-;;            - the last handler, in case the request wasn't processed, have to result in 'ignore'
+;; IMPORTANT: The main idea of this API is to organize handlers of any type (message, command, any
+;;            query, etc.) into a chain (in the order of their declaration within the 'defhandler'
+;;            body) that will process updates in the following way:
+;;            - the first handler of the type have to log an incoming update (its payload object);
+;;            - any intermediate handler have to either:
+;;              - result in an "operation [result] code" ('succeed', 'failed') OR in an "immediate
+;;                response" (only for Webhook updates) — which will stop the further processing;
+;;              - result in 'nil' — which will pass the update for processing to the next handler;
+;;            - the last handler, in case the update wasn't processed, have to "ignore" it — which
+;;              is also interpreted as the whole operation had 'succeed'.
 
 ;; NB: Any non-nil will do.
-(def ^:private op-succeed {:ok true})
-(def ^:private op-failed {:ok false})
+(def op-succeed {:ok true})
+(def op-failed {:ok false})
 
 (defmacro ^:private ignore
   [msg & args]
