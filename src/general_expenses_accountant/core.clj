@@ -651,6 +651,10 @@
 
 ;; - CHATS > ACCOUNTS
 
+(defn- get-members-count
+  [chat-data]
+  (:members-count chat-data))
+
 (defn- get-accounts-of-type
   ([chat-data acc-type]
    (map val (get-in chat-data [:accounts acc-type])))
@@ -712,7 +716,7 @@
                   (fn [cd]
                     ;; IMPLEMENTATION NOTE:
                     ;; Here the chat 'members-count' have to already be updated!
-                    (if (is-chat-for-group-accounting? (:members-count cd))
+                    (if (is-chat-for-group-accounting? (get-members-count cd))
                       (let [next-id (get-accounts-next-id cd)
                             acc-name (:name old-gen-acc default-general-acc-name)
                             new-general-acc (->general-account
@@ -1509,7 +1513,7 @@
    {:keys [text options] :as _response} {:keys [replace?] :as _opts}]
   ;; NB: Looks for the 'replace?' among the passed options to replace
   ;;     the existing response message rather than sending a new one.
-  (if-not replace?
+  (if-not (true? replace?)
     (m-api/send-text token chat-id options text)
     (m-api/edit-text token chat-id msg-id options text)))
 
@@ -2649,7 +2653,7 @@
                                    (get-group-chat-accounts chat-id)
                                    count)
               uncreated-count (get-number-of-missing-personal-accounts
-                                (:members-count (get-chat-data chat-id))
+                                (get-members-count (get-chat-data chat-id))
                                 pers-accs-count)]
           (if (> uncreated-count 0)
             (respond!* {:chat-id chat-id}
