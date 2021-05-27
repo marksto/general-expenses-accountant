@@ -4,6 +4,7 @@
             [clojure.string :as str]
             [clojure.core.async :refer [go chan >! <!! close! reduce]]
 
+            [taoensso.encore :refer [defalias]]
             [mount.core :as mount]
 
             [general-expenses-accountant.core :as core
@@ -17,6 +18,16 @@
 ;; TODO: Implement the test coverage in a form of externally stored (in files) web requests series (run by scripts).
 
 ;; TODO: Learn how to properly mock 'clj-http' requests?
+
+; Aliases (of required private fns)
+
+(defalias get-chat-data core/get-chat-data)
+(defalias update-chat-data! core/update-chat-data!)
+(defalias get-members-count core/get-members-count)
+(defalias get-chat-state core/get-chat-state)
+(defalias get-bot-msg-id core/get-bot-msg-id)
+(defalias set-bot-msg-id! core/set-bot-msg-id!)
+(defalias get-bot-msg-state core/get-bot-msg-state)
 
 ; Shared State
 
@@ -150,11 +161,13 @@
   {:pre [(pos-int? n)]}
   (nth (collect-responses) (dec n)))
 
+(declare res) ;; just to prevent warnings in tests
 (defmacro with-response
   [ns & forms]
   (let [body (for [n (if (coll? ns) ns [ns])]
-               `(let [~'res (get-response ~n)]
-                  ~@(map (fn [f] `(is ~f)) forms)))]
+               (let [msg (format "response #%s check" n)]
+                 `(let [~'res (get-response ~n)]
+                    ~@(map (fn [f] `(is ~f ~msg)) forms))))]
     (if (< 1 (count body))
       `(do ~@body)
       (first body))))
@@ -196,30 +209,32 @@
                                          :old_chat_member {:user bot-user :status "left"}
                                          :new_chat_member {:user bot-user :status "member"}})
                    result (bot-api update)
-                   chat-data (@#'core/get-chat-data chat-id)]
+                   chat-data (get-chat-data chat-id)]
                ;; operation code / immediate response
                (is (= op-succeed result))
 
                ;; chat data state
-               (is (= 2 (@#'core/get-members-count chat-data)))
-               (is (= :waiting (@#'core/get-chat-state chat-data)))
+               (is (= 2 (get-members-count chat-data)) "members count")
+               (is (= :waiting (get-chat-state chat-data)) "chat state")
 
                ;; bot responses
-               (is (= 2 (get-total-responses)))
+               (is (= 2 (get-total-responses)) "total responses")
                (with-response [1 2]
                               (= chat-id (-> res :chat :id)))
                (with-response 1
                               (str/includes? (:text res) user-name))
                (with-response 2
-                              (= (-> chat-data :bot-messages :name-request-msg-id)
-                                 (-> res :message_id))))))
+                              (= (get-bot-msg-id chat-id :name-request-msg-id)
+                                 (:message_id res))))))
+
+        ;; TODO: Add a TC that checks that other interactions are ineffectual at this point. Join these TCs.
 
         (testing ":: 1-2 Reply to the name request message"
           (with-mock-send
             {#'core/can-write-to-user? (constantly true)} ;; as if user has already started some other chat
             #(let [message-id (generate-message-id)
                    personal-account-name (generate-name-str "Acc/")]
-               (@#'core/update-chat-data! chat-id assoc-in [:bot-messages :name-request-msg-id] message-id)
+               (set-bot-msg-id! chat-id :name-request-msg-id message-id) ;; to be independent of test above
                (let [update (build-update :message
                                           {:message_id (generate-message-id)
                                            :chat {:id chat-id :title chat-title :type "group"}
@@ -228,16 +243,18 @@
                                            :reply_to_message {:message_id message-id}
                                            :text personal-account-name})
                      result (bot-api update)
-                     chat-data (@#'core/get-chat-data chat-id)]
+                     chat-data (get-chat-data chat-id)]
                  ;; operation code / immediate response
                  (is (= op-succeed result))
 
                  ;; chat data state
-                 (is (= 2 (@#'core/get-members-count chat-data)))
-                 (is (= :ready (@#'core/get-chat-state chat-data)))
+                 (is (= 2 (get-members-count chat-data)) "members count")
+                 (is (= :ready (get-chat-state chat-data)) "chat state")
+                 (let [new-acc (find-personal-account-by-name chat-data personal-account-name)]
+                   (is (some? new-acc) "an account with the specified name exists"))
 
                  ;; bot responses
-                 (is (= 3 (get-total-responses)))
+                 (is (= 3 (get-total-responses)) "total responses")
                  (with-response 1
                                 (= user-id (-> res :chat :id))
                                 (str/includes? (:text res) chat-title))
@@ -251,4 +268,4 @@
                                 (= ["<accounts>" "<expense_items>" "<shares>"]
                                    (mapv :callback_data (get-inline-kbd-row res 0)))
                                 (= [:settings :initial]
-                                   (@#'core/get-bot-msg-state chat-data (:message_id res))))))))))))
+                                   (get-bot-msg-state chat-data (:message_id res))))))))))))
