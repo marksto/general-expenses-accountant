@@ -19,6 +19,16 @@
              [polling :as m-poll]]
             [taoensso.timbre :as log]))
 
+;; TODO: List of possible Morse improvements.
+;;       1. Elude implicit and unnecessary library dependencies:
+;;          - 'cheshire' — make it optional (depending on CP) + add ability to plug any JSON parser
+;;          - 'clj-http' — the same as for 'cheshire', but with extra care for existing tests
+;;          - 'clojure.tools.macro' — only a single fn is used => inline it in 'utils'
+;;          - 'clj-stacktrace' — is it even used? no references within 'src'
+;;       2. Improve error logging:
+;;          - surround all outgoing HTTP requests w/ 'try-catch'
+;;          - on '::api/error' log the error itself (channel message ':description')
+
 ;; UPDATES SETUP
 
 ;; - WEBHOOK

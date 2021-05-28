@@ -1587,6 +1587,8 @@
     (apply respond! ids response
            (-> options (dissoc :param-vals) seq flatten))))
 
+;; TODO: GET RID OF MOST OF THESE !-FNS MAKING THEM PURE AND PASSING THEM DATA!
+
 (defn- proceed-with-chat-and-respond!
   "Continues the course of transitions between the states of the chat and sends
    a message (answers an inline/callback query) in response to a user/an event."
@@ -1895,6 +1897,8 @@
     {:chat-id chat-id :msg-id msg-id}
     {:transition [:chat-type/group :settings :restore]}))
 
+
+;; TODO: Make the call of these 2 macros linearized. Make a wrapper macro.
 
 (defmacro do-when-chat-is-ready-or-send-notification!
   [chat-state callback-query-id & body]
