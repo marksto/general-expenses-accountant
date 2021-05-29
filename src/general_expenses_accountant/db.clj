@@ -327,10 +327,9 @@
 
 (defn- restore-keys
   [map restore-fn]
-  (apply hash-map
-         (mapcat (fn [[k v]]
-                   [(restore-fn k) v])
-                 map)))
+  (reduce-kv (fn [m k v]
+               (assoc m (restore-fn k) v))
+             {} map))
 
 (defn restore-string-keys
   "Changes the type of keys in the 'map' from Keyword to a String."
