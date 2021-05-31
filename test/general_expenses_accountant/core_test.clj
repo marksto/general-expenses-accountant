@@ -211,7 +211,7 @@
                          (go (>! resp-chan# (:result tg-response#)))
                          tg-response#))
           responses# (memoize (fn []
-                                (Thread/sleep 500)
+                                (Thread/sleep 50)
                                 (close! resp-chan#)
                                 (<!! (reduce conj [] resp-chan#))))]
       (with-mock-db
@@ -312,7 +312,9 @@
             (testing ":: 2-1 Accounts Management"
               (let [reset-settings-state! (fn []
                                             (with-mock-db
-                                              #(change-bot-msg-state! chat-id :settings settings-msg-id :initial)))
+                                              #(let [curr-state (get-bot-msg-state (get-chat-data chat-id) settings-msg-id)]
+                                                 (when-not (= [:settings :initial] curr-state)
+                                                   (change-bot-msg-state! chat-id :settings settings-msg-id :initial)))))
                     enter-accounts-mgmt! (fn [callback-query-id]
                                            (with-mock-send
                                              #(let [update (build-update :callback_query
