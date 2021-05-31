@@ -329,30 +329,63 @@
                     virtual-personal-account-name (generate-name-str "Acc/")
                     virtual-personal-account-cd "ac::personal::1"]
 
-                (testing ":: 2-1-0 Enter the 'Accounts' menu"
+                (testing ":: 2-1-0 Menu navigation"
                   (reset-settings-state!)
                   (let [callback-query-id (generate-callback-query-id)
-                        [result chat-data responses] (enter-accounts-mgmt! callback-query-id)
+                        [result chat-data [accounts-mgmt-msg & rest]] (enter-accounts-mgmt! callback-query-id)
                         user-personal-account-name (:name (get-personal-account chat-data {:user-id user-id}))]
-                    ;; operation code / immediate response
-                    (is (= {:method "answerCallbackQuery"
-                            :callback_query_id callback-query-id} result))
 
-                    ;; chat data state
-                    (is (= :ready (get-chat-state chat-data)) "chat state")
-                    (is (= [:settings :accounts-mgmt]
-                           (get-bot-msg-state chat-data settings-msg-id)) "msg state")
+                    (testing ":: Enter the 'Accounts' menu"
+                      ;; operation code / immediate response
+                      (is (= {:method "answerCallbackQuery"
+                              :callback_query_id callback-query-id} result))
 
-                    ;; bot responses
-                    (is (= 1 (count responses)) "total responses")
-                    (let [res (nth responses 0)]
-                      (is (= chat-id (-> res :chat :id)))
-                      (is (str/includes? (:text res) user-personal-account-name))
-                      (is (some? (:reply_markup res)))
-                      (is (every? (set (map :callback_data (get-inline-kbd-col res 0)))
-                                  ["<accounts/create>" "<accounts/rename>"
-                                   "<accounts/revoke>" "<accounts/reinstate>"]))
-                      res)))
+                      ;; chat data state
+                      (is (= :ready (get-chat-state chat-data)) "chat state")
+                      (is (= [:settings :accounts-mgmt]
+                             (get-bot-msg-state chat-data settings-msg-id)) "msg state")
+
+                      ;; bot responses
+                      (is (= 0 (count rest)) "total responses")
+                      (let [res accounts-mgmt-msg]
+                        (is (= chat-id (-> res :chat :id)))
+                        (is (str/includes? (:text res) user-personal-account-name))
+                        (is (some? (:reply_markup res)))
+                        (is (every? (set (map :callback_data (get-inline-kbd-col res 0)))
+                                    ["<accounts/create>" "<accounts/rename>"
+                                     "<accounts/revoke>" "<accounts/reinstate>"]))
+                        res))
+
+                    (testing ":: Exit the 'Accounts' menu"
+                      (with-mock-send
+                        #(let [callback-query-id (generate-callback-query-id)
+                               update (build-update :callback_query
+                                                    {:id callback-query-id
+                                                     :chat {:id chat-id :title chat-title :type "group"}
+                                                     :from {:id user-id :first_name user-name :language_code "ru"}
+                                                     :message accounts-mgmt-msg
+                                                     :data "<back>"})
+                               result (bot-api update)
+                               chat-data (get-chat-data chat-id)]
+                           ;; operation code / immediate response
+                           (is (= {:method "answerCallbackQuery"
+                                   :callback_query_id callback-query-id} result))
+
+                           ;; chat data state
+                           (is (= :ready (get-chat-state chat-data)) "chat state")
+                           (is (= [:settings :initial]
+                                  (get-bot-msg-state chat-data settings-msg-id)) "msg state")
+
+                           ;; bot responses
+                           (is (= 1 (get-total-responses)) "total responses")
+                           (is (do-responses-match?
+                                 (fn [res]
+                                   ;; TODO: This checks group may be extracted into fn.
+                                   (and (= chat-id (-> res :chat :id))
+                                        (= settings-msg-id (:message_id res))
+                                        (some? (:reply_markup res))
+                                        (= ["<accounts>" "<expense_items>" "<shares>"]
+                                           (mapv :callback_data (get-inline-kbd-row res 0))))))))))))
 
                 (testing ":: 2-1-1 Create a new account"
                   (reset-settings-state!)
@@ -417,6 +450,7 @@
                                  (fn [res]
                                    ;; TODO: This checks group may be extracted into fn.
                                    (and (= chat-id (-> res :chat :id))
+                                        (= settings-msg-id (:message_id res))
                                         (some? (:reply_markup res))
                                         (= ["<accounts>" "<expense_items>" "<shares>"]
                                            (mapv :callback_data (get-inline-kbd-row res 0)))))
