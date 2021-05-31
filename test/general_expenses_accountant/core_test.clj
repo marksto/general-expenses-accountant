@@ -19,16 +19,16 @@
 
 ;; TODO: Learn how to properly mock 'clj-http' requests?
 
-; Aliases (of required private fns)
+; Aliases (of required private "getter" fns)
 
 (defalias get-chat-data core/get-chat-data)
-(defalias update-chat-data! core/update-chat-data!)
+;(defalias update-chat-data! core/update-chat-data!) ;; TODO: Get rid of this.
 (defalias get-members-count core/get-members-count)
 (defalias get-chat-state core/get-chat-state)
 (defalias get-bot-msg-id core/get-bot-msg-id)
-(defalias set-bot-msg-id! core/set-bot-msg-id!)
+(defalias set-bot-msg-id! core/set-bot-msg-id!) ;; TODO: Get rid of this.
 (defalias get-bot-msg-state core/get-bot-msg-state)
-(defalias change-bot-msg-state! core/change-bot-msg-state!*)
+(defalias change-bot-msg-state! core/change-bot-msg-state!*) ;; TODO: Get rid of this.
 (defalias get-personal-account core/get-personal-account)
 (defalias find-personal-account-by-name core/find-personal-account-by-name)
 
@@ -190,6 +190,7 @@
                    (remove #(= (first resp) %) resps))
                  (rest preds)))))))
 
+;; TODO: Get rid of this unnecessary macro. Use fn.
 (declare res) ;; just to prevent warnings in tests
 (defmacro with-response
   [ns & forms]
