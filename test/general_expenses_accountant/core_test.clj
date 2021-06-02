@@ -26,7 +26,6 @@
 (defalias get-chat-state core/get-chat-state)
 (defalias get-bot-msg-id core/get-bot-msg-id)
 (defalias get-bot-msg-state core/get-bot-msg-state)
-(defalias change-bot-msg-state! core/change-bot-msg-state!*) ;; TODO: Get rid of this.
 (defalias get-personal-account core/get-personal-account)
 (defalias find-personal-account-by-name core/find-personal-account-by-name)
 
@@ -112,12 +111,14 @@
                               :date (get-datetime-in-tg-format) ;; don't remember
                               :edit_date (get-datetime-in-tg-format)
                               :text (:text response)
+                              :entities (:entities response)
                               :reply_markup (-> response :options :reply_markup)}
                              {:message_id (generate-message-id)
                               :from bot-user
                               :chat chat
                               :date (get-datetime-in-tg-format)
                               :text (:text response)
+                              :entities (:entities response)
                               :reply_markup (-> response :options :reply_markup)})))
                  :callback true)]
     {:ok true
@@ -217,7 +218,7 @@
             chat-title (generate-name-str 3 "Group/")
             user-id (generate-user-id)
             user-name (generate-name-str "User/")
-            settings-msg (promise)]
+            settings-msg (atom nil)]
 
         (testing ":: 1 Start a new chat"
           (let [name-request-msg (promise)
@@ -296,17 +297,26 @@
                                          (mapv :callback_data (get-inline-kbd-row res 0)))
                                       (= [:settings :initial]
                                          (get-bot-msg-state chat-data (:message_id res))))
-                             (deliver settings-msg res)
+                             (reset! settings-msg res)
                              true)))
                        "responses match all predicates"))))))
 
         (testing ":: 2 Settings"
-          (let [settings-msg-id (:message_id @settings-msg)
-                reset-settings-state! (fn []
-                                        (with-mock-db
-                                          #(let [curr-state (get-bot-msg-state (get-chat-data chat-id) settings-msg-id)]
-                                             (when-not (= [:settings :initial] curr-state)
-                                               (change-bot-msg-state! chat-id :settings settings-msg-id :initial)))))]
+          (let [get-settings-msg-state (fn [chat-data]
+                                         (get-bot-msg-state chat-data (:message_id @settings-msg)))
+                re-enter-settings-msg! (fn []
+                                         (with-mock-send
+                                           #(let [chat-data (get-chat-data chat-id)]
+                                              (when-not (= [:settings :initial] (get-settings-msg-state chat-data))
+                                                (let [update (build-update :message
+                                                                           {:message_id (generate-message-id)
+                                                                            :chat {:id chat-id :title chat-title :type "group"}
+                                                                            :from {:id user-id :first_name user-name :language_code "ru"}
+                                                                            :date (get-datetime-in-tg-format)
+                                                                            :text "/settings"
+                                                                            :entities [{:offset 0 :length 9 :type "bot_command"}]})]
+                                                  (bot-api update)
+                                                  (reset! settings-msg (get-response 1)))))))]
 
             (testing ":: 2-1 Accounts Management"
               (let [enter-accounts-mgmt! (fn [callback-query-id]
@@ -324,7 +334,7 @@
                     virtual-personal-account-cd "ac::personal::1"]
 
                 (testing ":: 2-1-0 Menu navigation"
-                  (reset-settings-state!)
+                  (re-enter-settings-msg!)
                   (let [callback-query-id (generate-callback-query-id)
                         [result chat-data [accounts-mgmt-msg & rest]] (enter-accounts-mgmt! callback-query-id)
                         user-personal-account-name (:name (get-personal-account chat-data {:user-id user-id}))]
@@ -337,7 +347,7 @@
                       ;; chat data state
                       (is (= :ready (get-chat-state chat-data)) "chat state")
                       (is (= [:settings :accounts-mgmt]
-                             (get-bot-msg-state chat-data settings-msg-id)) "msg state")
+                             (get-settings-msg-state chat-data)) "msg state")
 
                       ;; bot responses
                       (is (= 0 (count rest)) "total responses")
@@ -368,7 +378,7 @@
                            ;; chat data state
                            (is (= :ready (get-chat-state chat-data)) "chat state")
                            (is (= [:settings :initial]
-                                  (get-bot-msg-state chat-data settings-msg-id)) "msg state")
+                                  (get-settings-msg-state chat-data)) "msg state")
 
                            ;; bot responses
                            (is (= 1 (get-total-responses)) "total responses")
@@ -376,14 +386,14 @@
                                  (fn [res]
                                    ;; TODO: This checks group may be extracted into fn.
                                    (and (= chat-id (-> res :chat :id))
-                                        (= settings-msg-id (:message_id res))
+                                        (= (:message_id @settings-msg) (:message_id res))
                                         (some? (:reply_markup res))
                                         (= ["<accounts>" "<expense_items>" "<shares>"]
                                            (mapv :callback_data (get-inline-kbd-row res 0))))))
                                "responses match all predicates"))))))
 
                 (testing ":: 2-1-1 Create a new account"
-                  (reset-settings-state!)
+                  (re-enter-settings-msg!)
                   (let [[_ _ [accounts-mgmt-msg]] (enter-accounts-mgmt! (generate-callback-query-id))
                         create-account-msg (promise)
                         new-account-name-request-msg (promise)]
@@ -406,7 +416,7 @@
                            ;; chat data state
                            (is (= :ready (get-chat-state chat-data)) "chat state")
                            (is (= [:settings :account-type-selection]
-                                  (get-bot-msg-state chat-data settings-msg-id)) "msg state")
+                                  (get-settings-msg-state chat-data)) "msg state")
 
                            ;; bot responses
                            (is (= 1 (get-total-responses)) "total responses")
@@ -438,7 +448,7 @@
                            ;; chat data state
                            (is (= :waiting (get-chat-state chat-data)) "chat state")
                            (is (= [:settings :initial]
-                                  (get-bot-msg-state chat-data settings-msg-id)) "msg state")
+                                  (get-settings-msg-state chat-data)) "msg state")
 
                            ;; bot responses
                            (is (= 2 (get-total-responses)) "total responses")
@@ -446,7 +456,7 @@
                                  (fn [res]
                                    ;; TODO: This checks group may be extracted into fn.
                                    (and (= chat-id (-> res :chat :id))
-                                        (= settings-msg-id (:message_id res))
+                                        (= (:message_id @settings-msg) (:message_id res))
                                         (some? (:reply_markup res))
                                         (= ["<accounts>" "<expense_items>" "<shares>"]
                                            (mapv :callback_data (get-inline-kbd-row res 0)))))
@@ -488,7 +498,7 @@
                            (is (= chat-id (-> (get-response 1) :chat :id))))))))
 
                 (testing ":: 2-1-2 Rename an account"
-                  (reset-settings-state!)
+                  (re-enter-settings-msg!)
                   (let [[_ _ [accounts-mgmt-msg]] (enter-accounts-mgmt! (generate-callback-query-id))
                         account-to-rename-selection-msg (promise)
                         account-rename-request-msg (promise)
@@ -513,7 +523,7 @@
                            ;; chat data state
                            (is (= :ready (get-chat-state chat-data)) "chat state")
                            (is (= [:settings :account-renaming]
-                                  (get-bot-msg-state chat-data settings-msg-id)) "msg state")
+                                  (get-settings-msg-state chat-data)) "msg state")
 
                            ;; bot responses
                            (is (= 1 (get-total-responses)) "total responses")
@@ -547,7 +557,7 @@
                            ;; chat data state
                            (is (= :waiting (get-chat-state chat-data)) "chat state")
                            (is (= [:settings :initial]
-                                  (get-bot-msg-state chat-data settings-msg-id)) "msg state")
+                                  (get-settings-msg-state chat-data)) "msg state")
 
                            ;; bot responses
                            (is (= 2 (get-total-responses)) "total responses")
@@ -555,7 +565,7 @@
                                  (fn [res]
                                    ;; TODO: This checks group may be extracted into fn.
                                    (and (= chat-id (-> res :chat :id))
-                                        (= settings-msg-id (:message_id res))
+                                        (= (:message_id @settings-msg) (:message_id res))
                                         (some? (:reply_markup res))
                                         (= ["<accounts>" "<expense_items>" "<shares>"]
                                            (mapv :callback_data (get-inline-kbd-row res 0)))))
@@ -598,7 +608,7 @@
                            (is (= chat-id (-> (get-response 1) :chat :id))))))))
 
                 (testing ":: 2-1-3 Revoke an account"
-                  (reset-settings-state!)
+                  (re-enter-settings-msg!)
                   (let [[_ _ [accounts-mgmt-msg]] (enter-accounts-mgmt! (generate-callback-query-id))
                         account-to-revoke-selection-msg (promise)
                         account-to-revoke-cd virtual-personal-account-cd]
@@ -622,7 +632,7 @@
                            ;; chat data state
                            (is (= :ready (get-chat-state chat-data)) "chat state")
                            (is (= [:settings :account-revocation]
-                                  (get-bot-msg-state chat-data settings-msg-id)) "msg state")
+                                  (get-settings-msg-state chat-data)) "msg state")
 
                            ;; bot responses
                            (is (= 1 (get-total-responses)) "total responses")
@@ -657,7 +667,7 @@
                            ;; chat data state
                            (is (= :ready (get-chat-state chat-data)) "chat state")
                            (is (= [:settings :initial]
-                                  (get-bot-msg-state chat-data settings-msg-id)) "msg state")
+                                  (get-settings-msg-state chat-data)) "msg state")
                            (let [acc (find-personal-account-by-name chat-data virtual-personal-account-name)]
                              (is (:revoked acc) "the selected account is marked as revoked"))
 
@@ -667,7 +677,7 @@
                                  (fn [res]
                                    ;; TODO: This checks group may be extracted into fn.
                                    (and (= chat-id (-> res :chat :id))
-                                        (= settings-msg-id (:message_id res))
+                                        (= (:message_id @settings-msg) (:message_id res))
                                         (some? (:reply_markup res))
                                         (= ["<accounts>" "<expense_items>" "<shares>"]
                                            (mapv :callback_data (get-inline-kbd-row res 0)))))
@@ -699,7 +709,7 @@
                            (is (= true (get-response 1))))))))
 
                 (testing ":: 2-1-4 Reinstate an account"
-                  (reset-settings-state!)
+                  (re-enter-settings-msg!)
                   (let [[_ _ [accounts-mgmt-msg]] (enter-accounts-mgmt! (generate-callback-query-id))
                         account-to-reinstate-selection-msg (promise)
                         account-to-reinstate-cd virtual-personal-account-cd]
@@ -723,7 +733,7 @@
                            ;; chat data state
                            (is (= :ready (get-chat-state chat-data)) "chat state")
                            (is (= [:settings :account-reinstatement]
-                                  (get-bot-msg-state chat-data settings-msg-id)) "msg state")
+                                  (get-settings-msg-state chat-data)) "msg state")
 
                            ;; bot responses
                            (is (= 1 (get-total-responses)) "total responses")
@@ -758,7 +768,7 @@
                            ;; chat data state
                            (is (= :ready (get-chat-state chat-data)) "chat state")
                            (is (= [:settings :initial]
-                                  (get-bot-msg-state chat-data settings-msg-id)) "msg state")
+                                  (get-settings-msg-state chat-data)) "msg state")
                            (let [acc (find-personal-account-by-name chat-data virtual-personal-account-name)]
                              (is (not (:revoked acc)) "the selected account is reinstated"))
 
@@ -768,7 +778,7 @@
                                  (fn [res]
                                    ;; TODO: This checks group may be extracted into fn.
                                    (and (= chat-id (-> res :chat :id))
-                                        (= settings-msg-id (:message_id res))
+                                        (= (:message_id @settings-msg) (:message_id res))
                                         (some? (:reply_markup res))
                                         (= ["<accounts>" "<expense_items>" "<shares>"]
                                            (mapv :callback_data (get-inline-kbd-row res 0)))))
