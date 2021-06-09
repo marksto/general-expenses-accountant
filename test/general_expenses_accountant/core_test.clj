@@ -210,6 +210,123 @@
 
 ; Test Cases
 
+(def start-new-chat-test-group
+  {:group ":: 1 Start a new chat"
+   :tests [{:name ":: 1-1 Create chat with bot"
+            :tags [:new-group-chat :single-user]
+            :give [:name-request-msg]}
+           {:name ":: 1-2 Reply to the name request message"
+            :tags [:new-group-chat :single-user]
+            :bind {:user-personal-account-name (generate-name-str "Acc/")}
+            :take [:name-request-msg]
+            :give [:settings-msg]}]})
+
+(def enter-the-accounts-menu
+  {:name ":: Enter the 'Accounts' menu"
+   :tags [:menu-navigation]
+   :take [:settings-msg]
+   :give [:accounts-mgmt-msg]})
+
+(def create-account-test-group
+  {:group ":: 2-1-1 Create a new account"
+   :tests [{:name ":: Should prompt the user to select the type of a new account"
+            :tags [:create-account]
+            :take [:accounts-mgmt-msg]
+            :give [:create-account-msg]}
+           {:name ":: Should restore the settings message & prompt the user for an account name"
+            :tags [:create-account]
+            :take [:create-account-msg]
+            :give [:new-account-name-request-msg]}
+           {:name ":: Should create a new account of the selected type and with the specified name"
+            :tags [:create-account]
+            :take [:new-account-name-request-msg]
+            :give [:created-account]}]})
+
+(def rename-account-test-group
+  {:group ":: 2-1-2 Rename an account" ;; TODO: Needs to be able to rename the virtual account.
+   :tests [{:name ":: Should prompt the user to select an account to rename"
+            :tags [:rename-account]
+            :take [:accounts-mgmt-msg]
+            :give [:account-to-rename-selection-msg]}
+           {:name ":: Should restore the settings message & prompt the user for an account name"
+            :tags [:rename-account]
+            :take [:account-to-rename-selection-msg]
+            :give [:account-rename-request-msg]}
+           {:name ":: Should update an existing account with the specified name"
+            :tags [:rename-account]
+            :bind {:user-personal-account-new-name (generate-name-str "Acc/")}
+            :take [:account-rename-request-msg]}]})
+
+;; NB: To be run twice: 1. when there are no accs; 2. after revoking an acc.
+(def no-eligible-accounts-for-revocation
+  {:name ":: Should notify user when there's no eligible accounts for revocation"
+   :tags [:revoke-account :notifications]
+   :take [:accounts-mgmt-msg]})
+
+(def revoke-account-test-group
+  {:group ":: 2-1-3 Revoke an account"
+   :tests [enter-the-accounts-menu ;; TODO: Have to also ':take' the newly ':created-account'.
+           {:name ":: Should prompt the user to select an account to revoke"
+            :tags [:revoke-account]
+            :take [:accounts-mgmt-msg]
+            :give [:account-to-revoke-selection-msg]}
+           {:name ":: Should restore the settings message & mark the selected account as revoked"
+            :tags [:revoke-account]
+            :bind {:account-to-revoke-cd :virtual-personal-account-cd}
+            :take [:account-to-revoke-selection-msg]
+            :give [:revoked-account]}
+           no-eligible-accounts-for-revocation]})
+
+;; NB: To be run twice: 1. when there are no accs; 2. after reinstating an acc.
+(def no-eligible-accounts-for-reinstatement
+  {:name ":: Should notify user when there's no eligible accounts for reinstatement"
+   :tags [:reinstate-account :notifications]
+   :take [:accounts-mgmt-msg]})
+
+(def reinstate-account-test-group
+  {:group ":: 2-1-4 Reinstate an account"
+   :tests [enter-the-accounts-menu ;; TODO: Have to also ':take' the recently ':revoked-account'.
+           {:name ":: Should prompt the user to select an account to reinstate"
+            :tags [:reinstate-account]
+            :take [:accounts-mgmt-msg]
+            :give [:account-to-reinstate-selection-msg]}
+           {:name ":: Should restore the settings message & reinstate the selected account"
+            :tags [:reinstate-account]
+            :bind {:account-to-reinstate-cd :virtual-personal-account-cd}
+            :take [:account-to-reinstate-selection-msg]}
+           no-eligible-accounts-for-reinstatement]})
+
+(def accounts-mgmt-test-group
+  {:group ":: 2-1 Accounts Management"
+   :binds {:virtual-personal-account-name (generate-name-str "Acc/")
+           :virtual-personal-account-cd "ac::personal::1"}
+   :tests [enter-the-accounts-menu
+
+           #{no-eligible-accounts-for-revocation
+             no-eligible-accounts-for-reinstatement}
+           #{[create-account-test-group
+              revoke-account-test-group
+              reinstate-account-test-group]
+             rename-account-test-group
+
+             {:name ":: Exit the 'Accounts' menu"
+              :tags [:menu-navigation]
+              :take [:accounts-mgmt-msg]}}]})
+
+(def settings-test-group
+  {:group ":: 2 Settings"
+   :tests [accounts-mgmt-test-group]})
+
+(def use-cases
+  [{:group "Use Case 1. Personal accounting (single user)"
+    :binds {:user-id (generate-user-id)
+            :user-name (generate-name-str "User/")}
+    :tests [{:group ":: Group Chat"
+             :binds {:chat-id (generate-chat-id)
+                     :chat-title (generate-name-str 3 "Group/")}
+             :tests [start-new-chat-test-group
+                     settings-test-group]}]}])
+
 (deftest personal-accounting
   (testing "Use Case 1. Personal accounting (single user)"
 
@@ -218,10 +335,12 @@
             chat-title (generate-name-str 3 "Group/")
             user-id (generate-user-id)
             user-name (generate-name-str "User/")
+
             settings-msg (atom nil)]
 
         (testing ":: 1 Start a new chat"
           (let [name-request-msg (promise)
+
                 user-personal-account-name (generate-name-str "Acc/")]
 
             (testing ":: 1-1 Create chat with bot"
@@ -330,6 +449,7 @@
                                                     result (bot-api update)
                                                     chat-data (get-chat-data chat-id)]
                                                 [result chat-data (collect-responses)])))
+
                     virtual-personal-account-name (generate-name-str "Acc/")
                     virtual-personal-account-cd "ac::personal::1"]
 
@@ -395,6 +515,7 @@
                 (testing ":: 2-1-1 Create a new account"
                   (re-enter-settings-msg!)
                   (let [[_ _ [accounts-mgmt-msg]] (enter-accounts-mgmt! (generate-callback-query-id))
+
                         create-account-msg (promise)
                         new-account-name-request-msg (promise)]
 
@@ -500,6 +621,7 @@
                 (testing ":: 2-1-2 Rename an account"
                   (re-enter-settings-msg!)
                   (let [[_ _ [accounts-mgmt-msg]] (enter-accounts-mgmt! (generate-callback-query-id))
+
                         account-to-rename-selection-msg (promise)
                         account-rename-request-msg (promise)
                         user-personal-account-new-name (generate-name-str "Acc/")]
@@ -610,6 +732,7 @@
                 (testing ":: 2-1-3 Revoke an account"
                   (re-enter-settings-msg!)
                   (let [[_ _ [accounts-mgmt-msg]] (enter-accounts-mgmt! (generate-callback-query-id))
+
                         account-to-revoke-selection-msg (promise)
                         account-to-revoke-cd virtual-personal-account-cd]
 
@@ -711,6 +834,7 @@
                 (testing ":: 2-1-4 Reinstate an account"
                   (re-enter-settings-msg!)
                   (let [[_ _ [accounts-mgmt-msg]] (enter-accounts-mgmt! (generate-callback-query-id))
+
                         account-to-reinstate-selection-msg (promise)
                         account-to-reinstate-cd virtual-personal-account-cd]
 
