@@ -1,10 +1,11 @@
 (ns general-expenses-accountant.core-test
   (:refer-clojure :exclude [reduce])
   (:require [clojure.test :refer [use-fixtures deftest testing is]]
-            [clojure.string :as str]
             [clojure.core.async :refer [go chan >! <!! close! reduce]]
+            [clojure.string :as str]
+            [clojure.zip :as zip]
 
-            [taoensso.encore :refer [defalias]]
+            [taoensso.encore :as encore :refer [defalias]]
             [mount.core :as mount]
 
             [general-expenses-accountant.core :as core
@@ -192,9 +193,9 @@
   {:pre [(pos-int? n)]}
   (nth (collect-responses) (dec n)))
 
-(defn- do-responses-match?
-  [& resp-assert-preds]
-  (loop [resps (collect-responses)
+(defn- do-responses-match?*
+  [all-resps & resp-assert-preds]
+  (loop [resps all-resps
          preds resp-assert-preds]
     (if (empty? preds)
       true ;; some resps match all predicates, finish!
@@ -206,6 +207,10 @@
                    resps ;; loose matches are retained
                    (remove #(= (first resp) %) resps))
                  (rest preds)))))))
+
+(defn- do-responses-match?
+  [& resp-assert-preds]
+  (apply do-responses-match?* (collect-responses) resp-assert-preds))
 
 (defmacro with-mock-send
   ([test-func]
@@ -237,6 +242,8 @@
                              ["<accounts>" "<expense_items>" "<shares>"])))
 
 ; Test Cases
+
+;; TODO: Get rid of '::' prefix in names. Change all ':name' keys to ':test'?
 
 (def start-new-chat-test-group
   {:group ":: 1 Start a new chat"
@@ -378,6 +385,102 @@
                      :user-personal-account-cd "ac::personal::0"}
              :tests [start-new-chat-test-group
                      settings-test-group]}]}])
+
+; Tests Composition
+
+(defn- to-zipper
+  [test-groups]
+  (zip/zipper #(or (vector? %) (:tests %) (set? %))
+              #(if (or (vector? %) (set? %)) (seq %) (:tests %))
+              (fn [node children] (with-meta children (meta node)))
+              test-groups))
+
+;; TODO: Build up the full TC name to be used as the 'testing' 1st arg.
+
+(defn- traverse
+  ;; TODO: Write a comprehensive doc string.
+  ([loc]
+   (traverse loc {} []))
+  ([loc ctx tests]
+   (letfn [(subs-from-ctx [binds]
+             (into {} (map #(if (keyword? (val %))
+                              (assoc % 1 (get ctx (val %)))
+                              %)
+                           binds)))]
+     (cond
+       (or (nil? loc) (zip/end? loc))
+       tests
+
+       (or (vector? (zip/node loc))
+           (set? (zip/node loc)))
+       (recur (zip/next loc) ctx tests)
+
+       (:group (zip/node loc))
+       (let [tg-zipper (to-zipper (:tests (zip/node loc)))
+             binds (subs-from-ctx (:binds (zip/node loc)))
+             tg-tests (traverse tg-zipper (merge ctx binds) [])]
+         (recur (zip/right loc) ctx (into tests tg-tests)))
+
+       (:name (zip/node loc))
+       (let [bind (subs-from-ctx (:bind (zip/node loc)))
+             case (dissoc (zip/node loc) :bind)
+             test {:case case, :ctx ctx}]
+         (recur (zip/next loc) (merge ctx bind) (conj tests test)))
+
+       :else ;; stops the whole process
+       (do
+         (println "Stopped traversing!") ;; TODO: Re-write w/ an exception.
+         (zip/node loc))))))
+
+(defn unit-update-test
+  "A unit test of the incoming update for a Telegram bot."
+  [{{:keys [mock-fns type data-fn] :or {mock-fns {}}} :update
+    checks :checks return-fn :return-fn :as _test-case} ctx]
+  (let [[result responses] (with-mock-send
+                             mock-fns
+                             #(let [update (build-update type (data-fn ctx))
+                                    result (bot-api update)]
+                                [result (collect-responses)]))]
+    ;; operation code / immediate response
+    (when-let [exp-result (:result checks)]
+      (is (= exp-result result)))
+
+    ;; chat data state
+    (encore/when-let [exp-chat-data (:chat-data checks)
+                      chat-data (get-chat-data (:chat-id ctx))]
+      ;; TODO: Add other possible validations here as well.
+      (when (some? (:members-count exp-chat-data))
+        (is (= (:members-count exp-chat-data) (get-members-count chat-data))
+            "members count"))
+      (when (some? (:chat-state exp-chat-data))
+        (is (= (:chat-state exp-chat-data) (get-chat-state chat-data))
+            "chat state")))
+
+    ;; bot responses
+    (encore/when-let [exp-responses (:responses checks)
+                      resp-assert-preds-fn (or (:assert-preds-fn exp-responses) :none)]
+      (when (some? (:total exp-responses))
+        (is (= (:total exp-responses) (count responses))
+            "total responses"))
+      (when (fn? resp-assert-preds-fn)
+        (is (apply do-responses-match?* responses (resp-assert-preds-fn ctx))
+            "responses match all predicates")))
+
+    (when (some? return-fn)
+      (return-fn ctx result responses))))
+
+(defn comp-update-test
+  "A composite test of the incoming update for a Telegram bot."
+  [test-groups]
+  (let [tests (traverse (to-zipper test-groups))]
+    (doseq [{:keys [case ctx]} tests]
+      (testing (:name case)
+        (unit-update-test case ctx)))))
+
+(deftest user-scenarios
+  (comp-update-test use-cases))
+
+
 
 (deftest personal-accounting
   (testing "Use Case 1. Personal accounting (single user)"
