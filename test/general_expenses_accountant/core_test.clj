@@ -434,36 +434,42 @@
 
 (defn unit-update-test
   "A unit test of the incoming update for a Telegram bot."
-  [{{:keys [mock-fns type data-fn] :or {mock-fns {}}} :update
-    checks :checks return-fn :return-fn :as _test-case} ctx]
-  (let [[result responses] (with-mock-send
-                             mock-fns
-                             #(let [update (build-update type (data-fn ctx))
+  [{:keys [update checks return-fn] :as _test-case} ctx]
+  {:pre [(some? update)]}
+  (let [get-value-with-ctx (fn [map key]
+                             (let [val-or-fn (get map key)]
+                               (if (fn? val-or-fn) (val-or-fn ctx) val-or-fn)))
+        [result responses] (with-mock-send
+                             (or (:mock-fns update) {})
+                             #(let [update (build-update (:type update)
+                                                         (get-value-with-ctx update :data))
                                     result (bot-api update)]
                                 [result (collect-responses)]))]
     ;; operation code / immediate response
-    (when-let [exp-result (:result checks)]
+    (when-some [exp-result (:result checks)]
       (is (= exp-result result)))
 
     ;; chat data state
-    (encore/when-let [exp-chat-data (:chat-data checks)
-                      chat-data (get-chat-data (:chat-id ctx))]
+    (encore/when-some [exp-chat-data (:chat-data checks)
+                       chat-data (get-chat-data (:chat-id ctx))]
       ;; TODO: Add other possible validations here as well.
       (when (some? (:members-count exp-chat-data))
         (is (= (:members-count exp-chat-data) (get-members-count chat-data))
             "members count"))
       (when (some? (:chat-state exp-chat-data))
         (is (= (:chat-state exp-chat-data) (get-chat-state chat-data))
-            "chat state")))
+            "chat state"))
+      (when-some [acc-name (get-value-with-ctx exp-chat-data :acc-name)]
+        (is (some? (find-personal-account-by-name chat-data acc-name))
+            "an account with the specified name exists")))
 
     ;; bot responses
-    (encore/when-let [exp-responses (:responses checks)
-                      resp-assert-preds-fn (or (:assert-preds-fn exp-responses) :none)]
+    (when-some [exp-responses (:responses checks)]
       (when (some? (:total exp-responses))
         (is (= (:total exp-responses) (count responses))
             "total responses"))
-      (when (fn? resp-assert-preds-fn)
-        (is (apply do-responses-match?* responses (resp-assert-preds-fn ctx))
+      (when-some [resp-assert-preds (get-value-with-ctx exp-responses :assert-preds)]
+        (is (apply do-responses-match?* responses resp-assert-preds)
             "responses match all predicates")))
 
     (when (some? return-fn)
@@ -472,10 +478,23 @@
 (defn comp-update-test
   "A composite test of the incoming update for a Telegram bot."
   [test-groups]
-  (let [tests (traverse (to-zipper test-groups))]
-    (doseq [{:keys [case ctx]} tests]
-      (testing (:name case)
-        (unit-update-test case ctx)))))
+  (letfn [(ensure-vec [v]
+            (if (vector? v) v (vector v)))
+          (get-deps [case]
+            (ensure-vec (:give case)))]
+    (loop [tests (traverse (to-zipper test-groups))
+           results {}]
+      (let [{:keys [case ctx]} (first tests)
+            ;; TODO: Assert that all test ':take's is there.
+            ctx (assoc ctx :deps results)
+            res (testing (:name case)
+                  (unit-update-test case ctx))]
+        (when (> (count tests) 1)
+          (recur (rest tests)
+                 ;; TODO: Dissoc all ':take's from 'results'?
+                 (apply assoc results
+                        (interleave (get-deps case)
+                                    (ensure-vec res)))))))))
 
 (deftest user-scenarios
   (comp-update-test use-cases))
