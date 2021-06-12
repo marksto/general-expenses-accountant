@@ -251,6 +251,17 @@
         (consists-exactly-of? res :callback_data
                               ["<accounts>" "<expense_items>" "<shares>"]))))
 
+(defn valid-accounts-mgmt-msg?
+  [res chat-id & acc-names]
+  (and (= chat-id (-> res :chat :id))
+       (or (empty? acc-names)
+           (every? identity ;; which, basically, does 'and'
+                   (map #(str/includes? (:text res) %) acc-names)))
+       (some? (:reply_markup res))
+       (contains-all? res :callback_data
+                      ["<accounts/create>" "<accounts/rename>"
+                       "<accounts/revoke>" "<accounts/reinstate>"])))
+
 ; Test Cases
 
 ;; TODO: Get rid of '::' prefix in names. Change all ':name' keys to ':test'?
@@ -279,7 +290,7 @@
                                                          (str/includes? (:text res) (:user-name ctx))))
                                                   (fn [res]
                                                     (valid-name-request-msg? res (:chat-id ctx)))])}}
-            :return-fn (fn [ctx _ responses]
+            :return-fn (fn [ctx responses]
                          (let [resp-pred #(valid-name-request-msg? % (:chat-id ctx))]
                            (first (filter resp-pred responses))))}
 
@@ -318,15 +329,64 @@
                                                          (= [:settings :initial]
                                                             (get-bot-msg-state (get-chat-data (:chat-id ctx))
                                                                                (:message_id res)))))])}}
-            :return-fn (fn [ctx _ responses]
+            :return-fn (fn [ctx responses]
                          (let [resp-pred #(valid-settings-msg? % (:chat-id ctx))]
                            (first (filter resp-pred responses))))}]})
 
 (def enter-the-accounts-menu
   {:name ":: Enter the 'Accounts' menu"
    :tags [:menu-navigation]
-   :take [:settings-msg]
-   :give [:accounts-mgmt-msg]})
+   :bind {:callback-query-id (generate-callback-query-id)}
+   :take :settings-msg
+   :give :accounts-mgmt-msg
+
+   :update {:type :callback_query
+            :data (fn [ctx]
+                    {:id (:callback-query-id ctx)
+                     :chat {:id (:chat-id ctx) :title (:chat-title ctx) :type "group"}
+                     :from {:id (:user-id ctx) :first_name (:user-name ctx) :language_code "ru"}
+                     :message (-> ctx :deps :settings-msg)
+                     :data "<accounts>"})}
+   :checks {:result (fn [ctx]
+                      {:method "answerCallbackQuery"
+                       :callback_query_id (:callback-query-id ctx)})
+            :chat-data {:chat-state :ready
+                        :bot-messages (fn [ctx]
+                                        [{:msg-id (-> ctx :deps :settings-msg :message_id)
+                                          :msg-state [:settings :accounts-mgmt]}])}
+            :responses {:total 1
+                        :assert-preds (fn [ctx]
+                                        [(fn [res]
+                                           (valid-accounts-mgmt-msg? res (:chat-id ctx)
+                                                                     (:user-personal-account-name ctx)))])}}
+   :return-fn (fn [_ responses]
+                (first responses))})
+
+(def exit-the-accounts-menu
+  {:name ":: Exit the 'Accounts' menu"
+   :tags [:menu-navigation]
+   :bind {:callback-query-id (generate-callback-query-id)}
+   :take :accounts-mgmt-msg
+
+   :update {:type :callback_query
+            :data (fn [ctx]
+                    {:id (:callback-query-id ctx)
+                     :chat {:id (:chat-id ctx) :title (:chat-title ctx) :type "group"}
+                     :from {:id (:user-id ctx) :first_name (:user-name ctx) :language_code "ru"}
+                     :message (-> ctx :deps :accounts-mgmt-msg)
+                     :data "<back>"})}
+   :checks {:result (fn [ctx]
+                      {:method "answerCallbackQuery"
+                       :callback_query_id (:callback-query-id ctx)})
+            :chat-data {:chat-state :ready
+                        :bot-messages (fn [ctx]
+                                        [{:msg-id (-> ctx :deps :settings-msg :message_id)
+                                          :msg-state [:settings :initial]}])}
+            :responses {:total 1
+                        :assert-preds (fn [ctx]
+                                        [(fn [res]
+                                           (valid-settings-msg? res (:chat-id ctx)
+                                                                (-> ctx :deps :settings-msg :message_id)))])}}})
 
 (def create-account-test-group
   {:group ":: 2-1-1 Create a new account"
@@ -433,9 +493,7 @@
                 rename-virtual-personal-account-test-group}]
              rename-user-personal-account-test-group
 
-             {:name ":: Exit the 'Accounts' menu"
-              :tags [:menu-navigation]
-              :take [:accounts-mgmt-msg]}}]})
+           exit-the-accounts-menu}]})
 
 (def settings-test-group
   {:group ":: 2 Settings"
@@ -513,7 +571,7 @@
                                     result (bot-api update)]
                                 [result (collect-responses)]))]
     ;; operation code / immediate response
-    (when-some [exp-result (:result checks)]
+    (when-some [exp-result (get-value-with-ctx checks :result)]
       (is (= exp-result result)))
 
     ;; chat data state
@@ -528,7 +586,11 @@
             "chat state"))
       (when-some [acc-name (get-value-with-ctx exp-chat-data :acc-name)]
         (is (some? (find-personal-account-by-name chat-data acc-name))
-            "an account with the specified name exists")))
+            "an account with the specified name exists"))
+      (doseq [bot-message (get-value-with-ctx exp-chat-data :bot-messages)]
+        (is (= (:msg-state bot-message)
+               (get-bot-msg-state chat-data (:msg-id bot-message)))
+            "msg state")))
 
     ;; bot responses
     (when-some [exp-responses (:responses checks)]
@@ -540,7 +602,7 @@
             "responses match all predicates")))
 
     (when (some? return-fn)
-      (return-fn ctx result responses))))
+      (return-fn ctx responses))))
 
 (defn comp-update-test
   "A composite test of the incoming update for a Telegram bot."
