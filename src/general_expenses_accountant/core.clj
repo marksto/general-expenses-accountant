@@ -18,7 +18,8 @@
             [general-expenses-accountant.domain.tlog :as tlogs]
             [general-expenses-accountant.nums :as nums]
             [general-expenses-accountant.tg-bot-api :as tg-api]
-            [general-expenses-accountant.tg-client :as tg-client])
+            [general-expenses-accountant.tg-client :as tg-client]
+            [general-expenses-accountant.utils :as utils])
   (:import [java.util Locale]))
 
 ;; STATE
@@ -993,12 +994,12 @@
 
 (defn- get-bot-msg-id
   [chat-id msg-keys]
-  (let [ensured-msg-keys (if (coll? msg-keys) msg-keys [msg-keys])]
+  (let [ensured-msg-keys (utils/ensure-coll msg-keys)]
     (get-in (get-chat-data chat-id) (into [:bot-messages] ensured-msg-keys))))
 
 (defn- set-bot-msg-id!
   [chat-id msg-keys msg-id]
-  (let [full-path ((if (coll? msg-keys) into conj) [:bot-messages] msg-keys)]
+  (let [full-path (utils/collect [:bot-messages] msg-keys)]
     (assoc-in-chat-data! chat-id full-path msg-id))
   msg-id)
 
@@ -1330,8 +1331,7 @@
   (let [transition-keys (:transition event)
         transition (get-in state-transitions transition-keys)
         chat-type (first transition-keys)
-        response-keys (as-> (:response transition) $
-                            ((if (coll? $) into conj) [chat-type] $))
+        response-keys (utils/collect [chat-type] (:response transition))
         response-data (get-in responses response-keys)]
     (change-state-fn (:to-state transition))
     (to-response response-data (:param-vals event))))

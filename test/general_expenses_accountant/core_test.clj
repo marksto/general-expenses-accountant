@@ -13,7 +13,8 @@
             [general-expenses-accountant.domain.chat :as chats]
             [general-expenses-accountant.domain.tlog :as tlogs]
 
-            [general-expenses-accountant.tg-client :as tg-client])
+            [general-expenses-accountant.tg-client :as tg-client]
+            [general-expenses-accountant.utils :as utils])
   (:import [java.util.concurrent.atomic AtomicInteger]))
 
 ;; TODO: Implement the test coverage in a form of externally stored (in files) web requests series (run by scripts).
@@ -381,7 +382,7 @@
 
 (def revoke-account-test-group
   {:group ":: 2-1-3 Revoke an account"
-   :tests [(update enter-the-accounts-menu :take conj :created-account)
+   :tests [(update enter-the-accounts-menu :take utils/collect :created-account)
            {:name ":: Should prompt the user to select an account to revoke"
             :tags [:revoke-account]
             :bind {:contains-all [:virtual-personal-account-name]
@@ -404,7 +405,7 @@
 
 (def reinstate-account-test-group
   {:group ":: 2-1-4 Reinstate an account"
-   :tests [(update enter-the-accounts-menu :take conj :revoked-account)
+   :tests [(update enter-the-accounts-menu :take utils/collect :revoked-account)
            {:name ":: Should prompt the user to select an account to reinstate"
             :tags [:reinstate-account]
             :bind {:contains-all [:virtual-personal-account-name]
@@ -544,10 +545,8 @@
 (defn comp-update-test
   "A composite test of the incoming update for a Telegram bot."
   [test-groups]
-  (letfn [(ensure-vec [v]
-            (if (vector? v) v (vector v)))
-          (get-deps [case]
-            (ensure-vec (:give case)))]
+  (letfn [(get-deps [case]
+            (utils/ensure-vec (:give case)))]
     (loop [tests (traverse (to-zipper test-groups))
            results {}]
       (let [{:keys [case ctx]} (first tests)
@@ -560,7 +559,7 @@
                  ;; TODO: Dissoc all ':take's from 'results'?
                  (apply assoc results
                         (interleave (get-deps case)
-                                    (ensure-vec res)))))))))
+                                    (utils/ensure-vec res)))))))))
 
 (deftest user-scenarios
   (comp-update-test use-cases))
