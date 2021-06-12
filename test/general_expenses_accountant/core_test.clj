@@ -438,7 +438,22 @@
 (def no-eligible-accounts-for-revocation
   {:name ":: Should notify user when there's no eligible accounts for revocation"
    :tags [:revoke-account :notifications]
-   :take [:accounts-mgmt-msg]})
+   :bind {:callback-query-id (generate-callback-query-id)}
+   :take :accounts-mgmt-msg
+
+   :update {:type :callback_query
+            :data (fn [ctx]
+                    {:id (:callback-query-id ctx)
+                     :chat {:id (:chat-id ctx) :title (:chat-title ctx) :type "group"}
+                     :from {:id (:user-id ctx) :first_name (:user-name ctx) :language_code "ru"}
+                     :message (-> ctx :deps :accounts-mgmt-msg)
+                     :data "<accounts/revoke>"})}
+   :checks {:result (fn [ctx]
+                      {:method "answerCallbackQuery"
+                       :callback_query_id (:callback-query-id ctx)})
+            :chat-data {:chat-state :ready}
+            :responses {:total 1
+                        :assert-preds [#(= true %)]}}})
 
 (def revoke-account-test-group
   {:group ":: 2-1-3 Revoke an account"
@@ -461,7 +476,22 @@
 (def no-eligible-accounts-for-reinstatement
   {:name ":: Should notify user when there's no eligible accounts for reinstatement"
    :tags [:reinstate-account :notifications]
-   :take [:accounts-mgmt-msg]})
+   :bind {:callback-query-id (generate-callback-query-id)}
+   :take :accounts-mgmt-msg
+
+   :update {:type :callback_query
+            :data (fn [ctx]
+                    {:id (:callback-query-id ctx)
+                     :chat {:id (:chat-id ctx) :title (:chat-title ctx) :type "group"}
+                     :from {:id (:user-id ctx) :first_name (:user-name ctx) :language_code "ru"}
+                     :message (-> ctx :deps :accounts-mgmt-msg)
+                     :data "<accounts/reinstate>"})}
+   :checks {:result (fn [ctx]
+                      {:method "answerCallbackQuery"
+                       :callback_query_id (:callback-query-id ctx)})
+            :chat-data {:chat-state :ready}
+            :responses {:total 1
+                        :assert-preds [#(= true %)]}}})
 
 (def reinstate-account-test-group
   {:group ":: 2-1-4 Reinstate an account"
