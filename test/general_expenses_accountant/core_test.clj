@@ -233,13 +233,22 @@
 
 ; Assertions
 
-(defn valid-settings-msg?
-  [res chat-id settings-msg-id]
+(defn valid-name-request-msg?
+  [res chat-id]
   (and (= chat-id (-> res :chat :id))
-       (= settings-msg-id (:message_id res))
-       (some? (:reply_markup res))
-       (consists-exactly-of? res :callback_data
-                             ["<accounts>" "<expense_items>" "<shares>"])))
+       (= (get-bot-msg-id chat-id :name-request-msg-id)
+          (:message_id res))))
+
+(defn valid-settings-msg?
+  ([res chat-id]
+   (valid-settings-msg? res chat-id nil))
+  ([res chat-id settings-msg-id]
+   (and (= chat-id (-> res :chat :id))
+        (or (nil? settings-msg-id) ;; don't check
+            (= settings-msg-id (:message_id res)))
+        (some? (:reply_markup res))
+        (consists-exactly-of? res :callback_data
+                              ["<accounts>" "<expense_items>" "<shares>"]))))
 
 ; Test Cases
 
@@ -249,11 +258,68 @@
   {:group ":: 1 Start a new chat"
    :tests [{:name ":: 1-1 Create chat with bot"
             :tags [:new-group-chat :single-user]
-            :give [:name-request-msg]}
+            :give :name-request-msg
+
+            :update {:mock-fns {#'tg-client/get-chat-members-count (constantly 2)}
+                     :type :my_chat_member
+                     :data (fn [ctx]
+                             {:chat {:id (:chat-id ctx) :title (:chat-title ctx) :type "group"}
+                              :from {:id (:user-id ctx) :first_name (:user-name ctx) :language_code "ru"}
+                              :date (get-datetime-in-tg-format)
+                              :old_chat_member {:user bot-user :status "left"}
+                              :new_chat_member {:user bot-user :status "member"}})}
+            :checks {:result op-succeed
+                     :chat-data {:members-count 2
+                                 :chat-state :waiting}
+                     :responses {:total 2
+                                 :assert-preds (fn [ctx]
+                                                 [(fn [res]
+                                                    (and (= (:chat-id ctx) (-> res :chat :id))
+                                                         (str/includes? (:text res) (:user-name ctx))))
+                                                  (fn [res]
+                                                    (valid-name-request-msg? res (:chat-id ctx)))])}}
+            :return-fn (fn [ctx _ responses]
+                         (let [resp-pred #(valid-name-request-msg? % (:chat-id ctx))]
+                           (first (filter resp-pred responses))))}
+
+           ;; TODO: Add a TC that checks that other interactions are ineffectual at this point.
+
            {:name ":: 1-2 Reply to the name request message"
             :tags [:new-group-chat :single-user]
-            :take [:name-request-msg]
-            :give [:settings-msg]}]})
+            :take :name-request-msg
+            :give :settings-msg
+
+            :update {:mock-fns {#'core/can-write-to-user? (constantly true)} ;; as if user has already started some chat
+                     :type :message
+                     :data (fn [ctx]
+                             {:message_id (generate-message-id)
+                              :chat {:id (:chat-id ctx) :title (:chat-title ctx) :type "group"}
+                              :from {:id (:user-id ctx) :first_name (:user-name ctx) :language_code "ru"}
+                              :date (get-datetime-in-tg-format)
+                              :reply_to_message (-> ctx :deps :name-request-msg)
+                              :text (:user-personal-account-name ctx)})}
+            :checks {:result op-succeed
+                     :chat-data {:members-count 2
+                                 :chat-state :ready
+                                 :acc-name #(:user-personal-account-name %)}
+                     :responses {:total 3
+                                 :assert-preds (fn [ctx]
+                                                 [(fn [res]
+                                                    (and (= (:user-id ctx) (-> res :chat :id))
+                                                         (str/includes? (:text res) (:chat-title ctx))))
+                                                  (fn [res]
+                                                    (and (= (:chat-id ctx) (-> res :chat :id))
+                                                         (some? (:reply_markup res))
+                                                         (= "https://t.me/number_one_bot"
+                                                            (:url (get-inline-kbd-btn res 0 0)))))
+                                                  (fn [res]
+                                                    (and (valid-settings-msg? res (:chat-id ctx))
+                                                         (= [:settings :initial]
+                                                            (get-bot-msg-state (get-chat-data (:chat-id ctx))
+                                                                               (:message_id res)))))])}}
+            :return-fn (fn [ctx _ responses]
+                         (let [resp-pred #(valid-settings-msg? % (:chat-id ctx))]
+                           (first (filter resp-pred responses))))}]})
 
 (def enter-the-accounts-menu
   {:name ":: Enter the 'Accounts' menu"
