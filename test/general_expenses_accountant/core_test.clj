@@ -687,7 +687,7 @@
                   :account-to-revoke-cd :virtual-personal-account-cd
                   :account-to-revoke-name :virtual-personal-account-name}
            :take :account-to-revoke-selection-msg
-           ;:give [:settings-msg :revoked-account] ;; TODO: Do need to implement this?
+           :give [:settings-msg :revoked-account]
 
            :update {:type :callback_query
                     :data (fn [ctx]
@@ -703,14 +703,23 @@
                                 :bot-messages (fn [ctx]
                                                 [{:msg-id (-> ctx :deps :settings-msg :message_id)
                                                   :msg-state [:settings :initial]}])
-                                :revoked-acc-name #(:account-to-revoke-name %)}
+                                :accounts (fn [ctx]
+                                            [{:name (:account-to-revoke-name ctx)
+                                              :pred #(:revoked %)
+                                              :desc "the selected account is marked as revoked"}])}
                     :responses {:total 2
                                 :assert-preds (fn [ctx]
                                                 [(fn [res]
                                                    (valid-settings-msg? res (:chat-id ctx)
                                                                         (-> ctx :deps :settings-msg :message_id)))
                                                  (fn [res]
-                                                   (= (:chat-id ctx) (-> res :chat :id)))])}}}
+                                                   (= (:chat-id ctx) (-> res :chat :id)))])}}
+           :return-fn (fn [ctx responses]
+                        (let [resp-pred #(valid-settings-msg? % (:chat-id ctx))
+                              revoked-acc (find-personal-account-by-name (get-chat-data (:chat-id ctx))
+                                                                         (:account-to-revoke-name ctx))]
+                          [(first (filter resp-pred responses))
+                           revoked-acc]))}
 
           enter-the-accounts-menu
           no-eligible-accounts-for-revocation]})
@@ -740,23 +749,74 @@
 (def reinstate-account-test-group
   {:type :test/group
    :name "2-1-4 Reinstate an account"
-   :test [(update enter-the-accounts-menu :take utils/collect :revoked-account)
-
-          {:type :test/case
+   :test [{:type :test/case
            :name "Should prompt the user to select an account to reinstate"
            :tags [:reinstate-account]
-           :bind {:contains-all [:virtual-personal-account-name]
+           :bind {:callback-query-id (generate-callback-query-id)
+                  :contains-all [:virtual-personal-account-name]
                   :not-contains [:user-personal-account-name]}
-           :take [:accounts-mgmt-msg]
-           :give [:account-to-reinstate-selection-msg]}
+           :take [:accounts-mgmt-msg :revoked-account]
+           :give :account-to-reinstate-selection-msg
+
+           :update {:type :callback_query
+                    :data (fn [ctx]
+                            {:id (:callback-query-id ctx)
+                             :chat {:id (:chat-id ctx) :title (:chat-title ctx) :type "group"}
+                             :from {:id (:user-id ctx) :first_name (:user-name ctx) :language_code "ru"}
+                             :message (-> ctx :deps :accounts-mgmt-msg)
+                             :data "<accounts/reinstate>"})}
+           :checks {:result (fn [ctx]
+                              {:method "answerCallbackQuery"
+                               :callback_query_id (:callback-query-id ctx)})
+                    :chat-data {:chat-state :ready
+                                :bot-messages (fn [ctx]
+                                                [{:msg-id (-> ctx :deps :settings-msg :message_id)
+                                                  :msg-state [:settings :account-reinstatement]}])}
+                    :responses {:total 1
+                                :assert-preds (fn [ctx]
+                                                [(fn [res]
+                                                   (and (= (:chat-id ctx) (-> res :chat :id))
+                                                        (some? (:reply_markup res))
+                                                        (contains-all? res :text (:contains-all ctx))
+                                                        (not-contains? res :text (:not-contains ctx))))])}}
+           :return-fn (fn [_ responses]
+                        (first responses))}
 
           {:type :test/case
            :name "Should restore the settings message & reinstate the selected account"
            :tags [:reinstate-account]
-           :bind {:account-to-reinstate-cd :virtual-personal-account-cd
+           :bind {:callback-query-id (generate-callback-query-id)
+                  :account-to-reinstate-cd :virtual-personal-account-cd
                   :account-to-reinstate-name :virtual-personal-account-name}
-           :take [:account-to-reinstate-selection-msg]}
+           :take :account-to-reinstate-selection-msg
 
+           :update {:type :callback_query
+                    :data (fn [ctx]
+                            {:id (:callback-query-id ctx)
+                             :chat {:id (:chat-id ctx) :title (:chat-title ctx) :type "group"}
+                             :from {:id (:user-id ctx) :first_name (:user-name ctx) :language_code "ru"}
+                             :message (-> ctx :deps :account-to-reinstate-selection-msg)
+                             :data (:account-to-reinstate-cd ctx)})}
+           :checks {:result (fn [ctx]
+                              {:method "answerCallbackQuery"
+                               :callback_query_id (:callback-query-id ctx)})
+                    :chat-data {:chat-state :ready
+                                :bot-messages (fn [ctx]
+                                                [{:msg-id (-> ctx :deps :settings-msg :message_id)
+                                                  :msg-state [:settings :initial]}])
+                                :accounts (fn [ctx]
+                                            [{:name (:account-to-reinstate-name ctx)
+                                              :pred #(not (:revoked %))
+                                              :desc "the selected account is reinstated"}])}
+                    :responses {:total 2
+                                :assert-preds (fn [ctx]
+                                                [(fn [res]
+                                                   (valid-settings-msg? res (:chat-id ctx)
+                                                                        (-> ctx :deps :settings-msg :message_id)))
+                                                 (fn [res]
+                                                   (= (:chat-id ctx) (-> res :chat :id)))])}}}
+
+          enter-the-accounts-menu
           no-eligible-accounts-for-reinstatement]})
 
 (def accounts-mgmt-test-group
@@ -770,11 +830,9 @@
             no-eligible-accounts-for-reinstatement}
           #{[create-virtual-personal-account-test-group
              [enter-the-accounts-menu
-              #{revoke-account-test-group
-                rename-virtual-personal-account-test-group}]
-             ;#{[... reinstate-account-test-group]
-             ;  ...}
-             ]
+              #{[revoke-account-test-group
+                 reinstate-account-test-group]
+                rename-virtual-personal-account-test-group}]]
             rename-user-personal-account-test-group
 
             exit-the-accounts-menu}]})
@@ -827,13 +885,14 @@
       (when (some? (:chat-state exp-chat-data))
         (is (= (:chat-state exp-chat-data) (get-chat-state chat-data))
             "chat state"))
+      ;; TODO: Generalize the below two validations.
       (when-some [acc-name (get-value-with-ctx exp-chat-data :acc-name)]
         (is (some? (find-personal-account-by-name chat-data acc-name))
             "an account with the specified name exists"))
-      (when-some [acc-name (get-value-with-ctx exp-chat-data :revoked-acc-name)] ;; TODO: Generalize!
-        (is (let [acc (find-personal-account-by-name chat-data acc-name)]
-              (and (some? acc) (:revoked acc)))
-            "the selected account is marked as revoked"))
+      (doseq [account (get-value-with-ctx exp-chat-data :accounts)]
+        (is (let [acc (find-personal-account-by-name chat-data (:name account))]
+              (and (some? acc) ((:pred account) acc)))
+            (:desc account)))
       (doseq [bot-message (get-value-with-ctx exp-chat-data :bot-messages)]
         (is (= (:msg-state bot-message)
                (get-bot-msg-state chat-data (:msg-id bot-message)))
