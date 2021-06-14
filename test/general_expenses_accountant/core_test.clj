@@ -277,6 +277,17 @@
        (= (get-bot-msg-id chat-id [:to-user user-id :request-acc-name-msg-id])
           (:message_id res))))
 
+(defn valid-account-rename-request-msg?
+  [res chat-id user-name user-id account-to-rename-old-name]
+  (and (= chat-id (-> res :chat :id))
+       (some? (:reply_markup res))
+       (-> res :reply_markup :force_reply)
+       (-> res :reply_markup :selective)
+       (str/includes? (:text res) user-name)
+       (str/includes? (:text res) account-to-rename-old-name)
+       (= (get-bot-msg-id chat-id [:to-user user-id :request-rename-msg-id])
+          (:message_id res))))
+
 ; Test Cases
 
 (def start-new-chat-test-group
@@ -512,19 +523,92 @@
    :test [{:type :test/case
            :name "Should prompt the user to select an account to rename"
            :tags [:rename-account]
-           :take [:accounts-mgmt-msg]
-           :give [:account-to-rename-selection-msg]}
+           :bind {:callback-query-id (generate-callback-query-id)}
+           :take :accounts-mgmt-msg
+           :give :account-to-rename-selection-msg
+
+           :update {:type :callback_query
+                    :data (fn [ctx]
+                            {:id (:callback-query-id ctx)
+                             :chat {:id (:chat-id ctx) :title (:chat-title ctx) :type "group"}
+                             :from {:id (:user-id ctx) :first_name (:user-name ctx) :language_code "ru"}
+                             :message (-> ctx :deps :accounts-mgmt-msg)
+                             :data "<accounts/rename>"})}
+           :checks {:result (fn [ctx]
+                              {:method "answerCallbackQuery"
+                               :callback_query_id (:callback-query-id ctx)})
+                    :chat-data {:chat-state :ready
+                                :bot-messages (fn [ctx]
+                                                [{:msg-id (-> ctx :deps :settings-msg :message_id)
+                                                  :msg-state [:settings :account-renaming]}])}
+                    :responses {:total 1
+                                :assert-preds (fn [ctx]
+                                                [(fn [res]
+                                                   (and (= (:chat-id ctx) (-> res :chat :id))
+                                                        (some? (:reply_markup res))
+                                                        (contains-all? res :text
+                                                                       [(:account-to-rename-old-name ctx)])))])}}
+           :return-fn (fn [_ responses]
+                        (first responses))}
 
           {:type :test/case
            :name "Should restore the settings message & prompt the user for an account name"
            :tags [:rename-account]
-           :take [:account-to-rename-selection-msg]
-           :give [:account-rename-request-msg]}
+           :bind {:callback-query-id (generate-callback-query-id)}
+           :take :account-to-rename-selection-msg
+           :give :account-rename-request-msg
+
+           :update {:type :callback_query
+                    :data (fn [ctx]
+                            {:id (:callback-query-id ctx)
+                             :chat {:id (:chat-id ctx) :title (:chat-title ctx) :type "group"}
+                             :from {:id (:user-id ctx) :first_name (:user-name ctx) :language_code "ru"}
+                             :message (-> ctx :deps :account-to-rename-selection-msg)
+                             :data (:account-to-rename-cd ctx)})}
+           :checks {:result (fn [ctx]
+                              {:method "answerCallbackQuery"
+                               :callback_query_id (:callback-query-id ctx)})
+                    :chat-data {:chat-state :waiting
+                                :bot-messages (fn [ctx]
+                                                [{:msg-id (-> ctx :deps :settings-msg :message_id)
+                                                  :msg-state [:settings :initial]}])}
+                    :responses {:total 2
+                                :assert-preds (fn [ctx]
+                                                [(fn [res]
+                                                   (valid-settings-msg? res (:chat-id ctx)
+                                                                        (-> ctx :deps :settings-msg :message_id)))
+                                                 (fn [res]
+                                                   (valid-account-rename-request-msg?
+                                                     res (:chat-id ctx) (:user-name ctx) (:user-id ctx)
+                                                     (:account-to-rename-old-name ctx)))])}}
+           :return-fn (fn [ctx responses]
+                        (let [resp-pred #(valid-account-rename-request-msg?
+                                           % (:chat-id ctx) (:user-name ctx) (:user-id ctx)
+                                           (:account-to-rename-old-name ctx))]
+                          (first (filter resp-pred responses))))}
+
+          ;; TODO: Add a TC that checks that other interactions are ineffectual at this point.
 
           {:type :test/case
            :name "Should update the selected account with the specified name"
            :tags [:rename-account]
-           :take [:account-rename-request-msg]}]})
+           :take :account-rename-request-msg
+
+           :update {:type :message
+                    :data (fn [ctx]
+                            {:message_id (generate-message-id)
+                             :chat {:id (:chat-id ctx) :title (:chat-title ctx) :type "group"}
+                             :from {:id (:user-id ctx) :first_name (:user-name ctx) :language_code "ru"}
+                             :date (get-datetime-in-tg-format)
+                             :reply_to_message (-> ctx :deps :account-rename-request-msg)
+                             :text (:account-to-rename-new-name ctx)})}
+           :checks {:result op-succeed
+                    :chat-data {:chat-state :ready
+                                :acc-name #(:account-to-rename-new-name %)}
+                    :responses {:total 1
+                                :assert-preds (fn [ctx]
+                                                [(fn [res]
+                                                   (= (:chat-id ctx) (-> res :chat :id)))])}}}]})
 
 (def rename-user-personal-account-test-group
   (assoc rename-account-test-group
@@ -636,13 +720,13 @@
 
           #{no-eligible-accounts-for-revocation
             no-eligible-accounts-for-reinstatement}
-          #{;[
-            create-virtual-personal-account-test-group
-            ; ;#{[revoke-account-test-group
-            ; ;   reinstate-account-test-group]
-            ; ;  rename-virtual-personal-account-test-group}
-            ; ]
-            ;rename-user-personal-account-test-group
+          #{[create-virtual-personal-account-test-group
+             [enter-the-accounts-menu
+              rename-virtual-personal-account-test-group]
+             ;#{[revoke-account-test-group
+             ;   reinstate-account-test-group]}
+             ]
+            rename-user-personal-account-test-group
 
             exit-the-accounts-menu}]})
 
