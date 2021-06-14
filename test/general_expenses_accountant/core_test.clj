@@ -647,24 +647,72 @@
 (def revoke-account-test-group
   {:type :test/group
    :name "2-1-3 Revoke an account"
-   :test [(update enter-the-accounts-menu :take utils/collect :created-account)
-
-          {:type :test/case
+   :test [{:type :test/case
            :name "Should prompt the user to select an account to revoke"
            :tags [:revoke-account]
-           :bind {:contains-all [:virtual-personal-account-name]
+           :bind {:callback-query-id (generate-callback-query-id)
+                  :contains-all [:virtual-personal-account-name]
                   :not-contains [:user-personal-account-name]}
-           :take [:accounts-mgmt-msg]
-           :give [:account-to-revoke-selection-msg]}
+           :take [:accounts-mgmt-msg :created-account]
+           :give :account-to-revoke-selection-msg
+
+           :update {:type :callback_query
+                    :data (fn [ctx]
+                            {:id (:callback-query-id ctx)
+                             :chat {:id (:chat-id ctx) :title (:chat-title ctx) :type "group"}
+                             :from {:id (:user-id ctx) :first_name (:user-name ctx) :language_code "ru"}
+                             :message (-> ctx :deps :accounts-mgmt-msg)
+                             :data "<accounts/revoke>"})}
+           :checks {:result (fn [ctx]
+                              {:method "answerCallbackQuery"
+                               :callback_query_id (:callback-query-id ctx)})
+                    :chat-data {:chat-state :ready
+                                :bot-messages (fn [ctx]
+                                                [{:msg-id (-> ctx :deps :settings-msg :message_id)
+                                                  :msg-state [:settings :account-revocation]}])}
+                    :responses {:total 1
+                                :assert-preds (fn [ctx]
+                                                [(fn [res]
+                                                   (and (= (:chat-id ctx) (-> res :chat :id))
+                                                        (some? (:reply_markup res))
+                                                        (contains-all? res :text (:contains-all ctx))
+                                                        (not-contains? res :text (:not-contains ctx))))])}}
+           :return-fn (fn [_ responses]
+                        (first responses))}
 
           {:type :test/case
            :name "Should restore the settings message & mark the selected account as revoked"
            :tags [:revoke-account]
-           :bind {:account-to-revoke-cd :virtual-personal-account-cd
+           :bind {:callback-query-id (generate-callback-query-id)
+                  :account-to-revoke-cd :virtual-personal-account-cd
                   :account-to-revoke-name :virtual-personal-account-name}
-           :take [:account-to-revoke-selection-msg]
-           :give [:settings-msg :revoked-account]}
+           :take :account-to-revoke-selection-msg
+           ;:give [:settings-msg :revoked-account] ;; TODO: Do need to implement this?
 
+           :update {:type :callback_query
+                    :data (fn [ctx]
+                            {:id (:callback-query-id ctx)
+                             :chat {:id (:chat-id ctx) :title (:chat-title ctx) :type "group"}
+                             :from {:id (:user-id ctx) :first_name (:user-name ctx) :language_code "ru"}
+                             :message (-> ctx :deps :account-to-revoke-selection-msg)
+                             :data (:account-to-revoke-cd ctx)})}
+           :checks {:result (fn [ctx]
+                              {:method "answerCallbackQuery"
+                               :callback_query_id (:callback-query-id ctx)})
+                    :chat-data {:chat-state :ready
+                                :bot-messages (fn [ctx]
+                                                [{:msg-id (-> ctx :deps :settings-msg :message_id)
+                                                  :msg-state [:settings :initial]}])
+                                :revoked-acc-name #(:account-to-revoke-name %)}
+                    :responses {:total 2
+                                :assert-preds (fn [ctx]
+                                                [(fn [res]
+                                                   (valid-settings-msg? res (:chat-id ctx)
+                                                                        (-> ctx :deps :settings-msg :message_id)))
+                                                 (fn [res]
+                                                   (= (:chat-id ctx) (-> res :chat :id)))])}}}
+
+          enter-the-accounts-menu
           no-eligible-accounts-for-revocation]})
 
 ;; NB: To be run twice: 1. when there are no accs; 2. after reinstating an acc.
@@ -722,9 +770,10 @@
             no-eligible-accounts-for-reinstatement}
           #{[create-virtual-personal-account-test-group
              [enter-the-accounts-menu
-              rename-virtual-personal-account-test-group]
-             ;#{[revoke-account-test-group
-             ;   reinstate-account-test-group]}
+              #{revoke-account-test-group
+                rename-virtual-personal-account-test-group}]
+             ;#{[... reinstate-account-test-group]
+             ;  ...}
              ]
             rename-user-personal-account-test-group
 
@@ -781,6 +830,10 @@
       (when-some [acc-name (get-value-with-ctx exp-chat-data :acc-name)]
         (is (some? (find-personal-account-by-name chat-data acc-name))
             "an account with the specified name exists"))
+      (when-some [acc-name (get-value-with-ctx exp-chat-data :revoked-acc-name)] ;; TODO: Generalize!
+        (is (let [acc (find-personal-account-by-name chat-data acc-name)]
+              (and (some? acc) (:revoked acc)))
+            "the selected account is marked as revoked"))
       (doseq [bot-message (get-value-with-ctx exp-chat-data :bot-messages)]
         (is (= (:msg-state bot-message)
                (get-bot-msg-state chat-data (:msg-id bot-message)))
@@ -818,9 +871,14 @@
 
 (defn- set-bindings
   [ctx binds]
-  (into ctx (map #(if (keyword? (val %))
-                    (assoc % 1 (get ctx (val %)))
-                    %)
+  (into ctx (map #(cond
+                    (keyword? (val %))
+                    [(key %) (get ctx (val %))]
+
+                    (vector? (val %))
+                    [(key %) (replace ctx (val %))]
+
+                    :else %)
                  binds)))
 
 (defn- traverse-tests
