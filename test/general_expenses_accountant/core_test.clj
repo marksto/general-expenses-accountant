@@ -2,6 +2,7 @@
   (:refer-clojure :exclude [reduce])
   (:require [clojure.test :refer [use-fixtures deftest testing is]]
             [clojure.core.async :refer [go chan >! <!! close! reduce]]
+            [clojure.set :as set]
             [clojure.string :as str]
             [clojure.zip :as zip]
 
@@ -52,13 +53,17 @@
 
 (use-fixtures :once start-required-states)
 
+(defn- reset-bot-data-afterwards [f]
+  (let [bot-data @*bot-data
+        f-result (f)]
+    (reset! *bot-data bot-data)
+    f-result))
+
 (def ^{:private true :tag 'AtomicInteger} latest-chat-id (AtomicInteger.))
 (def ^{:private true :tag 'AtomicInteger} latest-user-id (AtomicInteger.))
 (def ^{:private true :tag 'AtomicInteger} latest-update-id (AtomicInteger.))
 (def ^{:private true :tag 'AtomicInteger} latest-message-id (AtomicInteger.))
 (def ^{:private true :tag 'AtomicInteger} latest-callback-query-id (AtomicInteger.))
-
-;(use-fixtures :each (fn [f] setup... (f) cleanup...))
 
 ; Generators
 
@@ -265,6 +270,8 @@
 ; Test Cases
 
 ;; TODO: Get rid of '::' prefix in names. Change all ':name' keys to ':test'?
+;; TODO: Introduce the ':type' property — one of ':test/group', ':test/case'.
+;; TODO: Rename test group properties: 'group'->'name', 'binds'->'bind', etc.
 
 (def start-new-chat-test-group
   {:group ":: 1 Start a new chat"
@@ -518,12 +525,13 @@
            #{no-eligible-accounts-for-revocation
              no-eligible-accounts-for-reinstatement}
            #{[create-virtual-personal-account-test-group
-              #{[revoke-account-test-group
-                 reinstate-account-test-group]
-                rename-virtual-personal-account-test-group}]
+              ;#{[revoke-account-test-group
+              ;   reinstate-account-test-group]
+              ;  rename-virtual-personal-account-test-group}
+              ]
              rename-user-personal-account-test-group
 
-           exit-the-accounts-menu}]})
+             exit-the-accounts-menu}]})
 
 (def settings-test-group
   {:group ":: 2 Settings"
@@ -543,6 +551,8 @@
 
 ; Tests Composition
 
+(declare unit-update-test) ;; TODO: Move it up here.
+
 (defn- to-zipper
   [test-groups]
   (zip/zipper #(or (vector? %) (:tests %) (set? %))
@@ -550,42 +560,87 @@
               (fn [node children] (with-meta children (meta node)))
               test-groups))
 
+(defn- set-bindings
+  [ctx binds]
+  (into ctx (map #(if (keyword? (val %))
+                    (assoc % 1 (get ctx (val %)))
+                    %)
+                 binds)))
+
 ;; TODO: Build up the full TC name to be used as the 'testing' 1st arg.
 
-(defn- traverse
+(defn- traverse-tests
   ;; TODO: Write a comprehensive doc string.
   ([loc]
-   (traverse loc {} []))
-  ([loc ctx tests]
-   (letfn [(subs-from-ctx [binds]
-             (into {} (map #(if (keyword? (val %))
-                              (assoc % 1 (get ctx (val %)))
-                              %)
-                           binds)))]
+   (traverse-tests loc {} {}))
+  ([loc ctx results]
+   (traverse-tests loc ctx results #{}))
+  ([loc ctx results run-independently]
+   (let [node (when (some? loc) (zip/node loc))]
      (cond
        (or (nil? loc) (zip/end? loc))
-       tests
+       results
 
-       (or (vector? (zip/node loc))
-           (set? (zip/node loc)))
-       (recur (zip/next loc) ctx tests)
+       ;; These tests are ordered, so must run them one-by-one, since they depend on
+       ;; each other's results and side-effects (the shared state is the 'bot-data').
+       (vector? node)
+       (if (and (seq run-independently)
+                (run-independently node))
+         (let [upd-loc (zip/edit loc (fn [node] {:tests node}))]
+           ; NB: We run this tests independently as an anonymous test group.
+           (recur upd-loc ctx results (-> run-independently
+                                          (disj node)
+                                          (conj (zip/node upd-loc)))))
+         (recur (zip/next loc) ctx results run-independently))
 
-       (:group (zip/node loc))
-       (let [tg-zipper (to-zipper (:tests (zip/node loc)))
-             binds (subs-from-ctx (:binds (zip/node loc)))
-             tg-tests (traverse tg-zipper (merge ctx binds) [])]
-         (recur (zip/right loc) ctx (into tests tg-tests)))
+       ;; These tests are unordered, so we must run them independently of each other,
+       ;; as if they were the "parallel" versions of what might have happened to the
+       ;; same initial 'bot-data'.
+       (set? node)
+       (recur (zip/next loc) ctx results (set/union run-independently node))
 
-       (:name (zip/node loc))
-       (let [bind (subs-from-ctx (:bind (zip/node loc)))
-             case (dissoc (zip/node loc) :bind)
-             test {:case case, :ctx ctx}]
-         (recur (zip/next loc) (merge ctx bind) (conj tests test)))
+       (:tests node)
+       (let [ctx (set-bindings ctx (:binds node)) ;; should promote further
+             run-tg (fn []
+                      (let [tg-zipper (to-zipper (:tests node))]
+                        (traverse-tests tg-zipper ctx results)))]
+         (if (and (seq run-independently)
+                  (run-independently node))
+           (do
+             (reset-bot-data-afterwards run-tg)
+             (recur (zip/right loc) ctx results (disj run-independently node)))
+           (let [tg-results (run-tg)
+                 upd-results (merge results tg-results)]
+             (recur (zip/right loc) ctx upd-results run-independently))))
+
+       (:name node)
+       (let [run-tc (fn []
+                      (let [ctx (-> ctx
+                                    (assoc :deps results)
+                                    (set-bindings (:bind node)))
+                            case (dissoc node :bind)]
+                        ;; TODO: Assert that all test 'takes' are there.
+                        (testing (:name case)
+                          (unit-update-test case ctx))))]
+         (if (and (seq run-independently)
+                  (run-independently node))
+           (do
+             (reset-bot-data-afterwards run-tc)
+             (recur (zip/next loc) ctx results (disj run-independently node)))
+           (let [tc-result (run-tc)
+                 get-give (fn [case]
+                            (utils/ensure-vec (:give case)))
+                 upd-results (if (some? tc-result)
+                               (->> (utils/ensure-vec tc-result)
+                                    (interleave (get-give node))
+                                    (apply assoc results))
+                               results)]
+             (recur (zip/next loc) ctx upd-results run-independently))))
 
        :else ;; stops the whole process
        (do
          (println "Stopped traversing!") ;; TODO: Re-write w/ an exception.
-         (zip/node loc))))))
+         node)))))
 
 (defn unit-update-test
   "A unit test of the incoming update for a Telegram bot."
@@ -637,21 +692,7 @@
 (defn comp-update-test
   "A composite test of the incoming update for a Telegram bot."
   [test-groups]
-  (letfn [(get-deps [case]
-            (utils/ensure-vec (:give case)))]
-    (loop [tests (traverse (to-zipper test-groups))
-           results {}]
-      (let [{:keys [case ctx]} (first tests)
-            ;; TODO: Assert that all test ':take's is there.
-            ctx (assoc ctx :deps results)
-            res (testing (:name case)
-                  (unit-update-test case ctx))]
-        (when (> (count tests) 1)
-          (recur (rest tests)
-                 ;; TODO: Dissoc all ':take's from 'results'?
-                 (apply assoc results
-                        (interleave (get-deps case)
-                                    (utils/ensure-vec res)))))))))
+  (traverse-tests (to-zipper test-groups)))
 
 (deftest user-scenarios
   (comp-update-test use-cases))
