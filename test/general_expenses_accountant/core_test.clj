@@ -18,8 +18,6 @@
             [general-expenses-accountant.utils :as utils])
   (:import [java.util.concurrent.atomic AtomicInteger]))
 
-;; TODO: Implement the test coverage in a form of externally stored (in files) web requests series (run by scripts).
-
 ;; TODO: Learn how to properly mock 'clj-http' requests?
 
 ; Aliases (of required private "getter" fns)
@@ -42,7 +40,7 @@
 
 (def ^:private *bot-data (atom {}))
 
-(defn start-required-states [f]
+(defn- start-required-states [f]
   (-> (mount/only #{;#'config/loader ;; TODO: Use another config for tests.
                     #'general-expenses-accountant.core/bot-user
                     #'general-expenses-accountant.core/*bot-data})
@@ -134,8 +132,6 @@
 (defn- build-update
   [upd-type upd-data & _params]
   {:pre [(keyword? upd-type) (map? upd-data)]}
-  ;; TODO: Treat the 'upd-data' as a template,
-  ;;       substitute placeholders w/ params.
   {:update_id (generate-update-id)
    upd-type upd-data})
 
@@ -151,19 +147,19 @@
   [res n]
   (->> res :reply_markup :inline_keyboard (map #(get % n))))
 
-(defn consists-exactly-of?
+(defn- consists-exactly-of?
   [res key text-vals]
   ;; NB: Asserts a linear response structure, which is fine for now.
   (or (= text-vals (mapv key (get-inline-kbd-row res 0)))
       (= text-vals (mapv key (get-inline-kbd-col res 0)))))
 
-(defn contains-all?
+(defn- contains-all?
   [res key text-vals]
   ;; NB: Asserts a linear response structure, which is fine for now.
   (or (every? (set (map key (get-inline-kbd-row res 0))) text-vals)
       (every? (set (map key (get-inline-kbd-col res 0))) text-vals)))
 
-(defn not-contains?
+(defn- not-contains?
   [res key text-vals]
   ;; NB: Asserts a linear response structure, which is fine for now.
   (and (not-any? (set (map key (get-inline-kbd-row res 0))) text-vals)
@@ -188,18 +184,9 @@
 
 ; Mocks > Bot API
 
-(def collect-responses (constantly []))
+(def ^:private collect-responses (constantly []))
 
-(defn- get-total-responses
-  []
-  (count (collect-responses)))
-
-(defn- get-response
-  [n]
-  {:pre [(pos-int? n)]}
-  (nth (collect-responses) (dec n)))
-
-(defn- do-responses-match?*
+(defn- do-responses-match?
   [all-resps & resp-assert-preds]
   (loop [resps all-resps
          preds resp-assert-preds]
@@ -213,10 +200,6 @@
                    resps ;; loose matches are retained
                    (remove #(= (first resp) %) resps))
                  (rest preds)))))))
-
-(defn- do-responses-match?
-  [& resp-assert-preds]
-  (apply do-responses-match?* (collect-responses) resp-assert-preds))
 
 (defmacro with-mock-send
   ([test-func]
@@ -239,13 +222,13 @@
 
 ; Assertions
 
-(defn valid-name-request-msg?
+(defn- valid-name-request-msg?
   [res chat-id]
   (and (= chat-id (-> res :chat :id))
        (= (get-bot-msg-id chat-id :name-request-msg-id)
           (:message_id res))))
 
-(defn valid-settings-msg?
+(defn- valid-settings-msg?
   ([res chat-id]
    (valid-settings-msg? res chat-id nil))
   ([res chat-id settings-msg-id]
@@ -256,7 +239,7 @@
         (consists-exactly-of? res :callback_data
                               ["<accounts>" "<expense_items>" "<shares>"]))))
 
-(defn valid-accounts-mgmt-msg?
+(defn- valid-accounts-mgmt-msg?
   [res chat-id & acc-names]
   (and (= chat-id (-> res :chat :id))
        (or (empty? acc-names)
@@ -267,7 +250,7 @@
                       ["<accounts/create>" "<accounts/rename>"
                        "<accounts/revoke>" "<accounts/reinstate>"])))
 
-(defn valid-new-account-name-request-msg?
+(defn- valid-new-account-name-request-msg?
   [res chat-id user-name user-id]
   (and (= chat-id (-> res :chat :id))
        (some? (:reply_markup res))
@@ -277,7 +260,7 @@
        (= (get-bot-msg-id chat-id [:to-user user-id :request-acc-name-msg-id])
           (:message_id res))))
 
-(defn valid-account-rename-request-msg?
+(defn- valid-account-rename-request-msg?
   [res chat-id user-name user-id account-to-rename-old-name]
   (and (= chat-id (-> res :chat :id))
        (some? (:reply_markup res))
@@ -340,7 +323,8 @@
            :checks {:result op-succeed
                     :chat-data {:members-count 2
                                 :chat-state :ready
-                                :acc-name #(:user-personal-account-name %)}
+                                :accounts (fn [ctx]
+                                            [{:name (:user-personal-account-name ctx)}])}
                     :responses {:total 3
                                 :assert-preds (fn [ctx]
                                                 [(fn [res]
@@ -503,7 +487,8 @@
                              :text (:account-name ctx)})}
            :checks {:result op-succeed
                     :chat-data {:chat-state :ready
-                                :acc-name #(:account-name %)}
+                                :accounts (fn [ctx]
+                                            [{:name (:account-name ctx)}])}
                     :responses {:total 1
                                 :assert-preds (fn [ctx]
                                                 [(fn [res]
@@ -604,7 +589,8 @@
                              :text (:account-to-rename-new-name ctx)})}
            :checks {:result op-succeed
                     :chat-data {:chat-state :ready
-                                :acc-name #(:account-to-rename-new-name %)}
+                                :accounts (fn [ctx]
+                                            [{:name (:account-to-rename-new-name ctx)}])}
                     :responses {:total 1
                                 :assert-preds (fn [ctx]
                                                 [(fn [res]
@@ -651,8 +637,7 @@
            :name "Should prompt the user to select an account to revoke"
            :tags [:revoke-account]
            :bind {:callback-query-id (generate-callback-query-id)
-                  :contains-all [:virtual-personal-account-name]
-                  :not-contains [:user-personal-account-name]}
+                  :contains-all [:virtual-personal-account-name]}
            :take [:accounts-mgmt-msg :created-account]
            :give :account-to-revoke-selection-msg
 
@@ -676,7 +661,11 @@
                                                    (and (= (:chat-id ctx) (-> res :chat :id))
                                                         (some? (:reply_markup res))
                                                         (contains-all? res :text (:contains-all ctx))
-                                                        (not-contains? res :text (:not-contains ctx))))])}}
+                                                        ;; NB: User cannot revoke their own personal account.
+                                                        (let [chat-data (get-chat-data (:chat-id ctx))
+                                                              ids {:user-id (:user-id ctx)}
+                                                              user-pers-acc (get-personal-account chat-data ids)]
+                                                          (not-contains? res :text [(:name user-pers-acc)]))))])}}
            :return-fn (fn [_ responses]
                         (first responses))}
 
@@ -753,8 +742,7 @@
            :name "Should prompt the user to select an account to reinstate"
            :tags [:reinstate-account]
            :bind {:callback-query-id (generate-callback-query-id)
-                  :contains-all [:virtual-personal-account-name]
-                  :not-contains [:user-personal-account-name]}
+                  :contains-all [:virtual-personal-account-name]}
            :take [:accounts-mgmt-msg :revoked-account]
            :give :account-to-reinstate-selection-msg
 
@@ -778,7 +766,11 @@
                                                    (and (= (:chat-id ctx) (-> res :chat :id))
                                                         (some? (:reply_markup res))
                                                         (contains-all? res :text (:contains-all ctx))
-                                                        (not-contains? res :text (:not-contains ctx))))])}}
+                                                        ;; NB: User cannot reinstate their own personal account.
+                                                        (let [chat-data (get-chat-data (:chat-id ctx))
+                                                              ids {:user-id (:user-id ctx)}
+                                                              user-pers-acc (get-personal-account chat-data ids)]
+                                                          (not-contains? res :text [(:name user-pers-acc)]))))])}}
            :return-fn (fn [_ responses]
                         (first responses))}
 
@@ -858,7 +850,7 @@
 
 ; Tests Composition
 
-(defn unit-update-test
+(defn- unit-update-test
   "A unit test of the incoming update for a Telegram bot."
   [{:keys [update checks return-fn] :as _test-case} ctx]
   {:pre [(some? update)]}
@@ -878,21 +870,19 @@
     ;; chat data state
     (encore/when-some [exp-chat-data (:chat-data checks)
                        chat-data (get-chat-data (:chat-id ctx))]
-      ;; TODO: Add other possible validations here as well.
       (when (some? (:members-count exp-chat-data))
         (is (= (:members-count exp-chat-data) (get-members-count chat-data))
             "members count"))
       (when (some? (:chat-state exp-chat-data))
         (is (= (:chat-state exp-chat-data) (get-chat-state chat-data))
             "chat state"))
-      ;; TODO: Generalize the below two validations.
-      (when-some [acc-name (get-value-with-ctx exp-chat-data :acc-name)]
-        (is (some? (find-personal-account-by-name chat-data acc-name))
-            "an account with the specified name exists"))
       (doseq [account (get-value-with-ctx exp-chat-data :accounts)]
         (is (let [acc (find-personal-account-by-name chat-data (:name account))]
-              (and (some? acc) ((:pred account) acc)))
-            (:desc account)))
+              (and (some? acc)
+                   (or (not (contains? account :pred))
+                       ((:pred account) acc))))
+            (or (:desc account)
+                "an account with the specified name exists")))
       (doseq [bot-message (get-value-with-ctx exp-chat-data :bot-messages)]
         (is (= (:msg-state bot-message)
                (get-bot-msg-state chat-data (:msg-id bot-message)))
@@ -904,7 +894,7 @@
         (is (= (:total exp-responses) (count responses))
             "total responses"))
       (when-some [resp-assert-preds (get-value-with-ctx exp-responses :assert-preds)]
-        (is (apply do-responses-match?* responses resp-assert-preds)
+        (is (apply do-responses-match? responses resp-assert-preds)
             "responses match all predicates")))
 
     (when (some? return-fn)
@@ -1024,601 +1014,10 @@
        :else ;; stops the whole process
        (throw (IllegalStateException. (str "Unexpected node type: " node)))))))
 
-(defn comp-update-test
+(defn- comp-update-test
   "A composite test of the incoming update for a Telegram bot."
   [test-groups]
   (traverse-tests (to-zipper test-groups)))
 
 (deftest user-scenarios
   (comp-update-test use-cases))
-
-
-
-;; TODO: Remove later, when all test fns are transformed into plain data.
-(comment
-  (deftest personal-accounting
-    (testing "Use Case 1. Personal accounting (single user)"
-
-      (testing ":: Group Chat"
-        (let [chat-id (generate-chat-id)
-              chat-title (generate-name-str 3 "Group/")
-              user-id (generate-user-id)
-              user-name (generate-name-str "User/")
-
-              settings-msg (atom nil)]
-
-          (testing ":: 1 Start a new chat"
-            (let [name-request-msg (promise)
-
-                  user-personal-account-name (generate-name-str "Acc/")]
-
-              (testing ":: 1-1 Create chat with bot"
-                (with-mock-send
-                  {#'tg-client/get-chat-members-count (constantly 2)}
-                  #(let [update (build-update :my_chat_member
-                                              {:chat {:id chat-id :title chat-title :type "group"}
-                                               :from {:id user-id :first_name user-name :language_code "ru"}
-                                               :date (get-datetime-in-tg-format)
-                                               :old_chat_member {:user bot-user :status "left"}
-                                               :new_chat_member {:user bot-user :status "member"}})
-                         result (bot-api update)
-                         chat-data (get-chat-data chat-id)]
-                     ;; operation code / immediate response
-                     (is (= op-succeed result))
-
-                     ;; chat data state
-                     (is (= 2 (get-members-count chat-data)) "members count")
-                     (is (= :waiting (get-chat-state chat-data)) "chat state")
-
-                     ;; bot responses
-                     (is (= 2 (get-total-responses)) "total responses")
-                     (is (do-responses-match?
-                           (fn [res]
-                             (and (= chat-id (-> res :chat :id))
-                                  (str/includes? (:text res) user-name)))
-                           (fn [res]
-                             (when (and (= chat-id (-> res :chat :id))
-                                        (= (get-bot-msg-id chat-id :name-request-msg-id)
-                                           (:message_id res)))
-                               (deliver name-request-msg res)
-                               true)))
-                         "responses match all predicates"))))
-
-              ;; TODO: Add a TC that checks that other interactions are ineffectual at this point.
-
-              (testing ":: 1-2 Reply to the name request message"
-                (with-mock-send
-                  {#'core/can-write-to-user? (constantly true)} ;; as if user has already started some other chat
-                  #(let [update (build-update :message
-                                              {:message_id (generate-message-id)
-                                               :chat {:id chat-id :title chat-title :type "group"}
-                                               :from {:id user-id :first_name user-name :language_code "ru"}
-                                               :date (get-datetime-in-tg-format)
-                                               :reply_to_message @name-request-msg
-                                               :text user-personal-account-name})
-                         result (bot-api update)
-                         chat-data (get-chat-data chat-id)]
-                     ;; operation code / immediate response
-                     (is (= op-succeed result))
-
-                     ;; chat data state
-                     (is (= 2 (get-members-count chat-data)) "members count")
-                     (is (= :ready (get-chat-state chat-data)) "chat state")
-                     (let [new-acc (find-personal-account-by-name chat-data user-personal-account-name)]
-                       (is (some? new-acc) "an account with the specified name exists"))
-
-                     ;; bot responses
-                     (is (= 3 (get-total-responses)) "total responses")
-                     (is (do-responses-match?
-                           (fn [res]
-                             (and (= user-id (-> res :chat :id))
-                                  (str/includes? (:text res) chat-title)))
-                           (fn [res]
-                             (and (= chat-id (-> res :chat :id))
-                                  (some? (:reply_markup res))
-                                  (= "https://t.me/number_one_bot"
-                                     (:url (get-inline-kbd-btn res 0 0)))))
-                           (fn [res]
-                             (when (and (= chat-id (-> res :chat :id))
-                                        (some? (:reply_markup res))
-                                        (consists-exactly-of? res :callback_data
-                                                              ["<accounts>" "<expense_items>" "<shares>"])
-                                        (= [:settings :initial]
-                                           (get-bot-msg-state chat-data (:message_id res))))
-                               (reset! settings-msg res)
-                               true)))
-                         "responses match all predicates"))))))
-
-          (testing ":: 2 Settings"
-            (let [get-settings-msg-state (fn [chat-data]
-                                           (get-bot-msg-state chat-data (:message_id @settings-msg)))
-                  re-enter-settings-msg! (fn []
-                                           (with-mock-send
-                                             #(let [chat-data (get-chat-data chat-id)]
-                                                (when-not (= [:settings :initial] (get-settings-msg-state chat-data))
-                                                  (let [update (build-update :message
-                                                                             {:message_id (generate-message-id)
-                                                                              :chat {:id chat-id :title chat-title :type "group"}
-                                                                              :from {:id user-id :first_name user-name :language_code "ru"}
-                                                                              :date (get-datetime-in-tg-format)
-                                                                              :text "/settings"
-                                                                              :entities [{:offset 0 :length 9 :type "bot_command"}]})]
-                                                    (bot-api update)
-                                                    (reset! settings-msg (get-response 1)))))))]
-
-              (testing ":: 2-1 Accounts Management"
-                (let [enter-accounts-mgmt! (fn [callback-query-id]
-                                             (with-mock-send
-                                               #(let [update (build-update :callback_query
-                                                                           {:id callback-query-id
-                                                                            :chat {:id chat-id :title chat-title :type "group"}
-                                                                            :from {:id user-id :first_name user-name :language_code "ru"}
-                                                                            :message @settings-msg
-                                                                            :data "<accounts>"})
-                                                      result (bot-api update)
-                                                      chat-data (get-chat-data chat-id)]
-                                                  [result chat-data (collect-responses)])))
-
-                      user-personal-account-cd "ac::personal::0"
-
-                      virtual-personal-account-name (generate-name-str "Acc/")
-                      virtual-personal-account-cd "ac::personal::1"]
-
-                  (testing ":: 2-1-0 Menu navigation"
-                    (re-enter-settings-msg!)
-                    (let [callback-query-id (generate-callback-query-id)
-                          [result chat-data [accounts-mgmt-msg & rest]] (enter-accounts-mgmt! callback-query-id)
-                          user-personal-account-name (:name (get-personal-account chat-data {:user-id user-id}))]
-
-                      (testing ":: Enter the 'Accounts' menu"
-                        ;; operation code / immediate response
-                        (is (= {:method "answerCallbackQuery"
-                                :callback_query_id callback-query-id} result))
-
-                        ;; chat data state
-                        (is (= :ready (get-chat-state chat-data)) "chat state")
-                        (is (= [:settings :accounts-mgmt]
-                               (get-settings-msg-state chat-data)) "msg state")
-
-                        ;; bot responses
-                        (is (= 0 (count rest)) "total responses")
-                        (let [res accounts-mgmt-msg]
-                          (is (= chat-id (-> res :chat :id)))
-                          (is (str/includes? (:text res) user-personal-account-name))
-                          (is (some? (:reply_markup res)))
-                          (is (contains-all? res :callback_data
-                                             ["<accounts/create>" "<accounts/rename>"
-                                              "<accounts/revoke>" "<accounts/reinstate>"]))
-                          res))
-
-                      (testing ":: Exit the 'Accounts' menu"
-                        (with-mock-send
-                          #(let [callback-query-id (generate-callback-query-id)
-                                 update (build-update :callback_query
-                                                      {:id callback-query-id
-                                                       :chat {:id chat-id :title chat-title :type "group"}
-                                                       :from {:id user-id :first_name user-name :language_code "ru"}
-                                                       :message accounts-mgmt-msg
-                                                       :data "<back>"})
-                                 result (bot-api update)
-                                 chat-data (get-chat-data chat-id)]
-                             ;; operation code / immediate response
-                             (is (= {:method "answerCallbackQuery"
-                                     :callback_query_id callback-query-id} result))
-
-                             ;; chat data state
-                             (is (= :ready (get-chat-state chat-data)) "chat state")
-                             (is (= [:settings :initial]
-                                    (get-settings-msg-state chat-data)) "msg state")
-
-                             ;; bot responses
-                             (is (= 1 (get-total-responses)) "total responses")
-                             (is (do-responses-match?
-                                   (fn [res]
-                                     (valid-settings-msg? res chat-id (:message_id @settings-msg))))
-                                 "responses match all predicates"))))))
-
-                  (testing ":: 2-1-1 Create a new account"
-                    (re-enter-settings-msg!)
-                    (let [[_ _ [accounts-mgmt-msg]] (enter-accounts-mgmt! (generate-callback-query-id))
-
-                          create-account-msg (promise)
-                          new-account-name-request-msg (promise)
-
-                          account-type "at::personal"
-                          account-name virtual-personal-account-name]
-
-                      (testing ":: Should prompt the user to select the type of a new account"
-                        (with-mock-send
-                          #(let [callback-query-id (generate-callback-query-id)
-                                 update (build-update :callback_query
-                                                      {:id callback-query-id
-                                                       :chat {:id chat-id :title chat-title :type "group"}
-                                                       :from {:id user-id :first_name user-name :language_code "ru"}
-                                                       :message accounts-mgmt-msg
-                                                       :data "<accounts/create>"})
-                                 result (bot-api update)
-                                 chat-data (get-chat-data chat-id)]
-                             ;; operation code / immediate response
-                             (is (= {:method "answerCallbackQuery"
-                                     :callback_query_id callback-query-id} result))
-
-                             ;; chat data state
-                             (is (= :ready (get-chat-state chat-data)) "chat state")
-                             (is (= [:settings :account-type-selection]
-                                    (get-settings-msg-state chat-data)) "msg state")
-
-                             ;; bot responses
-                             (is (= 1 (get-total-responses)) "total responses")
-                             (is (do-responses-match?
-                                   (fn [res]
-                                     (when (and (= chat-id (-> res :chat :id))
-                                                (some? (:reply_markup res))
-                                                (contains-all? res :callback_data ["at::group" "at::personal"]))
-                                       (deliver create-account-msg res)
-                                       true)))
-                                 "responses match all predicates"))))
-
-                      (testing ":: Should restore the settings message & prompt the user for an account name"
-                        (with-mock-send
-                          #(let [callback-query-id (generate-callback-query-id)
-                                 update (build-update :callback_query
-                                                      {:id callback-query-id
-                                                       :chat {:id chat-id :title chat-title :type "group"}
-                                                       :from {:id user-id :first_name user-name :language_code "ru"}
-                                                       :message @create-account-msg
-                                                       :data account-type})
-                                 result (bot-api update)
-                                 chat-data (get-chat-data chat-id)]
-                             ;; operation code / immediate response
-                             (is (= {:method "answerCallbackQuery"
-                                     :callback_query_id callback-query-id} result))
-
-                             ;; chat data state
-                             (is (= :waiting (get-chat-state chat-data)) "chat state")
-                             (is (= [:settings :initial]
-                                    (get-settings-msg-state chat-data)) "msg state")
-
-                             ;; bot responses
-                             (is (= 2 (get-total-responses)) "total responses")
-                             (is (do-responses-match?
-                                   (fn [res]
-                                     (valid-settings-msg? res chat-id (:message_id @settings-msg)))
-                                   (fn [res]
-                                     (when (and (= chat-id (-> res :chat :id))
-                                                (some? (:reply_markup res))
-                                                (-> res :reply_markup :force_reply)
-                                                (-> res :reply_markup :selective)
-                                                (str/includes? (:text res) user-name)
-                                                (= (get-bot-msg-id chat-id [:to-user user-id :request-acc-name-msg-id])
-                                                   (:message_id res)))
-                                       (deliver new-account-name-request-msg res)
-                                       true)))
-                                 "responses match all predicates"))))
-
-                      ;; TODO: Add a TC that checks that other interactions are ineffectual at this point.
-
-                      (testing ":: Should create a new account of the selected type and with the specified name"
-                        (with-mock-send
-                          #(let [update (build-update :message
-                                                      {:message_id (generate-message-id)
-                                                       :chat {:id chat-id :title chat-title :type "group"}
-                                                       :from {:id user-id :first_name user-name :language_code "ru"}
-                                                       :date (get-datetime-in-tg-format)
-                                                       :reply_to_message @new-account-name-request-msg
-                                                       :text account-name})
-                                 result (bot-api update)
-                                 chat-data (get-chat-data chat-id)]
-                             ;; operation code / immediate response
-                             (is (= op-succeed result))
-
-                             ;; chat data state
-                             (is (= :ready (get-chat-state chat-data)) "chat state")
-                             (let [new-acc (find-personal-account-by-name chat-data account-name)]
-                               (is (some? new-acc) "a personal account with the specified name exists"))
-
-                             ;; bot responses
-                             (is (= 1 (get-total-responses)) "total responses")
-                             (is (= chat-id (-> (get-response 1) :chat :id))))))))
-
-                  (testing ":: 2-1-2 Rename an account"
-                    (re-enter-settings-msg!)
-                    (let [[_ chat-data [accounts-mgmt-msg]] (enter-accounts-mgmt! (generate-callback-query-id))
-
-                          account-to-rename-selection-msg (promise)
-                          account-rename-request-msg (promise)
-
-                          account-to-rename-cd user-personal-account-cd
-                          account-to-rename-old-name (:name (get-personal-account chat-data {:user-id user-id}))
-                          account-to-rename-new-name (generate-name-str "Acc/")]
-
-                      (testing ":: Should prompt the user to select an account to rename"
-                        (with-mock-send
-                          #(let [callback-query-id (generate-callback-query-id)
-                                 update (build-update :callback_query
-                                                      {:id callback-query-id
-                                                       :chat {:id chat-id :title chat-title :type "group"}
-                                                       :from {:id user-id :first_name user-name :language_code "ru"}
-                                                       :message accounts-mgmt-msg
-                                                       :data "<accounts/rename>"})
-                                 result (bot-api update)
-                                 chat-data (get-chat-data chat-id)]
-                             ;; operation code / immediate response
-                             (is (= {:method "answerCallbackQuery"
-                                     :callback_query_id callback-query-id} result))
-
-                             ;; chat data state
-                             (is (= :ready (get-chat-state chat-data)) "chat state")
-                             (is (= [:settings :account-renaming]
-                                    (get-settings-msg-state chat-data)) "msg state")
-
-                             ;; bot responses
-                             (is (= 1 (get-total-responses)) "total responses")
-                             (is (do-responses-match?
-                                   (fn [res]
-                                     (when (and (= chat-id (-> res :chat :id))
-                                                (some? (:reply_markup res))
-                                                ;; TODO: Should test for the 'virtual-personal-account-name'
-                                                ;;       separately, upon its creation. Call this test with
-                                                ;;       other params bound.
-                                                (contains-all? res :text [account-to-rename-old-name]))
-                                       (deliver account-to-rename-selection-msg res)
-                                       true)))
-                                 "responses match all predicates"))))
-
-                      (testing ":: Should restore the settings message & prompt the user for an account name"
-                        (with-mock-send
-                          #(let [callback-query-id (generate-callback-query-id)
-                                 update (build-update :callback_query
-                                                      {:id callback-query-id
-                                                       :chat {:id chat-id :title chat-title :type "group"}
-                                                       :from {:id user-id :first_name user-name :language_code "ru"}
-                                                       :message @account-to-rename-selection-msg
-                                                       :data account-to-rename-cd})
-                                 result (bot-api update)
-                                 chat-data (get-chat-data chat-id)]
-                             ;; operation code / immediate response
-                             (is (= {:method "answerCallbackQuery"
-                                     :callback_query_id callback-query-id} result))
-
-                             ;; chat data state
-                             (is (= :waiting (get-chat-state chat-data)) "chat state")
-                             (is (= [:settings :initial]
-                                    (get-settings-msg-state chat-data)) "msg state")
-
-                             ;; bot responses
-                             (is (= 2 (get-total-responses)) "total responses")
-                             (is (do-responses-match?
-                                   (fn [res]
-                                     (valid-settings-msg? res chat-id (:message_id @settings-msg)))
-                                   (fn [res]
-                                     (when (and (= chat-id (-> res :chat :id))
-                                                (some? (:reply_markup res))
-                                                (-> res :reply_markup :force_reply)
-                                                (-> res :reply_markup :selective)
-                                                (str/includes? (:text res) user-name)
-                                                (str/includes? (:text res) account-to-rename-old-name)
-                                                (= (get-bot-msg-id chat-id [:to-user user-id :request-rename-msg-id])
-                                                   (:message_id res)))
-                                       (deliver account-rename-request-msg res)
-                                       true)))
-                                 "responses match all predicates"))))
-
-                      ;; TODO: Add a TC that checks that other interactions are ineffectual at this point.
-
-                      (testing ":: Should update the selected account with the specified name"
-                        (with-mock-send
-                          #(let [update (build-update :message
-                                                      {:message_id (generate-message-id)
-                                                       :chat {:id chat-id :title chat-title :type "group"}
-                                                       :from {:id user-id :first_name user-name :language_code "ru"}
-                                                       :date (get-datetime-in-tg-format)
-                                                       :reply_to_message @account-rename-request-msg
-                                                       :text account-to-rename-new-name})
-                                 result (bot-api update)
-                                 chat-data (get-chat-data chat-id)]
-                             ;; operation code / immediate response
-                             (is (= op-succeed result))
-
-                             ;; chat data state
-                             (is (= :ready (get-chat-state chat-data)) "chat state")
-                             (let [new-acc (find-personal-account-by-name chat-data account-to-rename-new-name)]
-                               (is (some? new-acc) "a personal account with the specified name exists"))
-
-                             ;; bot responses
-                             (is (= 1 (get-total-responses)) "total responses")
-                             (is (= chat-id (-> (get-response 1) :chat :id))))))))
-
-                  (testing ":: 2-1-3 Revoke an account"
-                    (re-enter-settings-msg!)
-                    (let [[_ _ [accounts-mgmt-msg]] (enter-accounts-mgmt! (generate-callback-query-id))
-
-                          account-to-revoke-selection-msg (promise)
-                          account-to-revoke-cd virtual-personal-account-cd
-                          account-to-revoke-name virtual-personal-account-name]
-
-                      (testing ":: Should prompt the user to select an account to revoke"
-                        (with-mock-send
-                          #(let [callback-query-id (generate-callback-query-id)
-                                 update (build-update :callback_query
-                                                      {:id callback-query-id
-                                                       :chat {:id chat-id :title chat-title :type "group"}
-                                                       :from {:id user-id :first_name user-name :language_code "ru"}
-                                                       :message accounts-mgmt-msg
-                                                       :data "<accounts/revoke>"})
-                                 result (bot-api update)
-                                 chat-data (get-chat-data chat-id)
-
-                                 ;; NB: User cannot revoke or reinstate their own account.
-                                 user-personal-account-name (:name (get-personal-account chat-data {:user-id user-id}))]
-                             ;; operation code / immediate response
-                             (is (= {:method "answerCallbackQuery"
-                                     :callback_query_id callback-query-id} result))
-
-                             ;; chat data state
-                             (is (= :ready (get-chat-state chat-data)) "chat state")
-                             (is (= [:settings :account-revocation]
-                                    (get-settings-msg-state chat-data)) "msg state")
-
-                             ;; bot responses
-                             (is (= 1 (get-total-responses)) "total responses")
-                             (is (do-responses-match?
-                                   (fn [res]
-                                     (when (and (= chat-id (-> res :chat :id))
-                                                (some? (:reply_markup res))
-                                                (contains-all? res :text [account-to-revoke-name])
-                                                (not-contains? res :text [user-personal-account-name]))
-                                       (deliver account-to-revoke-selection-msg res)
-                                       true)))
-                                 "responses match all predicates"))))
-
-                      (testing ":: Should restore the settings message & mark the selected account as revoked"
-                        (with-mock-send
-                          #(let [callback-query-id (generate-callback-query-id)
-                                 update (build-update :callback_query
-                                                      {:id callback-query-id
-                                                       :chat {:id chat-id :title chat-title :type "group"}
-                                                       :from {:id user-id :first_name user-name :language_code "ru"}
-                                                       :message @account-to-revoke-selection-msg
-                                                       :data account-to-revoke-cd})
-                                 result (bot-api update)
-                                 chat-data (get-chat-data chat-id)]
-                             ;; operation code / immediate response
-                             (is (= {:method "answerCallbackQuery"
-                                     :callback_query_id callback-query-id} result))
-
-                             ;; chat data state
-                             (is (= :ready (get-chat-state chat-data)) "chat state")
-                             (is (= [:settings :initial]
-                                    (get-settings-msg-state chat-data)) "msg state")
-                             (let [acc (find-personal-account-by-name chat-data virtual-personal-account-name)]
-                               (is (:revoked acc) "the selected account is marked as revoked"))
-
-                             ;; bot responses
-                             (is (= 2 (get-total-responses)) "total responses")
-                             (is (do-responses-match?
-                                   (fn [res]
-                                     (valid-settings-msg? res chat-id (:message_id @settings-msg)))
-                                   (fn [res]
-                                     (= chat-id (-> res :chat :id))))
-                                 "responses match all predicates")))))
-
-                    (let [[_ _ [accounts-mgmt-msg]] (enter-accounts-mgmt! (generate-callback-query-id))]
-                      (testing ":: Should notify user when there's no eligible accounts"
-                        (with-mock-send
-                          #(let [callback-query-id (generate-callback-query-id)
-                                 update (build-update :callback_query
-                                                      {:id callback-query-id
-                                                       :chat {:id chat-id :title chat-title :type "group"}
-                                                       :from {:id user-id :first_name user-name :language_code "ru"}
-                                                       :message accounts-mgmt-msg
-                                                       :data "<accounts/revoke>"})
-                                 result (bot-api update)
-                                 chat-data (get-chat-data chat-id)]
-                             ;; operation code / immediate response
-                             (is (= {:method "answerCallbackQuery"
-                                     :callback_query_id callback-query-id} result))
-
-                             ;; chat data state
-                             (is (= :ready (get-chat-state chat-data)) "chat state")
-
-                             ;; bot responses
-                             (is (= 1 (get-total-responses)) "total responses")
-                             (is (= true (get-response 1))))))))
-
-                  (testing ":: 2-1-4 Reinstate an account"
-                    (re-enter-settings-msg!)
-                    (let [[_ _ [accounts-mgmt-msg]] (enter-accounts-mgmt! (generate-callback-query-id))
-
-                          account-to-reinstate-selection-msg (promise)
-                          account-to-reinstate-cd virtual-personal-account-cd
-                          account-to-reinstate-name virtual-personal-account-name]
-
-                      (testing ":: Should prompt the user to select an account to reinstate"
-                        (with-mock-send
-                          #(let [callback-query-id (generate-callback-query-id)
-                                 update (build-update :callback_query
-                                                      {:id callback-query-id
-                                                       :chat {:id chat-id :title chat-title :type "group"}
-                                                       :from {:id user-id :first_name user-name :language_code "ru"}
-                                                       :message accounts-mgmt-msg
-                                                       :data "<accounts/reinstate>"})
-                                 result (bot-api update)
-                                 chat-data (get-chat-data chat-id)
-
-                                 ;; NB: User cannot revoke or reinstate their own account.
-                                 user-personal-account-name (:name (get-personal-account chat-data {:user-id user-id}))]
-                             ;; operation code / immediate response
-                             (is (= {:method "answerCallbackQuery"
-                                     :callback_query_id callback-query-id} result))
-
-                             ;; chat data state
-                             (is (= :ready (get-chat-state chat-data)) "chat state")
-                             (is (= [:settings :account-reinstatement]
-                                    (get-settings-msg-state chat-data)) "msg state")
-
-                             ;; bot responses
-                             (is (= 1 (get-total-responses)) "total responses")
-                             (is (do-responses-match?
-                                   (fn [res]
-                                     (when (and (= chat-id (-> res :chat :id))
-                                                (some? (:reply_markup res))
-                                                (contains-all? res :text [account-to-reinstate-name])
-                                                (not-contains? res :text [user-personal-account-name]))
-                                       (deliver account-to-reinstate-selection-msg res)
-                                       true)))
-                                 "responses match all predicates"))))
-
-                      (testing ":: Should restore the settings message & reinstate the selected account"
-                        (with-mock-send
-                          #(let [callback-query-id (generate-callback-query-id)
-                                 update (build-update :callback_query
-                                                      {:id callback-query-id
-                                                       :chat {:id chat-id :title chat-title :type "group"}
-                                                       :from {:id user-id :first_name user-name :language_code "ru"}
-                                                       :message @account-to-reinstate-selection-msg
-                                                       :data account-to-reinstate-cd})
-                                 result (bot-api update)
-                                 chat-data (get-chat-data chat-id)]
-                             ;; operation code / immediate response
-                             (is (= {:method "answerCallbackQuery"
-                                     :callback_query_id callback-query-id} result))
-
-                             ;; chat data state
-                             (is (= :ready (get-chat-state chat-data)) "chat state")
-                             (is (= [:settings :initial]
-                                    (get-settings-msg-state chat-data)) "msg state")
-                             (let [acc (find-personal-account-by-name chat-data virtual-personal-account-name)]
-                               (is (not (:revoked acc)) "the selected account is reinstated"))
-
-                             ;; bot responses
-                             (is (= 2 (get-total-responses)) "total responses")
-                             (is (do-responses-match?
-                                   (fn [res]
-                                     (valid-settings-msg? res chat-id (:message_id @settings-msg)))
-                                   (fn [res]
-                                     (= chat-id (-> res :chat :id))))
-                                 "responses match all predicates")))))
-
-                    (let [[_ _ [accounts-mgmt-msg]] (enter-accounts-mgmt! (generate-callback-query-id))]
-                      (testing ":: Should notify user when there's no eligible accounts"
-                        (with-mock-send
-                          #(let [callback-query-id (generate-callback-query-id)
-                                 update (build-update :callback_query
-                                                      {:id callback-query-id
-                                                       :chat {:id chat-id :title chat-title :type "group"}
-                                                       :from {:id user-id :first_name user-name :language_code "ru"}
-                                                       :message accounts-mgmt-msg
-                                                       :data "<accounts/reinstate>"})
-                                 result (bot-api update)
-                                 chat-data (get-chat-data chat-id)]
-                             ;; operation code / immediate response
-                             (is (= {:method "answerCallbackQuery"
-                                     :callback_query_id callback-query-id} result))
-
-                             ;; chat data state
-                             (is (= :ready (get-chat-state chat-data)) "chat state")
-
-                             ;; bot responses
-                             (is (= 1 (get-total-responses)) "total responses")
-                             (is (= true (get-response 1)))))))))))))))))
