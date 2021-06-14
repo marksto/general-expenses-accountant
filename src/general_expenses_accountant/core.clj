@@ -329,6 +329,15 @@
     [(tg-api/build-inline-kbd-btn undo-button-text :callback_data cd-undo)
      (tg-api/build-inline-kbd-btn done-button-text :callback_data cd-done)]))
 
+(defn- get-new-group-members-msg
+  [acc-names]
+  {:pre [(seq acc-names)]}
+  {:type :text
+   :text (str "Члены новой группы:\n"
+              (->> acc-names
+                   (map #(str "- " %))
+                   (str/join "\n")))})
+
 (defn- get-account-rename-request-msg
   [user acc-name]
   {:type :text
@@ -1231,6 +1240,10 @@
     :new-member-selection-msg
     {:response-fn get-new-member-selection-msg
      :response-params [:accounts]}
+
+    :new-group-members-msg
+    {:response-fn get-new-group-members-msg
+     :response-params [:acc-names]}
 
     :account-rename-request-msg
     {:response-fn get-account-rename-request-msg
@@ -2249,7 +2262,7 @@
   (m-hlr/callback-fn
     (handle-with-care!
       [{callback-query-id :id
-        user :from
+        {user-id :id :as user} :from
         {msg-id :message_id {chat-id :id} :chat} :message
         callback-btn-data :data
         :as callback-query}]
@@ -2257,8 +2270,14 @@
       (when (and (= :chat-type/group (:chat-type callback-query))
                  (= :waiting (:chat-state callback-query))
                  (= cd-done callback-btn-data))
-        ;; TODO: Replace the 'msg-id' w/ a text listing all selected members.
-        (proceed-with-account-naming! chat-id user)
+        (let [chat-data (get-chat-data chat-id)
+              input-data (get-user-input-data chat-data user-id :create-account)
+              members (map :name (:account-members input-data))]
+          (respond!* {:chat-id chat-id :msg-id msg-id}
+                     [:chat-type/group :new-group-members-msg]
+                     :param-vals {:acc-names members}
+                     :replace? true)
+          (proceed-with-account-naming! chat-id user))
         (cb-succeed callback-query-id))
       send-retry-callback-query!))
 
