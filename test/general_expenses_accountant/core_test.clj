@@ -269,79 +269,79 @@
 
 ; Test Cases
 
-;; TODO: Get rid of '::' prefix in names. Change all ':name' keys to ':test'?
-;; TODO: Introduce the ':type' property — one of ':test/group', ':test/case'.
-;; TODO: Rename test group properties: 'group'->'name', 'binds'->'bind', etc.
-
 (def start-new-chat-test-group
-  {:group ":: 1 Start a new chat"
-   :tests [{:name ":: 1-1 Create chat with bot"
-            :tags [:new-group-chat :single-user]
-            :give :name-request-msg
+  {:type :test/group
+   :name "1 Start a new chat"
+   :test [{:type :test/case
+           :name "1-1 Create chat with bot"
+           :tags [:new-group-chat :single-user]
+           :give :name-request-msg
 
-            :update {:mock-fns {#'tg-client/get-chat-members-count (constantly 2)}
-                     :type :my_chat_member
-                     :data (fn [ctx]
-                             {:chat {:id (:chat-id ctx) :title (:chat-title ctx) :type "group"}
-                              :from {:id (:user-id ctx) :first_name (:user-name ctx) :language_code "ru"}
-                              :date (get-datetime-in-tg-format)
-                              :old_chat_member {:user bot-user :status "left"}
-                              :new_chat_member {:user bot-user :status "member"}})}
-            :checks {:result op-succeed
-                     :chat-data {:members-count 2
-                                 :chat-state :waiting}
-                     :responses {:total 2
-                                 :assert-preds (fn [ctx]
-                                                 [(fn [res]
-                                                    (and (= (:chat-id ctx) (-> res :chat :id))
-                                                         (str/includes? (:text res) (:user-name ctx))))
-                                                  (fn [res]
-                                                    (valid-name-request-msg? res (:chat-id ctx)))])}}
-            :return-fn (fn [ctx responses]
-                         (let [resp-pred #(valid-name-request-msg? % (:chat-id ctx))]
-                           (first (filter resp-pred responses))))}
+           :update {:mock-fns {#'tg-client/get-chat-members-count (constantly 2)}
+                    :type :my_chat_member
+                    :data (fn [ctx]
+                            {:chat {:id (:chat-id ctx) :title (:chat-title ctx) :type "group"}
+                             :from {:id (:user-id ctx) :first_name (:user-name ctx) :language_code "ru"}
+                             :date (get-datetime-in-tg-format)
+                             :old_chat_member {:user bot-user :status "left"}
+                             :new_chat_member {:user bot-user :status "member"}})}
+           :checks {:result op-succeed
+                    :chat-data {:members-count 2
+                                :chat-state :waiting}
+                    :responses {:total 2
+                                :assert-preds (fn [ctx]
+                                                [(fn [res]
+                                                   (and (= (:chat-id ctx) (-> res :chat :id))
+                                                        (str/includes? (:text res) (:user-name ctx))))
+                                                 (fn [res]
+                                                   (valid-name-request-msg? res (:chat-id ctx)))])}}
+           :return-fn (fn [ctx responses]
+                        (let [resp-pred #(valid-name-request-msg? % (:chat-id ctx))]
+                          (first (filter resp-pred responses))))}
 
-           ;; TODO: Add a TC that checks that other interactions are ineffectual at this point.
+          ;; TODO: Add a TC that checks that other interactions are ineffectual at this point.
 
-           {:name ":: 1-2 Reply to the name request message"
-            :tags [:new-group-chat :single-user]
-            :take :name-request-msg
-            :give :settings-msg
+          {:type :test/case
+           :name "1-2 Reply to the name request message"
+           :tags [:new-group-chat :single-user]
+           :take :name-request-msg
+           :give :settings-msg
 
-            :update {:mock-fns {#'core/can-write-to-user? (constantly true)} ;; as if user has already started some chat
-                     :type :message
-                     :data (fn [ctx]
-                             {:message_id (generate-message-id)
-                              :chat {:id (:chat-id ctx) :title (:chat-title ctx) :type "group"}
-                              :from {:id (:user-id ctx) :first_name (:user-name ctx) :language_code "ru"}
-                              :date (get-datetime-in-tg-format)
-                              :reply_to_message (-> ctx :deps :name-request-msg)
-                              :text (:user-personal-account-name ctx)})}
-            :checks {:result op-succeed
-                     :chat-data {:members-count 2
-                                 :chat-state :ready
-                                 :acc-name #(:user-personal-account-name %)}
-                     :responses {:total 3
-                                 :assert-preds (fn [ctx]
-                                                 [(fn [res]
-                                                    (and (= (:user-id ctx) (-> res :chat :id))
-                                                         (str/includes? (:text res) (:chat-title ctx))))
-                                                  (fn [res]
-                                                    (and (= (:chat-id ctx) (-> res :chat :id))
-                                                         (some? (:reply_markup res))
-                                                         (= "https://t.me/number_one_bot"
-                                                            (:url (get-inline-kbd-btn res 0 0)))))
-                                                  (fn [res]
-                                                    (and (valid-settings-msg? res (:chat-id ctx))
-                                                         (= [:settings :initial]
-                                                            (get-bot-msg-state (get-chat-data (:chat-id ctx))
-                                                                               (:message_id res)))))])}}
-            :return-fn (fn [ctx responses]
-                         (let [resp-pred #(valid-settings-msg? % (:chat-id ctx))]
-                           (first (filter resp-pred responses))))}]})
+           :update {:mock-fns {#'core/can-write-to-user? (constantly true)} ;; as if user has already started some chat
+                    :type :message
+                    :data (fn [ctx]
+                            {:message_id (generate-message-id)
+                             :chat {:id (:chat-id ctx) :title (:chat-title ctx) :type "group"}
+                             :from {:id (:user-id ctx) :first_name (:user-name ctx) :language_code "ru"}
+                             :date (get-datetime-in-tg-format)
+                             :reply_to_message (-> ctx :deps :name-request-msg)
+                             :text (:user-personal-account-name ctx)})}
+           :checks {:result op-succeed
+                    :chat-data {:members-count 2
+                                :chat-state :ready
+                                :acc-name #(:user-personal-account-name %)}
+                    :responses {:total 3
+                                :assert-preds (fn [ctx]
+                                                [(fn [res]
+                                                   (and (= (:user-id ctx) (-> res :chat :id))
+                                                        (str/includes? (:text res) (:chat-title ctx))))
+                                                 (fn [res]
+                                                   (and (= (:chat-id ctx) (-> res :chat :id))
+                                                        (some? (:reply_markup res))
+                                                        (= "https://t.me/number_one_bot"
+                                                           (:url (get-inline-kbd-btn res 0 0)))))
+                                                 (fn [res]
+                                                   (and (valid-settings-msg? res (:chat-id ctx))
+                                                        (= [:settings :initial]
+                                                           (get-bot-msg-state (get-chat-data (:chat-id ctx))
+                                                                              (:message_id res)))))])}}
+           :return-fn (fn [ctx responses]
+                        (let [resp-pred #(valid-settings-msg? % (:chat-id ctx))]
+                          (first (filter resp-pred responses))))}]})
 
 (def enter-the-accounts-menu
-  {:name ":: Enter the 'Accounts' menu"
+  {:type :test/case
+   :name "Enter the 'Accounts' menu"
    :tags [:menu-navigation]
    :bind {:callback-query-id (generate-callback-query-id)}
    :take :settings-msg
@@ -370,7 +370,8 @@
                 (first responses))})
 
 (def exit-the-accounts-menu
-  {:name ":: Exit the 'Accounts' menu"
+  {:type :test/case
+   :name "Exit the 'Accounts' menu"
    :tags [:menu-navigation]
    :bind {:callback-query-id (generate-callback-query-id)}
    :take :accounts-mgmt-msg
@@ -396,54 +397,67 @@
                                                                 (-> ctx :deps :settings-msg :message_id)))])}}})
 
 (def create-account-test-group
-  {:group ":: 2-1-1 Create a new account"
-   :tests [{:name ":: Should prompt the user to select the type of a new account"
-            :tags [:create-account]
-            :take [:accounts-mgmt-msg]
-            :give [:create-account-msg]}
-           {:name ":: Should restore the settings message & prompt the user for an account name"
-            :tags [:create-account]
-            :take [:create-account-msg]
-            :give [:new-account-name-request-msg]}
-           {:name ":: Should create a new account of the selected type and with the specified name"
-            :tags [:create-account]
-            :take [:new-account-name-request-msg]
-            :give [:settings-msg :created-account]}]})
+  {:type :test/group
+   :name "2-1-1 Create a new account"
+   :test [{:type :test/case
+           :name "Should prompt the user to select the type of a new account"
+           :tags [:create-account]
+           :take [:accounts-mgmt-msg]
+           :give [:create-account-msg]}
+
+          {:type :test/case
+           :name "Should restore the settings message & prompt the user for an account name"
+           :tags [:create-account]
+           :take [:create-account-msg]
+           :give [:new-account-name-request-msg]}
+
+          {:type :test/case
+           :name "Should create a new account of the selected type and with the specified name"
+           :tags [:create-account]
+           :take [:new-account-name-request-msg]
+           :give [:settings-msg :created-account]}]})
 
 (def create-virtual-personal-account-test-group
   (assoc create-account-test-group
-    :binds {:account-type "at::personal"
-            :account-name :virtual-personal-account-name}))
+    :bind {:account-type "at::personal"
+           :account-name :virtual-personal-account-name}))
 
 (def rename-account-test-group
-  {:group ":: 2-1-2 Rename an account"
-   :tests [{:name ":: Should prompt the user to select an account to rename"
-            :tags [:rename-account]
-            :take [:accounts-mgmt-msg]
-            :give [:account-to-rename-selection-msg]}
-           {:name ":: Should restore the settings message & prompt the user for an account name"
-            :tags [:rename-account]
-            :take [:account-to-rename-selection-msg]
-            :give [:account-rename-request-msg]}
-           {:name ":: Should update the selected account with the specified name"
-            :tags [:rename-account]
-            :take [:account-rename-request-msg]}]})
+  {:type :test/group
+   :name "2-1-2 Rename an account"
+   :test [{:type :test/case
+           :name "Should prompt the user to select an account to rename"
+           :tags [:rename-account]
+           :take [:accounts-mgmt-msg]
+           :give [:account-to-rename-selection-msg]}
+
+          {:type :test/case
+           :name "Should restore the settings message & prompt the user for an account name"
+           :tags [:rename-account]
+           :take [:account-to-rename-selection-msg]
+           :give [:account-rename-request-msg]}
+
+          {:type :test/case
+           :name "Should update the selected account with the specified name"
+           :tags [:rename-account]
+           :take [:account-rename-request-msg]}]})
 
 (def rename-user-personal-account-test-group
   (assoc rename-account-test-group
-    :binds {:account-to-rename-cd :user-personal-account-cd
-            :account-to-rename-old-name :user-personal-account-name
-            :account-to-rename-new-name (generate-name-str "Acc/")}))
+    :bind {:account-to-rename-cd :user-personal-account-cd
+           :account-to-rename-old-name :user-personal-account-name
+           :account-to-rename-new-name (generate-name-str "Acc/")}))
 
 (def rename-virtual-personal-account-test-group
   (assoc rename-account-test-group
-    :binds {:account-to-rename-cd :virtual-personal-account-cd
-            :account-to-rename-old-name :virtual-personal-account-name
-            :account-to-rename-new-name (generate-name-str "Acc/")}))
+    :bind {:account-to-rename-cd :virtual-personal-account-cd
+           :account-to-rename-old-name :virtual-personal-account-name
+           :account-to-rename-new-name (generate-name-str "Acc/")}))
 
 ;; NB: To be run twice: 1. when there are no accs; 2. after revoking an acc.
 (def no-eligible-accounts-for-revocation
-  {:name ":: Should notify user when there's no eligible accounts for revocation"
+  {:type :test/case
+   :name "Should notify user when there's no eligible accounts for revocation"
    :tags [:revoke-account :notifications]
    :bind {:callback-query-id (generate-callback-query-id)}
    :take :accounts-mgmt-msg
@@ -463,25 +477,32 @@
                         :assert-preds [#(= true %)]}}})
 
 (def revoke-account-test-group
-  {:group ":: 2-1-3 Revoke an account"
-   :tests [(update enter-the-accounts-menu :take utils/collect :created-account)
-           {:name ":: Should prompt the user to select an account to revoke"
-            :tags [:revoke-account]
-            :bind {:contains-all [:virtual-personal-account-name]
-                   :not-contains [:user-personal-account-name]}
-            :take [:accounts-mgmt-msg]
-            :give [:account-to-revoke-selection-msg]}
-           {:name ":: Should restore the settings message & mark the selected account as revoked"
-            :tags [:revoke-account]
-            :bind {:account-to-revoke-cd :virtual-personal-account-cd
-                   :account-to-revoke-name :virtual-personal-account-name}
-            :take [:account-to-revoke-selection-msg]
-            :give [:settings-msg :revoked-account]}
-           no-eligible-accounts-for-revocation]})
+  {:type :test/group
+   :name "2-1-3 Revoke an account"
+   :test [(update enter-the-accounts-menu :take utils/collect :created-account)
+
+          {:type :test/case
+           :name "Should prompt the user to select an account to revoke"
+           :tags [:revoke-account]
+           :bind {:contains-all [:virtual-personal-account-name]
+                  :not-contains [:user-personal-account-name]}
+           :take [:accounts-mgmt-msg]
+           :give [:account-to-revoke-selection-msg]}
+
+          {:type :test/case
+           :name "Should restore the settings message & mark the selected account as revoked"
+           :tags [:revoke-account]
+           :bind {:account-to-revoke-cd :virtual-personal-account-cd
+                  :account-to-revoke-name :virtual-personal-account-name}
+           :take [:account-to-revoke-selection-msg]
+           :give [:settings-msg :revoked-account]}
+
+          no-eligible-accounts-for-revocation]})
 
 ;; NB: To be run twice: 1. when there are no accs; 2. after reinstating an acc.
 (def no-eligible-accounts-for-reinstatement
-  {:name ":: Should notify user when there's no eligible accounts for reinstatement"
+  {:type :test/case
+   :name "Should notify user when there's no eligible accounts for reinstatement"
    :tags [:reinstate-account :notifications]
    :bind {:callback-query-id (generate-callback-query-id)}
    :take :accounts-mgmt-msg
@@ -501,146 +522,66 @@
                         :assert-preds [#(= true %)]}}})
 
 (def reinstate-account-test-group
-  {:group ":: 2-1-4 Reinstate an account"
-   :tests [(update enter-the-accounts-menu :take utils/collect :revoked-account)
-           {:name ":: Should prompt the user to select an account to reinstate"
-            :tags [:reinstate-account]
-            :bind {:contains-all [:virtual-personal-account-name]
-                   :not-contains [:user-personal-account-name]}
-            :take [:accounts-mgmt-msg]
-            :give [:account-to-reinstate-selection-msg]}
-           {:name ":: Should restore the settings message & reinstate the selected account"
-            :tags [:reinstate-account]
-            :bind {:account-to-reinstate-cd :virtual-personal-account-cd
-                   :account-to-reinstate-name :virtual-personal-account-name}
-            :take [:account-to-reinstate-selection-msg]}
-           no-eligible-accounts-for-reinstatement]})
+  {:type :test/group
+   :name "2-1-4 Reinstate an account"
+   :test [(update enter-the-accounts-menu :take utils/collect :revoked-account)
+
+          {:type :test/case
+           :name "Should prompt the user to select an account to reinstate"
+           :tags [:reinstate-account]
+           :bind {:contains-all [:virtual-personal-account-name]
+                  :not-contains [:user-personal-account-name]}
+           :take [:accounts-mgmt-msg]
+           :give [:account-to-reinstate-selection-msg]}
+
+          {:type :test/case
+           :name "Should restore the settings message & reinstate the selected account"
+           :tags [:reinstate-account]
+           :bind {:account-to-reinstate-cd :virtual-personal-account-cd
+                  :account-to-reinstate-name :virtual-personal-account-name}
+           :take [:account-to-reinstate-selection-msg]}
+
+          no-eligible-accounts-for-reinstatement]})
 
 (def accounts-mgmt-test-group
-  {:group ":: 2-1 Accounts Management"
-   :binds {:virtual-personal-account-name (generate-name-str "Acc/")
-           :virtual-personal-account-cd "ac::personal::1"}
-   :tests [enter-the-accounts-menu
+  {:type :test/group
+   :name "2-1 Accounts Management"
+   :bind {:virtual-personal-account-name (generate-name-str "Acc/")
+          :virtual-personal-account-cd "ac::personal::1"}
+   :test [enter-the-accounts-menu
 
-           #{no-eligible-accounts-for-revocation
-             no-eligible-accounts-for-reinstatement}
-           #{[create-virtual-personal-account-test-group
-              ;#{[revoke-account-test-group
-              ;   reinstate-account-test-group]
-              ;  rename-virtual-personal-account-test-group}
-              ]
-             rename-user-personal-account-test-group
+          #{no-eligible-accounts-for-revocation
+            no-eligible-accounts-for-reinstatement}
+          #{
+            ;[create-virtual-personal-account-test-group
+            ; ;#{[revoke-account-test-group
+            ; ;   reinstate-account-test-group]
+            ; ;  rename-virtual-personal-account-test-group}
+            ; ]
+            ;rename-user-personal-account-test-group
 
-             exit-the-accounts-menu}]})
+            exit-the-accounts-menu}]})
 
 (def settings-test-group
-  {:group ":: 2 Settings"
-   :tests [accounts-mgmt-test-group]})
+  {:type :test/group
+   :name "2 Settings"
+   :test [accounts-mgmt-test-group]})
 
 (def use-cases
-  [{:group "Use Case 1. Personal accounting (single user)"
-    :binds {:user-id (generate-user-id)
-            :user-name (generate-name-str "User/")}
-    :tests [{:group ":: Group Chat"
-             :binds {:chat-id (generate-chat-id)
-                     :chat-title (generate-name-str 3 "Group/")
-                     :user-personal-account-name (generate-name-str "Acc/")
-                     :user-personal-account-cd "ac::personal::0"}
-             :tests [start-new-chat-test-group
-                     settings-test-group]}]}])
+  [{:type :test/group
+    :name "Use Case 1. Personal accounting (single user)"
+    :bind {:user-id (generate-user-id)
+           :user-name (generate-name-str "User/")}
+    :test [{:type :test/group
+            :name "Group Chat"
+            :bind {:chat-id (generate-chat-id)
+                   :chat-title (generate-name-str 3 "Group/")
+                   :user-personal-account-name (generate-name-str "Acc/")
+                   :user-personal-account-cd "ac::personal::0"}
+            :test [start-new-chat-test-group
+                   settings-test-group]}]}])
 
 ; Tests Composition
-
-(declare unit-update-test) ;; TODO: Move it up here.
-
-(defn- to-zipper
-  [test-groups]
-  (zip/zipper #(or (vector? %) (:tests %) (set? %))
-              #(if (or (vector? %) (set? %)) (seq %) (:tests %))
-              (fn [node children] (with-meta children (meta node)))
-              test-groups))
-
-(defn- set-bindings
-  [ctx binds]
-  (into ctx (map #(if (keyword? (val %))
-                    (assoc % 1 (get ctx (val %)))
-                    %)
-                 binds)))
-
-;; TODO: Build up the full TC name to be used as the 'testing' 1st arg.
-
-(defn- traverse-tests
-  ;; TODO: Write a comprehensive doc string.
-  ([loc]
-   (traverse-tests loc {} {}))
-  ([loc ctx results]
-   (traverse-tests loc ctx results #{}))
-  ([loc ctx results run-independently]
-   (let [node (when (some? loc) (zip/node loc))]
-     (cond
-       (or (nil? loc) (zip/end? loc))
-       results
-
-       ;; These tests are ordered, so must run them one-by-one, since they depend on
-       ;; each other's results and side-effects (the shared state is the 'bot-data').
-       (vector? node)
-       (if (and (seq run-independently)
-                (run-independently node))
-         (let [upd-loc (zip/edit loc (fn [node] {:tests node}))]
-           ; NB: We run this tests independently as an anonymous test group.
-           (recur upd-loc ctx results (-> run-independently
-                                          (disj node)
-                                          (conj (zip/node upd-loc)))))
-         (recur (zip/next loc) ctx results run-independently))
-
-       ;; These tests are unordered, so we must run them independently of each other,
-       ;; as if they were the "parallel" versions of what might have happened to the
-       ;; same initial 'bot-data'.
-       (set? node)
-       (recur (zip/next loc) ctx results (set/union run-independently node))
-
-       (:tests node)
-       (let [ctx (set-bindings ctx (:binds node)) ;; should promote further
-             run-tg (fn []
-                      (let [tg-zipper (to-zipper (:tests node))]
-                        (traverse-tests tg-zipper ctx results)))]
-         (if (and (seq run-independently)
-                  (run-independently node))
-           (do
-             (reset-bot-data-afterwards run-tg)
-             (recur (zip/right loc) ctx results (disj run-independently node)))
-           (let [tg-results (run-tg)
-                 upd-results (merge results tg-results)]
-             (recur (zip/right loc) ctx upd-results run-independently))))
-
-       (:name node)
-       (let [run-tc (fn []
-                      (let [ctx (-> ctx
-                                    (assoc :deps results)
-                                    (set-bindings (:bind node)))
-                            case (dissoc node :bind)]
-                        ;; TODO: Assert that all test 'takes' are there.
-                        (testing (:name case)
-                          (unit-update-test case ctx))))]
-         (if (and (seq run-independently)
-                  (run-independently node))
-           (do
-             (reset-bot-data-afterwards run-tc)
-             (recur (zip/next loc) ctx results (disj run-independently node)))
-           (let [tc-result (run-tc)
-                 get-give (fn [case]
-                            (utils/ensure-vec (:give case)))
-                 upd-results (if (some? tc-result)
-                               (->> (utils/ensure-vec tc-result)
-                                    (interleave (get-give node))
-                                    (apply assoc results))
-                               results)]
-             (recur (zip/next loc) ctx upd-results run-independently))))
-
-       :else ;; stops the whole process
-       (do
-         (println "Stopped traversing!") ;; TODO: Re-write w/ an exception.
-         node)))))
 
 (defn unit-update-test
   "A unit test of the incoming update for a Telegram bot."
@@ -688,6 +629,115 @@
 
     (when (some? return-fn)
       (return-fn ctx responses))))
+
+(defn- to-zipper
+  [test-groups]
+  (zip/zipper #(or (vector? %) (set? %) (:test %))
+              #(if (or (vector? %) (set? %)) (seq %) (:test %))
+              (fn [node children] (with-meta children (meta node)))
+              test-groups))
+
+(defn- assert-test-params
+  [ctx case]
+  (let [required-params (if (contains? case :take)
+                          (set (utils/ensure-vec (:take case)))
+                          #{})
+        provided-params (or (-> (:deps ctx) keys set) #{})
+        missing-params (set/difference required-params provided-params)]
+    (assert (empty? missing-params)
+            (format "Missing test case parameter(s) %s in TC \"%s\""
+                    missing-params (:name case)))))
+
+(defn- set-bindings
+  [ctx binds]
+  (into ctx (map #(if (keyword? (val %))
+                    (assoc % 1 (get ctx (val %)))
+                    %)
+                 binds)))
+
+(defn- traverse-tests
+  "Recursively runs the tests of some test tree (consisting of test groups and
+   individual test cases) in a depth-first, pre-order traversal.
+
+   The following parameters are accepted:
+   - loc               — a zipper structure (tree+location) over the test tree,
+   - ctx               — a context of a test execution (which is hierarchical),
+   - results           — the results of all previous tests executions that are
+                         gathered together in a rolling updates fashion (which
+                         reflects how they are gathered in real use cases),
+   - run-independently — an indicator set of test cases or groups that need to
+                         be executed independently, i.e. without affecting the
+                         shared state (*bot-data) and the 'results' passed on."
+  ([loc]
+   (traverse-tests loc {} {}))
+  ([loc ctx results]
+   (traverse-tests loc ctx results #{}))
+  ([loc ctx results run-independently]
+   (let [node (when (some? loc) (zip/node loc))]
+     (cond
+       (or (nil? loc) (zip/end? loc))
+       results
+
+       ;; These tests are ordered, so must run them one-by-one, since they depend on
+       ;; each other's results and side-effects (the shared state is the 'bot-data').
+       (vector? node)
+       (if (and (seq run-independently)
+                (run-independently node))
+         (let [upd-loc (zip/edit loc (fn [node] {:type :test/group
+                                                 :test node}))]
+           ; NB: We run this tests independently as an anonymous test group.
+           (recur upd-loc ctx results (-> run-independently
+                                          (disj node)
+                                          (conj (zip/node upd-loc)))))
+         (recur (zip/next loc) ctx results run-independently))
+
+       ;; These tests are unordered, so we must run them independently of each other,
+       ;; as if they were the "parallel" versions of what might have happened to the
+       ;; same initial 'bot-data'.
+       (set? node)
+       (recur (zip/next loc) ctx results (set/union run-independently node))
+
+       (= :test/group (:type node))
+       (let [ctx (set-bindings ctx (:bind node)) ;; should promote further
+             run-tg (fn []
+                      (let [tg-zipper (to-zipper (:test node))]
+                        (testing (str (:name node) " ::")
+                          (traverse-tests tg-zipper ctx results))))]
+         (if (and (seq run-independently)
+                  (run-independently node))
+           (do
+             (reset-bot-data-afterwards run-tg)
+             (recur (zip/right loc) ctx results (disj run-independently node)))
+           (let [tg-results (run-tg)
+                 upd-results (merge results tg-results)]
+             (recur (zip/right loc) ctx upd-results run-independently))))
+
+       (= :test/case (:type node))
+       (let [run-tc (fn []
+                      (let [ctx (-> ctx
+                                    (assoc :deps results)
+                                    (set-bindings (:bind node)))
+                            case (dissoc node :bind)]
+                        (assert-test-params ctx case)
+                        (testing (:name case)
+                          (unit-update-test case ctx))))]
+         (if (and (seq run-independently)
+                  (run-independently node))
+           (do
+             (reset-bot-data-afterwards run-tc)
+             (recur (zip/next loc) ctx results (disj run-independently node)))
+           (let [tc-result (run-tc)
+                 get-give (fn [case]
+                            (utils/ensure-vec (:give case)))
+                 upd-results (if (some? tc-result)
+                               (->> (utils/ensure-vec tc-result)
+                                    (interleave (get-give node))
+                                    (apply assoc results))
+                               results)]
+             (recur (zip/next loc) ctx upd-results run-independently))))
+
+       :else ;; stops the whole process
+       (throw (IllegalStateException. (str "Unexpected node type: " node)))))))
 
 (defn comp-update-test
   "A composite test of the incoming update for a Telegram bot."
