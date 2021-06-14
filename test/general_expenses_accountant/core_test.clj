@@ -1,6 +1,6 @@
 (ns general-expenses-accountant.core-test
   (:refer-clojure :exclude [reduce])
-  (:require [clojure.test :refer [use-fixtures deftest testing is]]
+  (:require [clojure.test :refer [use-fixtures deftest testing is run-tests]]
             [clojure.core.async :refer [go chan >! <!! close! reduce]]
             [clojure.set :as set]
             [clojure.string :as str]
@@ -1021,3 +1021,11 @@
 
 (deftest user-scenarios
   (comp-update-test use-cases))
+
+
+
+(defn retest []
+  (reset! *bot-data {})
+  (run-tests))
+
+(comment (retest))
