@@ -930,24 +930,67 @@
                     :else %)
                  binds)))
 
+(defn- should-run-independently?
+  [node run-independently]
+  (and (seq run-independently)
+       (run-independently node)))
+
+(declare traverse-tests)
+
+(defn- run-test-group
+  [test-group ctx results independants]
+  (let [run-fn (fn []
+                 (let [tg-zipper (to-zipper (:test test-group))]
+                   (testing (str (:name test-group) " ::")
+                     (traverse-tests tg-zipper ctx results))))]
+    (if (should-run-independently? test-group independants)
+      (do
+        (reset-bot-data-afterwards run-fn)
+        [results (disj independants test-group)])
+      (let [tg-results (run-fn)
+            upd-results (merge results tg-results)]
+        [upd-results independants]))))
+
+(defn- run-test-case
+  [test-case ctx results independants]
+  (let [run-fn (fn []
+                 (let [ctx (-> (assoc ctx :deps results)
+                               (set-bindings (:bind test-case)))]
+                   (assert-test-params ctx test-case)
+                   (testing (:name test-case)
+                     (unit-update-test test-case ctx))))
+        get-give (fn [case]
+                   (utils/ensure-vec (:give case)))]
+    (if (should-run-independently? test-case independants)
+      (do
+        (reset-bot-data-afterwards run-fn)
+        [results (disj independants test-case)])
+      (let [tc-result (run-fn)
+            upd-results (if (some? tc-result)
+                          (->> (utils/ensure-vec tc-result)
+                               (interleave (get-give test-case))
+                               (apply assoc results))
+                          results)]
+        [upd-results independants]))))
+
 (defn- traverse-tests
-  "Recursively runs the tests of some test tree (consisting of test groups and
-   individual test cases) in a depth-first, pre-order traversal.
+  "Recursively runs the tests of some test tree (consisting of test groups
+   and individual test cases) in a depth-first, pre-order traversal.
 
    The following parameters are accepted:
-   - loc               — a zipper structure (tree+location) over the test tree,
-   - ctx               — a context of a test execution (which is hierarchical),
-   - results           — the results of all previous tests executions that are
-                         gathered together in a rolling updates fashion (which
-                         reflects how they are gathered in real use cases),
-   - run-independently — an indicator set of test cases or groups that need to
-                         be executed independently, i.e. without affecting the
-                         shared state (*bot-data) and the 'results' passed on."
+   - loc          — a zipper structure (tree+location) over the test tree,
+   - ctx          — a context of a test execution (which is hierarchical),
+   - results      — the results of all previous tests executions that are
+                    gathered together in a rolling updates fashion (which
+                    reflects how they are gathered in real use cases),
+   - independants — an indicator set of test cases or groups that need to
+                    be executed independently, i.e. without affecting the
+                    shared state (*bot-data) and the 'results' passed on."
   ([loc]
    (traverse-tests loc {} {}))
   ([loc ctx results]
    (traverse-tests loc ctx results #{}))
-  ([loc ctx results run-independently]
+  ([loc ctx results independants]
    (let [node (when (some? loc) (zip/node loc))]
      (cond
        (or (nil? loc) (zip/end? loc))
@@ -956,60 +999,28 @@
        ;; These tests are ordered, so must run them one-by-one, since they depend on
        ;; each other's results and side-effects (the shared state is the 'bot-data').
        (vector? node)
-       (if (and (seq run-independently)
-                (run-independently node))
+       (if (should-run-independently? node independants)
+         ;; NB: For these tests to be run as an anonymous test group & independently.
          (let [upd-loc (zip/edit loc (fn [node] {:type :test/group
-                                                 :test node}))]
-           ; NB: We run this tests independently as an anonymous test group.
-           (recur upd-loc ctx results (-> run-independently
-                                          (disj node)
-                                          (conj (zip/node upd-loc)))))
-         (recur (zip/next loc) ctx results run-independently))
+                                                 :test node}))
+               independants (-> independants (disj node) (conj (zip/node upd-loc)))]
+           (recur upd-loc ctx results independants))
+         (recur (zip/next loc) ctx results independants))
 
        ;; These tests are unordered, so we must run them independently of each other,
        ;; as if they were the "parallel" versions of what might have happened to the
        ;; same initial 'bot-data'.
        (set? node)
-       (recur (zip/next loc) ctx results (set/union run-independently node))
+       (recur (zip/next loc) ctx results (set/union independants node))
 
        (= :test/group (:type node))
        (let [ctx (set-bindings ctx (:bind node)) ;; should promote further
-             run-tg (fn []
-                      (let [tg-zipper (to-zipper (:test node))]
-                        (testing (str (:name node) " ::")
-                          (traverse-tests tg-zipper ctx results))))]
-         (if (and (seq run-independently)
-                  (run-independently node))
-           (do
-             (reset-bot-data-afterwards run-tg)
-             (recur (zip/right loc) ctx results (disj run-independently node)))
-           (let [tg-results (run-tg)
-                 upd-results (merge results tg-results)]
-             (recur (zip/right loc) ctx upd-results run-independently))))
+             [results independants] (run-test-group node ctx results independants)]
+         (recur (zip/right loc) ctx results independants))
 
        (= :test/case (:type node))
-       (let [run-tc (fn []
-                      (let [ctx (-> ctx
-                                    (assoc :deps results)
-                                    (set-bindings (:bind node)))
-                            case (dissoc node :bind)]
-                        (assert-test-params ctx case)
-                        (testing (:name case)
-                          (unit-update-test case ctx))))]
-         (if (and (seq run-independently)
-                  (run-independently node))
-           (do
-             (reset-bot-data-afterwards run-tc)
-             (recur (zip/next loc) ctx results (disj run-independently node)))
-           (let [tc-result (run-tc)
-                 get-give (fn [case]
-                            (utils/ensure-vec (:give case)))
-                 upd-results (if (some? tc-result)
-                               (->> (utils/ensure-vec tc-result)
-                                    (interleave (get-give node))
-                                    (apply assoc results))
-                               results)]
-             (recur (zip/next loc) ctx upd-results run-independently))))
+       (let [[results independants] (run-test-case node ctx results independants)]
+         (recur (zip/next loc) ctx results independants))
 
        :else ;; stops the whole process
        (throw (IllegalStateException. (str "Unexpected node type: " node)))))))
