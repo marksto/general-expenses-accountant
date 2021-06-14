@@ -18,7 +18,9 @@
                            {:* (partial mapv keyword)}]
                   :to-user db/restore-numeric-keys}
    :input [db/restore-numeric-keys
-           {:* {:rename-account {:account-type keyword}
+           {:* {:create-account {:account-type keyword
+                                 :account-members {:* {:type keyword}}}
+                :rename-account {:account-type keyword}
                 :locked-messages set}}]
    :accounts {:acc-type/general [db/restore-numeric-keys
                                  {:* {:type keyword

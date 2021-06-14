@@ -285,15 +285,24 @@
   "Recursively transforms the JSON object (a map) according to a predefined mapping.
    To be called within `post-select`, e.g. with an `update-in` on a JSONB attribute."
   [json-obj mapping-rules]
-  (letfn [(reducer [m [k v]]
+  (letfn [(as-temp-map [set]
+            (with-meta (into {} (map-indexed #(vector %1 %2) set)) {:was-set true}))
+          (back-to-set [coll]
+            (if (true? (:was-set (meta coll))) (set (vals coll)) coll))
+          (reducer [m [k v]]
             (if (= :* k)
-              ;; "transform for every key in a map" scenario
+              ;; "every coll (map/vector/set) entry transformation" scenario
               ;; {M, [:* FN]} -> (recur {M,  [k_1 FN]}) = M'
               ;;                  ...
               ;;                 (recur {M', [k_N FN]})
               (reduce (fn [m' k']
                         (reducer m' [k' v]))
-                      m (keys m))
+                      (cond
+                        (or (map? m) (vector? m)) m
+                        (set? m) (as-temp-map m))
+                      (cond
+                        (map? m) (keys m)
+                        (counted? m) (range (count m))))
 
               (let [mkv (get m k)]
                 (if (some? mkv)
@@ -306,7 +315,7 @@
                           res (reduce (fn [m' [k' v']]
                                         (reducer m' [k' v']))
                                       mkv kvs)]
-                      (assoc m k res))
+                      (assoc m k (back-to-set res)))
 
                     (if (vector? v)
                       ;; "series of transformations" scenario (order matters!)
