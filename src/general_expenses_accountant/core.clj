@@ -353,7 +353,7 @@
   {:pre [(seq acc-names)]}
   {:type :text
    :text (str "Члены новой группы:\n"
-              (->> acc-names
+              (->> acc-names ;; TODO: Extract into a dedicated fn + reuse above.
                    (map #(str "- " %))
                    (str/join "\n")))})
 
@@ -962,6 +962,9 @@
     (and (is-account-active? acc)
          (or (and (= :acc-type/personal (:type acc))
                   (contains? #{user-id nil} (:user-id acc)))
+             ;; TODO: There's a case that is missing: a creator
+             ;;       of a group who did not include themselves
+             ;;       into the group. Needs to be able as well.
              (and (= :acc-type/group (:type acc))
                   (is-group-acc-member? acc chat-id user-id))))))
 
@@ -971,6 +974,9 @@
     (and (is-account-active? acc)
          (or (and (= :acc-type/personal (:type acc))
                   (not= (:user-id acc) user-id))
+             ;; TODO: There's a case that is missing: a creator
+             ;;       of a group who did not include themselves
+             ;;       into the group. Needs to be able as well.
              (and (= :acc-type/group (:type acc))
                   (is-group-acc-member? acc chat-id user-id))))))
 
@@ -1021,6 +1027,7 @@
     ;; TODO: Update group accs of which the 'changed-pers-acc-id' is a member.
     (apply create-general-account! chat-id datetime member-opts)
     changed-pers-acc-id))
+;; TODO: Give a better name to the fn above, e.g. 'change-personal-account-active-status!'.
 
 ;; - CHATS > GROUP CHAT > BOT MESSAGES
 
@@ -1968,6 +1975,7 @@
      (respond!* {:callback-query-id ~callback-query-id}
                 [:chat-type/group :waiting-for-user-input-notification])))
 
+;; TODO: Doesn't work for the 2nd level of nested sub-menus? Fix this!
 (defmacro try-with-message-lock-or-send-notification!
   [chat-id user-id msg-id callback-query-id & body]
   `(if (acquire-message-lock! ~chat-id ~user-id ~msg-id)
@@ -2323,6 +2331,7 @@
         (let [chat-data (get-chat-data chat-id)
               input-data (get-user-input-data chat-data user-id :create-account)
               members (map :name (:account-members input-data))]
+          ;; TODO: Send a warning notification in case no members are selected.
           (respond!* {:chat-id chat-id :msg-id msg-id}
                      [:chat-type/group :new-group-members-msg]
                      :param-vals {:acc-names members}
