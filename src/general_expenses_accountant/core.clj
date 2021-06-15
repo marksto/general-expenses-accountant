@@ -187,9 +187,10 @@
       {:reply-markup (tg-api/build-reply-markup :inline-keyboard (vec select-items))})))
 
 (defn- append-extra-buttons
-  [inline-kbd-markup extra-buttons]
-  (let [extra-buttons (for [extra-button extra-buttons] [extra-button])]
-    (update-in inline-kbd-markup [:reply_markup :inline_keyboard] into extra-buttons)))
+  [inline-kbd-markup ?extra-buttons]
+  (if-let [extra-buttons (for [extra-button ?extra-buttons] [extra-button])]
+    (update-in inline-kbd-markup [:reply_markup :inline_keyboard] into extra-buttons)
+    inline-kbd-markup))
 
 (defn- group-refs->options
   [group-refs]
@@ -312,11 +313,11 @@
 (defn- get-account-selection-msg
   ([accounts txt]
    (get-account-selection-msg accounts txt nil))
-  ([accounts txt extra-buttons]
+  ([accounts txt ?extra-buttons]
    {:pre [(seq accounts)]}
    {:type :text
     :text txt
-    :options (apply accounts->options accounts extra-buttons)}))
+    :options (apply accounts->options accounts ?extra-buttons)}))
 
 (defn- get-account-type-selection-msg
   [account-types extra-buttons]
@@ -455,29 +456,29 @@
       (tg-api/build-inline-kbd-btn "←" :callback_data cd-clear)
       (tg-api/build-inline-kbd-btn "OK" :callback_data cd-enter)]]))
 
-(defn- new-expense-msg ;; TODO: Poor naming. Rename or throw away.
+(defn- get-interactive-input-msg
   ([text]
-   (new-expense-msg text nil))
-  ([text extra-opts]
+   (get-interactive-input-msg text nil))
+  ([text ?extra-opts]
    {:type :text
     :text (str (escape-markdown-v2 "Новый расход:\n= ") text)
     :options (tg-api/build-message-options
-               (merge {:parse-mode "MarkdownV2"} extra-opts))}))
+               (merge {:parse-mode "MarkdownV2"} ?extra-opts))}))
 
-(defn- get-interactive-input-msg
+(defn- get-inline-calculator-msg
   [user-input]
-  (new-expense-msg
-    (escape-markdown-v2 (if (empty? user-input) "_" user-input))
+  (get-interactive-input-msg
+    (escape-markdown-v2 (if (empty? user-input) "_" user-input)) ;; TODO: Always show '_' in the end of user input.
     {:reply-markup inline-calculator-markup}))
 
 (defn- get-calculation-success-msg
   [amount]
-  (new-expense-msg
+  (get-interactive-input-msg
     (escape-markdown-v2 (format-currency amount "ru"))))
 
 (defn- get-calculation-failure-msg
   [amount]
-  (new-expense-msg
+  (get-interactive-input-msg
     (str/join "\n"
               [amount
                ;; TODO: Make this disclaimer permanent, i.e. always show it in the 'interactive input' mode.
@@ -620,14 +621,14 @@
       (-update-chat! upd-chat))))
 
 (defn- assoc-in-chat-data!
-  [chat-id [key & ks] value]
+  [chat-id [key & ks] ?value]
   {:pre [(does-chat-exist? chat-id)]}
   (let [real-chat-id (get-real-chat-id chat-id)
         full-path (concat [real-chat-id :data key] ks)
-        bot-data (if (nil? value)
+        bot-data (if (nil? ?value)
                    (update-bot-data! update-in (butlast full-path)
                                      dissoc (last full-path))
-                   (update-bot-data! assoc-in full-path value))
+                   (update-bot-data! assoc-in full-path ?value))
         upd-chat (get bot-data real-chat-id)]
     (-update-chat! upd-chat)))
 
@@ -828,7 +829,6 @@
     (some? ?acc-id)
     (get-in chat-data [:accounts :acc-type/personal ?acc-id])))
 
-;; TODO: Rename optional args in all other fns to start w/ '?...' as well.
 (defn- create-personal-account!
   [chat-id acc-name created-dt & {?user-id :user-id ?first-msg-id :first-msg-id :as _opts}]
   (if (or (nil? ?user-id)
@@ -1016,7 +1016,9 @@
       (get-group-chat-account updated-chat-data acc-type acc-id)
       :failure/the-account-name-is-already-taken)))
 
-(defn- change-personal-and-related-accounts!
+(defn- change-personal-account-activity-status!
+  "Changes the activity status of the personal account and updates all related
+   general (revokes and creates a new version, if needed) and group accounts."
   [chat-id acc-to-change
    {:keys [revoke? reinstate? datetime] :as upd}]
   (let [changed-pers-acc (update-personal-account! chat-id acc-to-change upd)
@@ -1027,7 +1029,6 @@
     ;; TODO: Update group accs of which the 'changed-pers-acc-id' is a member.
     (apply create-general-account! chat-id datetime member-opts)
     changed-pers-acc-id))
-;; TODO: Give a better name to the fn above, e.g. 'change-personal-account-active-status!'.
 
 ;; - CHATS > GROUP CHAT > BOT MESSAGES
 
@@ -1037,10 +1038,10 @@
     (get-in (get-chat-data chat-id) (into [:bot-messages] ensured-msg-keys))))
 
 (defn- set-bot-msg-id!
-  [chat-id msg-keys msg-id]
+  [chat-id msg-keys ?msg-id]
   (let [full-path (utils/collect [:bot-messages] msg-keys)]
-    (assoc-in-chat-data! chat-id full-path msg-id))
-  msg-id)
+    (assoc-in-chat-data! chat-id full-path ?msg-id))
+  ?msg-id)
 
 (defn- is-reply-to-bot?
   [chat-id message bot-msg-keys]
@@ -1074,12 +1075,12 @@
   (get-in chat-data [:input user-id input-name]))
 
 (defn- set-user-input-data!
-  [chat-id user-id input-name input-data]
-  (if (nil? input-data)
+  [chat-id user-id input-name ?input-data]
+  (if (nil? ?input-data)
     (update-chat-data! chat-id
                        update-in [:input user-id] dissoc input-name)
     (update-chat-data! chat-id
-                       assoc-in [:input user-id input-name] input-data)))
+                       assoc-in [:input user-id input-name] ?input-data)))
 
 (defn- drop-user-input-data!
   [chat-id user-id]
@@ -1317,8 +1318,8 @@
     {:response-fn get-private-introduction-msg
      :response-params [:first-name]}
 
-    :interactive-input-msg
-    {:response-fn get-interactive-input-msg
+    :inline-calculator-msg
+    {:response-fn get-inline-calculator-msg
      :response-params [:new-user-input]}
     :calculation-success-msg
     {:response-fn get-calculation-success-msg
@@ -1445,7 +1446,7 @@
      :response :private-introduction-msg}
     :show-calculator
     {:to-state :interactive-input
-     :response :interactive-input-msg}
+     :response :inline-calculator-msg}
     :select-group
     {:to-state :group-selection
      :response :group-selection-msg}
@@ -1860,9 +1861,9 @@
   (encore/when-let [chat-data (get-chat-data chat-id)
                     user-id (:id left-chat-member)
                     pers-acc (get-personal-account chat-data {:user-id user-id})]
-    (change-personal-and-related-accounts! chat-id pers-acc
-                                           {:revoke? true
-                                            :datetime (get-datetime-in-tg-format)})
+    (change-personal-account-activity-status! chat-id pers-acc
+                                              {:revoke? true
+                                               :datetime (get-datetime-in-tg-format)})
     (drop-user-input-data! chat-id user-id)
     (report-to-user! user-id
                      [:chat-type/private :removed-from-group-msg]
@@ -2381,7 +2382,7 @@
                   account-to-revoke (data->account callback-btn-data chat-data)
                   datetime (get-datetime-in-tg-format)]
               (case (:type account-to-revoke)
-                :acc-type/personal (change-personal-and-related-accounts!
+                :acc-type/personal (change-personal-account-activity-status!
                                      chat-id account-to-revoke {:revoke? true
                                                                 :datetime datetime})
                 :acc-type/group (throw (Exception. "Not implemented yet")))) ;; TODO!
@@ -2412,7 +2413,7 @@
               ;; TODO: Check whether we can simply update an existing personal account
               ;;       rather than create a new version w/ 'create-personal-account!'.
               (case (:type account-to-reinstate)
-                :acc-type/personal (change-personal-and-related-accounts!
+                :acc-type/personal (change-personal-account-activity-status!
                                      chat-id account-to-reinstate {:reinstate? true
                                                                    :datetime datetime})
                 :acc-type/group (throw (Exception. "Not implemented yet")))) ;; TODO!
@@ -2568,7 +2569,7 @@
                 new-user-input (update-user-input! chat-id non-terminal-operation)]
             (when (not= old-user-input new-user-input)
               (respond!* {:chat-id chat-id :msg-id msg-id}
-                         [:chat-type/private :interactive-input-msg]
+                         [:chat-type/private :inline-calculator-msg]
                          :param-vals {:new-user-input new-user-input}
                          :replace? true)))
           (cb-succeed callback-query-id)))
