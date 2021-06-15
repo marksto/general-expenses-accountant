@@ -1822,7 +1822,7 @@
     #(->> % :message_id (set-bot-msg-id! chat-id :name-request-msg-id))))
 
 (defn- proceed-with-group-chat-finalization!
-  [chat-id]
+  [chat-id show-settings?]
   ;; NB: Tries to create a new version of the "general account"
   ;;     even if the group chat already existed before.
   (create-general-account! chat-id (get-datetime-in-tg-format))
@@ -1830,12 +1830,12 @@
     {:chat-id chat-id}
     {:transition [:chat-type/group :declare-readiness]
      :param-vals {:bot-username (get-bot-username)}})
-  ;; TODO: Send the settings conditionally, depending on whether it is the first time.
-  (respond!* {:chat-id chat-id}
-             [:chat-type/group :settings-msg]
-             :param-vals {:first-time? true}
-             :response-handler
-             #(change-bot-msg-state!* chat-id :settings (:message_id %) :initial)))
+  (when show-settings?
+    (respond!* {:chat-id chat-id}
+               [:chat-type/group :settings-msg]
+               :param-vals {:first-time? true}
+               :response-handler
+               #(change-bot-msg-state!* chat-id :settings (:message_id %) :initial))))
 
 (defn- proceed-with-personal-accounts-check!
   [chat-id existing-chat?]
@@ -1846,7 +1846,7 @@
       ;;     during the bot's absence, if any.
       ;;     Users with an existing active personal account are ignored.
       (proceed-with-personal-accounts-creation! chat-id existing-chat? nil)
-      (proceed-with-group-chat-finalization! chat-id))))
+      (proceed-with-group-chat-finalization! chat-id (not existing-chat?)))))
 
 (defn- proceed-with-new-chat-members!
   [chat-id new-chat-members]
@@ -2743,7 +2743,7 @@
                        :param-vals {:count pers-accs-missing})
             (do
               (set-bot-msg-id! chat-id :name-request-msg-id nil)
-              (proceed-with-group-chat-finalization! chat-id))))
+              (proceed-with-group-chat-finalization! chat-id true))))
         op-succeed)
       send-retry-message!))
 
