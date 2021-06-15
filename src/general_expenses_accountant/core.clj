@@ -114,13 +114,6 @@
   (and (some? chat-members-count) ;; a private chat with the bot
        (>= chat-members-count min-chat-members-for-group-accounting)))
 
-(defn- get-number-of-missing-personal-accounts
-  "Returns the number of missing personal accounts in a group chat,
-   which have to be created before the group chat is ready for the
-   general expenses accounting."
-  [chat-members-count number-of-existing-personal-accounts]
-  (- chat-members-count number-of-existing-personal-accounts 1))
-
 
 ;; MESSAGE TEMPLATES & CALLBACK DATA
 
@@ -384,14 +377,17 @@
 ;; TODO: Add messages for 'shares' here.
 
 (defn- get-personal-account-name-request-msg
-  [?chat-members]
+  [existing-chat? ?chat-members]
   {:type :text
-   :text (let [request-txt "как будет называться ваш личный счёт?"]
-           (if (some? ?chat-members)
-             (let [mentions (for [user ?chat-members]
-                              (tg-api/get-user-mention-text user))]
-               (str (str/join " " mentions) ", " request-txt))
-             (str/capitalize request-txt)))
+   :text (let [request-txt (escape-markdown-v2 "как будет называться ваш личный счёт?")
+               part-one (if (some? ?chat-members)
+                          (let [mentions (for [user ?chat-members]
+                                           (tg-api/get-user-mention-text user))]
+                            (str (str/join " " mentions) ", " request-txt))
+                          (str/capitalize request-txt))
+               part-two (when (and existing-chat? (empty? ?chat-members))
+                          (escape-markdown-v2 "Пожалуйста, проигнорийруте это сообщение, если у вас уже есть личный счёт в данной группе."))]
+           (str/trim (str part-one "\n" part-two)))
    :options (tg-api/build-message-options
               {:reply-markup (tg-api/build-reply-markup
                                :force-reply {:selective (some? ?chat-members)})
@@ -943,6 +939,17 @@
                                       {:acc-types all-account-types
                                        :filter-pred ?filter-pred}))))
 
+(defn- get-number-of-missing-personal-accounts
+  "Returns the number of missing personal accounts in a group chat,
+   which have to be created before the group chat is ready for the
+   expenses accounting."
+  [chat-id]
+  (let [chat-members-count (get-members-count (get-chat-data chat-id))
+        existing-pers-accs (->> {:acc-types [:acc-type/personal]}
+                                (get-group-chat-accounts chat-id)
+                                count)]
+    (- chat-members-count existing-pers-accs 1)))
+
 (defn- is-group-acc-member?
   [group-acc chat-id user-id]
   (let [group-chat-data (get-chat-data chat-id)
@@ -1235,7 +1242,7 @@
 
     :personal-account-name-request-msg
     {:response-fn get-personal-account-name-request-msg
-     :response-params [:chat-members]}
+     :response-params [:existing-chat? :chat-members]}
 
     :personal-accounts-left-msg
     {:response-fn get-personal-accounts-left-msg
@@ -1379,7 +1386,8 @@
    :ready #{:waiting
             :ready
             :evicted}
-   :evicted #{:waiting}})
+   :evicted #{:waiting
+              :ready}})
 
 (def ^:private private-chat-states
   {:initial #{:input}
@@ -1796,11 +1804,12 @@
     {:transition [:chat-type/group :mark-evicted]}))
 
 (defn- proceed-with-personal-accounts-creation!
-  [chat-id ?new-chat-members]
+  [chat-id existing-chat? ?new-chat-members]
   (proceed-with-chat-and-respond!
     {:chat-id chat-id}
     {:transition [:chat-type/group :request-acc-names]
-     :param-vals {:chat-members ?new-chat-members}}
+     :param-vals {:existing-chat? existing-chat?
+                  :chat-members ?new-chat-members}}
     :response-handler
     #(->> % :message_id (set-bot-msg-id! chat-id :name-request-msg-id))))
 
@@ -1820,11 +1829,22 @@
              :response-handler
              #(change-bot-msg-state!* chat-id :settings (:message_id %) :initial)))
 
+(defn- proceed-with-personal-accounts-check!
+  [chat-id existing-chat?]
+  (let [pers-accs-missing (get-number-of-missing-personal-accounts chat-id)]
+    (if (> pers-accs-missing 0)
+      ;; NB: It will be nice to update the list of chat personal accounts
+      ;;     with new ones for those users who have joined the group chat
+      ;;     during the bot's absence, if any.
+      ;;     Users with an existing active personal account are ignored.
+      (proceed-with-personal-accounts-creation! chat-id existing-chat? nil)
+      (proceed-with-group-chat-finalization! chat-id))))
+
 (defn- proceed-with-new-chat-members!
   [chat-id new-chat-members]
   (update-chat-data! chat-id
                      update :members-count (partial + (count new-chat-members)))
-  (proceed-with-personal-accounts-creation! chat-id new-chat-members))
+  (proceed-with-personal-accounts-creation! chat-id true new-chat-members))
 
 (defn- proceed-with-left-chat-member!
   [chat-id left-chat-member]
@@ -2606,20 +2626,18 @@
         (tg-api/has-joined? my-chat-member-updated)
         (let [token (config/get-prop :bot-api-token)
               chat-members-count (tg-client/get-chat-members-count token chat-id)
-              new-chat (setup-new-group-chat! chat-id chat-title chat-members-count)]
-          (if (some? new-chat)
-            (respond!* {:chat-id chat-id}
-                       [:chat-type/group :introduction-msg]
-                       :param-vals {:chat-members-count chat-members-count
-                                    :first-name first-name})
+              new-chat (setup-new-group-chat! chat-id chat-title chat-members-count)
+              existing-chat? (nil? new-chat)]
+          (if existing-chat?
             (do
               (log/debugf "The chat=%s already exists" chat-id)
               (update-chat-data! chat-id
-                                 assoc :members-count chat-members-count)))
-          ;; NB: It would be nice to update the list of personal
-          ;;     accounts with new ones for those users who have
-          ;;     joined the group chat during the bot's absence.
-          (proceed-with-personal-accounts-creation! chat-id nil)
+                                 assoc :members-count chat-members-count))
+            (respond!* {:chat-id chat-id}
+                       [:chat-type/group :introduction-msg]
+                       :param-vals {:chat-members-count chat-members-count
+                                    :first-name first-name}))
+          (proceed-with-personal-accounts-check! chat-id existing-chat?)
           op-succeed)
 
         (tg-api/has-left? my-chat-member-updated)
@@ -2708,16 +2726,11 @@
                              [:chat-type/private :added-to-new-group-msg]
                              {:chat-title chat-title})))
 
-        (let [pers-accs-count (->> {:acc-types [:acc-type/personal]}
-                                   (get-group-chat-accounts chat-id)
-                                   count)
-              uncreated-count (get-number-of-missing-personal-accounts
-                                (get-members-count (get-chat-data chat-id))
-                                pers-accs-count)]
-          (if (> uncreated-count 0)
+        (let [pers-accs-missing (get-number-of-missing-personal-accounts chat-id)]
+          (if (> pers-accs-missing 0)
             (respond!* {:chat-id chat-id}
                        [:chat-type/group :personal-accounts-left-msg]
-                       :param-vals {:count uncreated-count})
+                       :param-vals {:count pers-accs-missing})
             (do
               (set-bot-msg-id! chat-id :name-request-msg-id nil)
               (proceed-with-group-chat-finalization! chat-id))))
