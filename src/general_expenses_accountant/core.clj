@@ -59,6 +59,22 @@
   ([upd-fn & upd-fn-args]
    (apply swap! *bot-data upd-fn upd-fn-args)))
 
+(defn- conditionally-update-bot-data!
+  ([pred upd-fn]
+   (with-local-vars [succeed true]
+     (let [updated-bot-data
+           (update-bot-data!
+             (fn [bot-data]
+               (if (pred bot-data)
+                 (upd-fn bot-data)
+                 (do
+                   (var-set succeed false)
+                   bot-data))))]
+       (when @succeed
+         updated-bot-data))))
+  ([pred upd-fn & upd-fn-args]
+   (conditionally-update-bot-data! pred #(apply upd-fn % upd-fn-args))))
+
 
 ;; TODO: Get rid of this atom after debugging is complete. This is not needed for the app.
 (defonce ^:private *transactions (atom {}))
@@ -567,6 +583,12 @@
    (when-let [real-chat-id (get-real-chat-id bot-data chat-id)]
      (get-in bot-data [real-chat-id :data]))))
 
+(defn- -update-chat!
+  [chat-to-upd]
+  (if (chats/update! chat-to-upd)
+    (:data chat-to-upd)
+    (throw (ex-info "Failed to persist an updated chat" {:chat chat-to-upd}))))
+
 (defn- update-chat-data!
   [chat-id upd-fn & upd-fn-args]
   {:pre [(does-chat-exist? chat-id)]}
@@ -574,9 +596,18 @@
         bot-data (apply update-bot-data!
                         update-in [real-chat-id :data] upd-fn upd-fn-args)
         upd-chat (get bot-data real-chat-id)]
-    (if (chats/update! upd-chat)
-      (:data upd-chat)
-      (throw (IllegalStateException. (str "Failed to save updated chat:" upd-chat))))))
+    (-update-chat! upd-chat)))
+
+(defn- conditionally-update-chat-data!
+  [chat-id pred upd-fn & upd-fn-args]
+  {:pre [(does-chat-exist? chat-id)]}
+  (let [real-chat-id (get-real-chat-id chat-id)
+        bot-data (apply conditionally-update-bot-data!
+                        #(pred (get-in % [real-chat-id :data]))
+                        update-in [real-chat-id :data] upd-fn upd-fn-args)
+        upd-chat (get bot-data real-chat-id)]
+    (when (some? upd-chat)
+      (-update-chat! upd-chat))))
 
 (defn- assoc-in-chat-data!
   [chat-id [key & ks] value]
@@ -588,9 +619,7 @@
                                      dissoc (last full-path))
                    (update-bot-data! assoc-in full-path value))
         upd-chat (get bot-data real-chat-id)]
-    (if (chats/update! upd-chat)
-      (:data upd-chat)
-      (throw (IllegalStateException. (str "Failed to save updated chat:" upd-chat))))))
+    (-update-chat! upd-chat)))
 
 (defn- get-chat-state
   "Determines the state of the given chat. Returns 'nil' in case the group chat
@@ -676,6 +705,27 @@
   [chat-data]
   (-> chat-data :accounts :last-id inc))
 
+(defn- find-account-by-name
+  [chat-data acc-type acc-name]
+  ;; NB: Personal and group account names must be unique.
+  (first (get-accounts-of-type chat-data acc-type
+                               #(= (:name %) acc-name))))
+
+(defn- create-named-account!
+  "Attempts to create a named type account with a name uniqueness check."
+  [chat-id acc-type acc-name constructor-fn]
+  (let [updated-chat-data
+        (conditionally-update-chat-data!
+          chat-id
+          #(nil? (find-account-by-name % acc-type acc-name))
+          (fn [chat-data]
+            (let [next-id (get-accounts-next-id chat-data)
+                  upd-accounts-next-id #(assoc-in % [:accounts :last-id] next-id)]
+              (constructor-fn (upd-accounts-next-id chat-data) next-id))))]
+    (if (some? updated-chat-data)
+      (find-account-by-name updated-chat-data acc-type acc-name)
+      :failure/the-account-name-is-already-taken)))
+
 ;; - CHATS > ACCOUNTS > GENERAL
 
 (defn- get-current-general-account
@@ -742,19 +792,12 @@
 
 ;; - CHATS > ACCOUNTS > PERSONAL
 
-(defn- find-personal-account-by-name
-  [chat-data acc-name]
-  ;; NB: A personal account's name must be unique.
-  (first (get-accounts-of-type chat-data
-                               :acc-type/personal
-                               #(= (:name %) acc-name))))
-
 (defn- get-personal-account-id
   [chat-data {?user-id :user-id ?acc-name :name :as _ids}]
   {:pre [(or (some? ?user-id) (some? ?acc-name))]}
   (if (some? ?user-id)
     (get-in chat-data [:user-account-mapping ?user-id])
-    (:id (find-personal-account-by-name chat-data ?acc-name))))
+    (:id (find-account-by-name chat-data :acc-type/personal ?acc-name))))
 
 (defn- set-personal-account-id
   [chat-data user-id pers-acc-id]
@@ -770,7 +813,7 @@
       (get-in chat-data [:accounts :acc-type/personal pers-acc-id]))
 
     (some? ?acc-name)
-    (find-personal-account-by-name chat-data ?acc-name)
+    (find-account-by-name chat-data :acc-type/personal ?acc-name)
 
     (some? ?acc-id)
     (get-in chat-data [:accounts :acc-type/personal ?acc-id])))
@@ -778,49 +821,27 @@
 ;; TODO: Rename optional args in all other fns to start w/ '?...' as well.
 (defn- create-personal-account!
   [chat-id acc-name created-dt & {?user-id :user-id ?first-msg-id :first-msg-id :as _opts}]
-  ;; TODO: Add some check for the 'acc-name' uniqueness and an account name re-request flow.
-  (when (or (nil? ?user-id)
-            (let [pers-acc (get-personal-account (get-chat-data chat-id) {:user-id ?user-id})] ;; petty RC
-              (or (nil? pers-acc) (is-account-revoked? pers-acc))))
-    (let [updated-chat-data
-          (update-chat-data!
-            chat-id
-            (fn [chat-data]
-              (let [next-id (get-accounts-next-id chat-data)
-
-                    upd-accounts-next-id-fn
-                    (fn [cd]
-                      (assoc-in cd [:accounts :last-id] next-id))
-
-                    add-new-personal-acc-fn
-                    (fn [cd]
-                      (let [pers-acc (->personal-account
-                                       next-id acc-name created-dt
-                                       ?user-id ?first-msg-id)]
-                        (cond-> (assoc-in cd [:accounts :acc-type/personal next-id] pers-acc)
-                                (some? ?user-id) (set-personal-account-id ?user-id next-id))))]
-                (-> chat-data
-                    upd-accounts-next-id-fn
-                    add-new-personal-acc-fn))))]
-      (get-personal-account updated-chat-data {:user-id ?user-id :name acc-name}))))
+  (if (or (nil? ?user-id)
+          (let [pers-acc (get-personal-account (get-chat-data chat-id) {:user-id ?user-id})] ;; petty RC
+            (or (nil? pers-acc) (is-account-revoked? pers-acc))))
+    (create-named-account!
+      chat-id :acc-type/personal acc-name
+      (fn [chat-data acc-id]
+        (let [pers-acc (->personal-account acc-id acc-name created-dt
+                                           ?user-id ?first-msg-id)]
+          (cond-> (assoc-in chat-data [:accounts :acc-type/personal acc-id] pers-acc)
+                  (some? ?user-id) (set-personal-account-id ?user-id acc-id)))))
+    :failure/user-already-has-an-active-account))
 
 (defn- update-personal-account!
-  [chat-id
-   {?user-id :user-id ?acc-name :name :as ids}
-   {:keys [new-name revoke? reinstate? datetime] :as _upd}]
+  [chat-id ids {:keys [revoke? reinstate? datetime] :as _upd}]
   (let [pers-acc-id (get-personal-account-id (get-chat-data chat-id) ids)] ;; petty RC
     (when (some? pers-acc-id)
       (let [updated-chat-data
             (update-chat-data!
               chat-id
               (fn [chat-data]
-                (let [upd-acc-name-fn
-                      (fn [cd]
-                        (if (some? new-name)
-                          (assoc-in cd [:accounts :acc-type/personal pers-acc-id :name] new-name)
-                          cd))
-
-                      upd-acc-revoked-fn
+                (let [upd-acc-revoked-fn
                       (fn [cd]
                         (if (true? revoke?)
                           (assoc-in cd [:accounts :acc-type/personal pers-acc-id :revoked] datetime)
@@ -832,49 +853,19 @@
                           (update-in cd [:accounts :acc-type/personal pers-acc-id] dissoc :revoked)
                           cd))]
                   (-> chat-data
-                      upd-acc-name-fn
                       upd-acc-revoked-fn
                       upd-acc-reinstated-fn))))]
-        (get-personal-account updated-chat-data {:user-id ?user-id
-                                                 :name (or new-name ?acc-name)})))))
+        (get-personal-account updated-chat-data ids)))))
 
 ;; - CHATS > ACCOUNTS > GROUP
 
-(defn- find-group-accounts
-  [chat-data members]
-  (get-accounts-of-type chat-data
-                        :acc-type/group
-                        #(= (:members %) members)))
-
-(defn- get-latest-group-account
-  [chat-data members]
-  (->> (find-group-accounts chat-data members)
-       (sort-by :created)
-       first))
-
 (defn- create-group-account!
   [chat-id members acc-name created-dt]
-  ;; TODO: Add some check for the 'acc-name' uniqueness.
-  ;; TODO: Extract the common part ('updated-chat-data'...'next-id') into a fn.
-  (let [updated-chat-data
-        (update-chat-data!
-          chat-id
-          (fn [chat-data]
-            (let [next-id (get-accounts-next-id chat-data)
-
-                  upd-accounts-next-id-fn
-                  (fn [cd]
-                    (assoc-in cd [:accounts :last-id] next-id))
-
-                  add-new-group-acc-fn
-                  (fn [cd]
-                    (let [group-acc (->group-account
-                                      next-id acc-name created-dt members)]
-                      (assoc-in cd [:accounts :acc-type/group next-id] group-acc)))]
-              (-> chat-data
-                  upd-accounts-next-id-fn
-                  add-new-group-acc-fn))))]
-    (get-latest-group-account updated-chat-data members)))
+  (create-named-account!
+    chat-id :acc-type/group acc-name
+    (fn [chat-data acc-id]
+      (let [group-acc (->group-account acc-id acc-name created-dt members)]
+        (assoc-in chat-data [:accounts :acc-type/group acc-id] group-acc)))))
 
 ;; - CHATS > GROUP CHAT
 
@@ -986,6 +977,17 @@
     (get-group-chat-account group-chat-data
                             (keyword "acc-type" (nth account-path 0))
                             (.intValue (biginteger (nth account-path 1))))))
+
+(defn- change-group-chat-account-name!
+  [chat-id acc-type acc-id new-acc-name]
+  (let [updated-chat-data
+        (conditionally-update-chat-data!
+          chat-id
+          #(nil? (find-account-by-name % acc-type new-acc-name))
+          assoc-in [:accounts acc-type acc-id :name] new-acc-name)]
+    (if (some? updated-chat-data)
+      (get-group-chat-account updated-chat-data acc-type acc-id)
+      :failure/the-account-name-is-already-taken)))
 
 (defn- change-personal-and-related-accounts!
   [chat-id acc-to-change
@@ -2044,6 +2046,8 @@
          ((fn ~bindings ~@body) arg#)
          (catch Exception e#
            (log/error e# "Failed to handle an incoming update:" arg#)
+           (when-some [ex-data# (ex-data e#)]
+             (log/error "The associated exception data:" ex-data#))
            (~care-fn arg#)
            op-failed)))))
 

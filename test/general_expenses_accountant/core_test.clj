@@ -27,8 +27,8 @@
 (defalias get-chat-state core/get-chat-state)
 (defalias get-bot-msg-id core/get-bot-msg-id)
 (defalias get-bot-msg-state core/get-bot-msg-state)
+(defalias find-account-by-name core/find-account-by-name)
 (defalias get-personal-account core/get-personal-account)
-(defalias find-personal-account-by-name core/find-personal-account-by-name)
 
 ; Shared State
 
@@ -494,8 +494,9 @@
                                                 [(fn [res]
                                                    (= (:chat-id ctx) (-> res :chat :id)))])}}
            :return-fn (fn [ctx _]
-                        (find-personal-account-by-name (get-chat-data (:chat-id ctx))
-                                                       (:account-name ctx)))}]})
+                        (find-account-by-name (get-chat-data (:chat-id ctx))
+                                              :acc-type/personal
+                                              (:account-name ctx)))}]})
 
 (def create-virtual-personal-account-test-group
   (assoc create-account-test-group
@@ -705,8 +706,9 @@
                                                    (= (:chat-id ctx) (-> res :chat :id)))])}}
            :return-fn (fn [ctx responses]
                         (let [resp-pred #(valid-settings-msg? % (:chat-id ctx))
-                              revoked-acc (find-personal-account-by-name (get-chat-data (:chat-id ctx))
-                                                                         (:account-to-revoke-name ctx))]
+                              revoked-acc (find-account-by-name (get-chat-data (:chat-id ctx))
+                                                                :acc-type/personal
+                                                                (:account-to-revoke-name ctx))]
                           [(first (filter resp-pred responses))
                            revoked-acc]))}
 
@@ -877,7 +879,7 @@
         (is (= (:chat-state exp-chat-data) (get-chat-state chat-data))
             "chat state"))
       (doseq [account (get-value-with-ctx exp-chat-data :accounts)]
-        (is (let [acc (find-personal-account-by-name chat-data (:name account))]
+        (is (let [acc (find-account-by-name chat-data :acc-type/personal (:name account))]
               (and (some? acc)
                    (or (not (contains? account :pred))
                        ((:pred account) acc))))
