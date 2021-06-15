@@ -179,6 +179,11 @@
   (String/format (Locale/forLanguageTag lang)
                  "%.2f" (to-array [amount])))
 
+(def ^:private force-reply-options
+  (tg-api/build-message-options
+    {:reply-markup (tg-api/build-reply-markup :force-reply {:selective true})
+     :parse-mode "MarkdownV2"}))
+
 (defn- build-select-items-options
   [items name-extr-fn key-extr-fn val-extr-fn]
   (let [select-items (for [item items]
@@ -332,10 +337,15 @@
   [user]
   {:type :text
    :text (str (tg-api/get-user-mention-text user)
-              ", как бы вы хотели назвать новый счёт?")
-   :options (tg-api/build-message-options
-              {:reply-markup (tg-api/build-reply-markup :force-reply {:selective true})
-               :parse-mode "MarkdownV2"})})
+              (escape-markdown-v2 ", как бы вы хотели назвать новый счёт?"))
+   :options force-reply-options})
+
+(defn- get-the-name-is-already-taken-msg
+  [user]
+  {:type :text
+   :text (str (tg-api/get-user-mention-text user)
+              (escape-markdown-v2 ", данное имя счёта уже занято. Выберите другое имя."))
+   :options force-reply-options})
 
 (defn- get-new-member-selection-msg
   [accounts]
@@ -359,9 +369,7 @@
   {:type :text
    :text (str (tg-api/get-user-mention-text user)
               ", как бы вы хотели переименовать счёт \"" (escape-markdown-v2 acc-name) "\"?")
-   :options (tg-api/build-message-options
-              {:reply-markup (tg-api/build-reply-markup :force-reply {:selective true})
-               :parse-mode "MarkdownV2"})})
+   :options force-reply-options})
 
 (def ^:private no-eligible-accounts-notification
   {:type :callback
@@ -530,6 +538,12 @@
 (defn get-datetime-in-tg-format
   []
   (quot (System/currentTimeMillis) 1000))
+
+(defn- is-failure?
+  "Checks if something resulted in a failure."
+  [res]
+  (and (keyword? res)
+       (= "failure" (namespace res))))
 
 ;; - CHATS
 
@@ -1239,6 +1253,10 @@
     {:response-fn get-new-account-name-request-msg
      :response-params [:user]}
 
+    :the-name-is-already-taken-msg
+    {:response-fn get-the-name-is-already-taken-msg
+     :response-params [:user]}
+
     :new-member-selection-msg
     {:response-fn get-new-member-selection-msg
      :response-params [:accounts]}
@@ -1840,6 +1858,14 @@
     :response-handler
     #(->> % :message_id
           (set-bot-msg-id! chat-id [:to-user user-id :request-acc-name-msg-id]))))
+
+(defn- proceed-with-the-name-is-already-taken!
+  [chat-id user bot-msg-key]
+  (respond!* {:chat-id chat-id}
+             [:chat-type/group :the-name-is-already-taken-msg]
+             :param-vals {:user user}
+             :response-handler
+             #(->> % :message_id (set-bot-msg-id! chat-id bot-msg-key))))
 
 (defn- proceed-with-account-creation!
   [chat-id acc-type {user-id :id :as user}]
@@ -2658,7 +2684,7 @@
   (m-hlr/message-fn
     (handle-with-care!
       [{msg-id :message_id date :date text :text
-        {user-id :id} :from
+        {user-id :id :as user} :from
         {chat-id :id chat-title :title} :chat
         :as message}]
       ;; TODO: Figure out how to proceed if someone accidentally closes the reply.
@@ -2669,12 +2695,18 @@
         (when-some [_new-chat (setup-new-private-chat! user-id chat-id)]
           (update-private-chat-groups! user-id chat-id))
 
-        (if (create-personal-account! chat-id text date
-                                      :user-id user-id :first-msg-id msg-id)
-          (report-to-user! user-id
-                           [:chat-type/private :added-to-new-group-msg]
-                           {:chat-title chat-title})
-          (update-personal-account! chat-id {:user-id user-id} {:new-name text}))
+        (let [create-acc-res (create-personal-account! chat-id text date
+                                                       :user-id user-id :first-msg-id msg-id)]
+          (if (is-failure? create-acc-res)
+            (case create-acc-res
+              :failure/user-already-has-an-active-account
+              nil ;; TODO: Send a reply that a possible new name has been ignored?
+
+              :failure/the-account-name-is-already-taken
+              (proceed-with-the-name-is-already-taken! chat-id user :name-request-msg-id))
+            (report-to-user! user-id
+                             [:chat-type/private :added-to-new-group-msg]
+                             {:chat-title chat-title})))
 
         (let [pers-accs-count (->> {:acc-types [:acc-type/personal]}
                                    (get-group-chat-accounts chat-id)
@@ -2695,7 +2727,7 @@
   (m-hlr/message-fn
     (handle-with-care!
       [{date :date text :text
-        {user-id :id} :from
+        {user-id :id :as user} :from
         {chat-id :id} :chat
         :as message}]
       (when (and (= :chat-type/group (:chat-type message))
@@ -2706,27 +2738,35 @@
         (let [chat-data (get-chat-data chat-id)
               input-data (get-user-input-data chat-data user-id :create-account)
               acc-type (:account-type input-data)
-              members (map :id (:account-members input-data))]
-          (case acc-type
-            :acc-type/personal (do
-                                 (create-personal-account! chat-id text date)
-                                 (create-general-account! chat-id date))
-            :acc-type/group (create-group-account! chat-id members text date))
+              members (map :id (:account-members input-data))
 
-          ;; TODO: Extract this common functionality into a dedicated cleanup fn.
-          (set-bot-msg-id! chat-id [:to-user user-id :request-acc-name-msg-id] nil)
-          (set-user-input-data! chat-id user-id :create-account nil)
+              create-acc-res
+              (case acc-type
+                :acc-type/personal (when-some [pers-acc (create-personal-account! chat-id text date)]
+                                     (create-general-account! chat-id date)
+                                     pers-acc)
+                :acc-type/group (create-group-account! chat-id members text date))]
+          (if (is-failure? create-acc-res)
+            (case create-acc-res
+              :failure/the-account-name-is-already-taken
+              (proceed-with-the-name-is-already-taken! chat-id user
+                                                       [:to-user user-id :request-acc-name-msg-id])
+              (throw (ex-info "Unexpected operation result" {:result create-acc-res})))
+            (do
+              ;; TODO: Extract this common functionality into a dedicated cleanup fn.
+              (set-bot-msg-id! chat-id [:to-user user-id :request-acc-name-msg-id] nil)
+              (set-user-input-data! chat-id user-id :create-account nil)
 
-          (proceed-with-chat-and-respond!
-            {:chat-id chat-id}
-            {:transition [:chat-type/group :notify-changes-success]}))
+              (proceed-with-chat-and-respond!
+                {:chat-id chat-id}
+                {:transition [:chat-type/group :notify-changes-success]}))))
         op-succeed)
       send-retry-message!))
 
   (m-hlr/message-fn
     (handle-with-care!
       [{text :text
-        {user-id :id} :from
+        {user-id :id :as user} :from
         {chat-id :id} :chat
         :as message}]
       (when (and (= :chat-type/group (:chat-type message))
@@ -2737,17 +2777,23 @@
         (let [chat-data (get-chat-data chat-id)
               input-data (get-user-input-data chat-data user-id :rename-account)
               acc-type (:account-type input-data)
-              acc-id (:account-id input-data)]
-          (update-chat-data! chat-id
-                             assoc-in [:accounts acc-type acc-id :name] text)
+              acc-id (:account-id input-data)
 
-          ;; TODO: Extract this common functionality into a dedicated cleanup fn.
-          (set-bot-msg-id! chat-id [:to-user user-id :request-rename-msg-id] nil)
-          (set-user-input-data! chat-id user-id :rename-account nil)
+              update-acc-res (change-group-chat-account-name! chat-id acc-type acc-id text)]
+          (if (is-failure? update-acc-res)
+            (case update-acc-res
+              :failure/the-account-name-is-already-taken
+              (proceed-with-the-name-is-already-taken! chat-id user
+                                                       [:to-user user-id :request-rename-msg-id])
+              (throw (ex-info "Unexpected operation result" {:result update-acc-res})))
+            (do
+              ;; TODO: Extract this common functionality into a dedicated cleanup fn.
+              (set-bot-msg-id! chat-id [:to-user user-id :request-rename-msg-id] nil)
+              (set-user-input-data! chat-id user-id :rename-account nil)
 
-          (proceed-with-chat-and-respond!
-            {:chat-id chat-id}
-            {:transition [:chat-type/group :notify-changes-success]}))
+              (proceed-with-chat-and-respond!
+                {:chat-id chat-id}
+                {:transition [:chat-type/group :notify-changes-success]}))))
         op-succeed)
       send-retry-message!))
 
