@@ -1668,6 +1668,21 @@
     (respond! ids response
               (assoc ?options :replace? true))))
 
+;; TODO: As a precondition, check if the chat with 'chat-id' is not in ':evicted' state.
+(defn- delete-response!
+  "Deletes one of the bot's previous response messages.
+   NB: - A message can only be deleted if it was sent less than 48 hours ago.
+       - Bots can delete outgoing messages in private chats, groups, and supergroups.
+   This fn takes an optional parameter, which is an options map of a specific API method."
+  ([ids]
+   (delete-response! ids nil))
+  ([{:keys [chat-id msg-id] :as ids} ?options]
+   (make-tg-bot-api-request!
+     (fn [token]
+       (m-api/delete-text token chat-id msg-id))
+     (assoc ?options
+       :on-failure #(log/errorf % "Failed to delete the response message %s" ids)))))
+
 ;; - SPECIFIC ACTIONS
 
 (defn- send-retry-command!
