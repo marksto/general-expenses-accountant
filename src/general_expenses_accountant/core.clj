@@ -1370,9 +1370,9 @@
 ;; TODO: Re-write with an existing state machine (FSM) library.
 
 (defn- to-response
-  [{:keys [response-fn response-params]} param-vals]
+  [{:keys [response-fn response-params]} ?param-vals]
   (when (some? response-fn)
-    (apply response-fn (map (or param-vals {}) response-params))))
+    (apply response-fn (map (or ?param-vals {}) response-params))))
 
 (defn- handle-state-transition!
   [event state-transitions change-state-fn]
@@ -1576,43 +1576,40 @@
    {:keys [options] :as _response} _opts]
   (tg-client/answer-callback-query token callback-query-id options))
 
-;; TODO: Provide 'on-success' + 'on-failure' handler pair instead of 'response-handler'.
-;; TODO: As a precondition, check if the chat with 'chat-id' is not in ':evicted' state.
-(defn- respond!
-  "Uniformly responds to the user action, whether it a message, inline or callback query,
-   or some event (e.g. service message or chat member status update). By default, this fn
-   awaits the feedback (Telegram's response) synchronously and returns a pre-defined code,
-   ':finished-sync'.
+(defn- make-tg-bot-api-request!
+  "Makes a request to the Telegram Bot API. By default, this function awaits the feedback
+   (a Telegram's response) synchronously and returns a pre-defined code ':finished-sync'.
 
    Options are key-value pairs and may be one of:
-   :response-handler
-     The fn used to handle the Telegram's response (in case of success)
    :async?
      An indicator to make the whole process asynchronous (causes the fn
      to return immediately with the ':launched-async' code)
-   and possibly other API method-specific values.
+   :on-failure
+     A fn used to handle an exception in case of the request failure
+   :on-success
+     A fn used to handle the Telegram's response in case of the successful request
 
    NB: Properly wrapped in try-catch and logged to highlight the exact HTTP client error."
-  [ids response & {:keys [response-handler async?] :as options}]
+  [request-fn {:keys [async? on-failure on-success] :as _?options}]
   (let [token (config/get-prop :bot-api-token)
-        send-response-fn (fn []
-                           (try
-                             (send! token ids response options)
-                             (catch Throwable t
-                               ;; TODO: Add 'response' to the 'failed-responses' queue for the bot Admin
-                               ;;       to be able to manually handle it later. Is this feature needed?
-                               (log/errorf t "Failed to respond to %s with %s" ids response)
-                               :error)))
+        handle-tg-bot-api-req (fn []
+                                (try
+                                  (request-fn token)
+                                  (catch Throwable t
+                                    (if (some? on-failure)
+                                      (on-failure t)
+                                      (log/error t "Failed making a Telegram Bot API request"))
+                                    :req-failed)))
         handle-tg-response-fn (fn [tg-response]
                                 (log/debug "Telegram returned:" tg-response)
                                 (try
-                                  (when (and (some? response-handler)
+                                  (when (and (some? on-success)
                                              (true? (:ok tg-response)))
-                                    (response-handler (:result tg-response)))
+                                    (on-success (:result tg-response)))
                                   (catch Exception e
-                                    (log/error e "Failed to handler the response from Telegram"))))
-        handle-when-not-error (fn [res]
-                                (when-not (= :error res)
+                                    (log/error e "Failed to handle the response from Telegram"))))
+        handle-when-succeeded (fn [res]
+                                (when-not (= :req-failed res)
                                   (handle-tg-response-fn res)))]
     (if (true? async?)
       (letfn [(with-one-off-channel [req-fn handle-fn]
@@ -1620,41 +1617,56 @@
                   (go (handle-fn (<! resp-chan))
                       (close! resp-chan))
                   (go (>! resp-chan (req-fn)))))]
-        (with-one-off-channel send-response-fn handle-when-not-error)
+        (with-one-off-channel handle-tg-bot-api-req handle-when-succeeded)
         :launched-async)
       (do
-        (handle-when-not-error (send-response-fn))
+        (handle-when-succeeded (handle-tg-bot-api-req))
         :finished-sync))))
+
+;; TODO: As a precondition, check if the chat with 'chat-id' is not in ':evicted' state.
+(defn- respond!
+  "Uniformly responds to the user action, whether it a message, inline or callback query,
+   or some event (e.g. service message or chat member status update).
+   This fn takes an optional parameter, which is an options map of a specific API method."
+  ([ids response]
+   (respond! ids response nil))
+  ([ids response ?options]
+   (make-tg-bot-api-request!
+     (fn [token]
+       (send! token ids response ?options))
+     (assoc ?options
+       ;; TODO: Add the 'response' to the 'failed-responses' queue for the bot Admin
+       ;;       to be able to manually handle it later, if this feature is necessary.
+       :on-failure #(log/errorf % "Failed to respond to %s with %s" ids response)))))
 
 (defn- respond!*
   "A variant of the 'respond!' function that is used with the 'keys' of one of
    the predefined responses, rather than with an arbitrary response value."
-  [ids response-keys & {:keys [param-vals] :as options}]
+  [ids response-keys & {:keys [param-vals] :as ?options}]
   {:pre [(vector? response-keys)]}
   (encore/when-let [response-data (get-in responses response-keys)
                     response (to-response response-data param-vals)]
-    (apply respond! ids response
-           (-> options (dissoc :param-vals) seq flatten))))
+    (respond! ids response
+              (dissoc ?options :param-vals))))
 
 ;; TODO: GET RID OF MOST OF THESE !-FNS MAKING THEM PURE AND PASSING THEM DATA!
 
 (defn- proceed-with-chat-and-respond!
   "Continues the course of transitions between the states of the chat and sends
    a message (answers an inline/callback query) in response to a user/an event."
-  [{:keys [chat-id] :as ids} event & options]
+  [{:keys [chat-id] :as ids} event & {:as ?options}]
   {:pre [(some? chat-id)]}
   (when-let [response (handle-chat-state-transition! chat-id event)]
-    (apply respond! ids response
-           (flatten (seq options)))))
+    (respond! ids response ?options)))
 
 (defn- proceed-with-msg-and-respond!
   "Continues the course of transitions between the states of the extant message
    in some chat and replaces its content in response to a user/an event."
-  [{:keys [chat-id msg-id] :as ids} msg-event & options]
+  [{:keys [chat-id msg-id] :as ids} msg-event & {:as ?options}]
   {:pre [(some? chat-id) (some? msg-id)]}
   (when-let [response (handle-msg-state-transition! chat-id msg-id msg-event)]
-    (apply respond! ids response
-           :replace? true (flatten (seq options)))))
+    (respond! ids response
+              (assoc ?options :replace? true))))
 
 ;; - SPECIFIC ACTIONS
 
@@ -1818,8 +1830,7 @@
     {:transition [:chat-type/group :request-acc-names]
      :param-vals {:existing-chat? existing-chat?
                   :chat-members ?new-chat-members}}
-    :response-handler
-    #(->> % :message_id (set-bot-msg-id! chat-id :name-request-msg-id))))
+    :on-success #(->> % :message_id (set-bot-msg-id! chat-id :name-request-msg-id))))
 
 (defn- proceed-with-group-chat-finalization!
   [chat-id show-settings?]
@@ -1834,8 +1845,7 @@
     (respond!* {:chat-id chat-id}
                [:chat-type/group :settings-msg]
                :param-vals {:first-time? true}
-               :response-handler
-               #(change-bot-msg-state!* chat-id :settings (:message_id %) :initial))))
+               :on-success #(change-bot-msg-state!* chat-id :settings (:message_id %) :initial))))
 
 (defn- proceed-with-personal-accounts-check!
   [chat-id existing-chat?]
@@ -1883,17 +1893,15 @@
     {:chat-id chat-id}
     {:transition [:chat-type/group :request-acc-name]
      :param-vals {:user user}}
-    :response-handler
-    #(->> % :message_id
-          (set-bot-msg-id! chat-id [:to-user user-id :request-acc-name-msg-id]))))
+    :on-success #(->> % :message_id
+                      (set-bot-msg-id! chat-id [:to-user user-id :request-acc-name-msg-id]))))
 
 (defn- proceed-with-the-name-is-already-taken!
   [chat-id user bot-msg-key]
   (respond!* {:chat-id chat-id}
              [:chat-type/group :the-name-is-already-taken-msg]
              :param-vals {:user user}
-             :response-handler
-             #(->> % :message_id (set-bot-msg-id! chat-id bot-msg-key))))
+             :on-success #(->> % :message_id (set-bot-msg-id! chat-id bot-msg-key))))
 
 (defn- proceed-with-account-creation!
   [chat-id acc-type {user-id :id :as user}]
@@ -1955,9 +1963,8 @@
     {:transition [:chat-type/group :request-acc-new-name]
      :param-vals {:user user
                   :acc-name (:name acc-to-rename)}}
-    :response-handler
-    #(->> % :message_id
-          (set-bot-msg-id! chat-id [:to-user user-id :request-rename-msg-id]))))
+    :on-success #(->> % :message_id
+                      (set-bot-msg-id! chat-id [:to-user user-id :request-rename-msg-id]))))
 
 (defn- proceed-with-restoring-group-chat-intro!
   [chat-id user-id msg-id]
@@ -2036,8 +2043,7 @@
   (respond!* {:chat-id chat-id}
              [:chat-type/group :settings-msg]
              :param-vals {:first-time? false}
-             :response-handler
-             #(change-bot-msg-state!* chat-id :settings (:message_id %) :initial)))
+             :on-success #(change-bot-msg-state!* chat-id :settings (:message_id %) :initial)))
 
 
 ;; API RESPONSES
