@@ -664,6 +664,11 @@
                   chat-data)))))]
     (get-chat-state updated-chat-data)))
 
+(defn- is-chat-evicted?
+  [chat-id]
+  (and (does-chat-exist? chat-id)
+       (= :evicted (get-chat-state (get-chat-data chat-id)))))
+
 ;; - ACCOUNTS
 
 (defn- ->general-account
@@ -1560,11 +1565,13 @@
 (defmethod send! :text
   [token {:keys [chat-id msg-id] :as _ids}
    {:keys [text options] :as _response} {:keys [replace?] :as _opts}]
-  ;; NB: Looks for the 'replace?' among the passed options to replace
-  ;;     the existing response message rather than sending a new one.
-  (if-not (true? replace?)
-    (m-api/send-text token chat-id options text)
-    (m-api/edit-text token chat-id msg-id options text)))
+  (if (is-chat-evicted? chat-id)
+    (log/debug "Dropped sending a message to an evicted chat=" chat-id)
+    ;; NB: Looks for the 'replace?' among the passed options to replace
+    ;;     the existing response message rather than sending a new one.
+    (if-not (true? replace?)
+      (m-api/send-text token chat-id options text)
+      (m-api/edit-text token chat-id msg-id options text))))
 
 (defmethod send! :inline
   [token {:keys [inline-query-id] :as _ids}
@@ -1623,7 +1630,6 @@
         (handle-when-succeeded (handle-tg-bot-api-req))
         :finished-sync))))
 
-;; TODO: As a precondition, check if the chat with 'chat-id' is not in ':evicted' state.
 (defn- respond!
   "Uniformly responds to the user action, whether it a message, inline or callback query,
    or some event (e.g. service message or chat member status update).
@@ -1668,7 +1674,6 @@
     (respond! ids response
               (assoc ?options :replace? true))))
 
-;; TODO: As a precondition, check if the chat with 'chat-id' is not in ':evicted' state.
 (defn- delete-response!
   "Deletes one of the bot's previous response messages.
    NB: - A message can only be deleted if it was sent less than 48 hours ago.
@@ -1677,11 +1682,13 @@
   ([ids]
    (delete-response! ids nil))
   ([{:keys [chat-id msg-id] :as ids} ?options]
-   (make-tg-bot-api-request!
-     (fn [token]
-       (m-api/delete-text token chat-id msg-id))
-     (assoc ?options
-       :on-failure #(log/errorf % "Failed to delete the response message %s" ids)))))
+   (if (is-chat-evicted? chat-id)
+     (log/debug "Dropped deleting the bot's response from an evicted chat=" chat-id)
+     (make-tg-bot-api-request!
+       (fn [token]
+         (m-api/delete-text token chat-id msg-id))
+       (assoc ?options
+         :on-failure #(log/errorf % "Failed to delete the response message %s" ids))))))
 
 ;; - SPECIFIC ACTIONS
 
