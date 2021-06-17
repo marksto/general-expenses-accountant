@@ -2025,7 +2025,6 @@
      (respond!* {:callback-query-id ~callback-query-id}
                 [:chat-type/group :waiting-for-user-input-notification])))
 
-;; TODO: Doesn't work for the 2nd level of nested sub-menus? Fix this!
 (defmacro try-with-message-lock-or-send-notification!
   [chat-id user-id msg-id callback-query-id & body]
   `(if (acquire-message-lock! ~chat-id ~user-id ~msg-id)
@@ -2332,12 +2331,14 @@
                  (str/starts-with? callback-btn-data cd-account-type-prefix))
         (do-when-chat-is-ready-or-send-notification!
           (:chat-state callback-query) callback-query-id
+          (try-with-message-lock-or-send-notification!
+            chat-id user-id msg-id callback-query-id
 
-          (proceed-with-restoring-group-chat-intro! chat-id user-id msg-id)
-          (let [acc-type-name (str/replace-first callback-btn-data
-                                                 cd-account-type-prefix "")
-                acc-type (keyword "acc-type" acc-type-name)]
-            (proceed-with-account-creation! chat-id acc-type user)))
+            (proceed-with-restoring-group-chat-intro! chat-id user-id msg-id)
+            (let [acc-type-name (str/replace-first callback-btn-data
+                                                   cd-account-type-prefix "")
+                  acc-type (keyword "acc-type" acc-type-name)]
+              (proceed-with-account-creation! chat-id acc-type user))))
         (cb-succeed callback-query-id))
       send-retry-callback-query!))
 
