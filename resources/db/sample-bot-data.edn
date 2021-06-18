@@ -25,14 +25,17 @@
                     :members-count 3
                     :is-bot-member true
 
-                    ;; messages to delete/check replies to
-                    :bot-messages {:name-request-msg-id 2
+                    ;; bot response messages
+                    :bot-messages {;; to check chat members replies to
+                                   2 {:type :name-request}
 
-                                   ;; user-specific
-                                   :to-user {1200000000 {:request-new-name-msg-id 10}}
+                                   ;; user-specific (for restrictions)
+                                   10 {:type :request-new-name
+                                       :to-user 1200000000}
 
-                                   ;; message state (for navigation)
-                                   :states {20 [:settings :initial]}}
+                                   ;; message state (e.g. navigation)
+                                   20 {:type :settings
+                                       :state :initial}}
 
                     ;; user input/temporary values
                     :input {1200000000 {:rename-account {:account-type :acc-type/personal

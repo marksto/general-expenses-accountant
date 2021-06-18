@@ -644,17 +644,17 @@
        (when (some? chat-data) default-chat-state)))
 
 (defn- change-chat-state!
-  [chat-id chat-states new-state]
+  [chat-id chat-type-states new-state]
   {:pre [(does-chat-exist? chat-id)]}
   (let [updated-chat-data
         (update-chat-data!
           chat-id
           (fn [chat-data]
             (let [curr-state (get-chat-state chat-data)
-                  possible-new-states (or (-> chat-states curr-state :to)
-                                          (-> chat-states curr-state))]
+                  possible-new-states (or (-> chat-type-states curr-state :to)
+                                          (-> chat-type-states curr-state))]
               (if (contains? possible-new-states new-state)
-                (let [state-init-fn (-> chat-states new-state :init-fn)]
+                (let [state-init-fn (-> chat-type-states new-state :init-fn)]
                   (cond-> chat-data
                           (some? state-init-fn) (state-init-fn)
                           :and-most-importantly (assoc :state new-state)))
@@ -1048,41 +1048,57 @@
 
 ;; - CHATS > GROUP CHAT > BOT MESSAGES
 
-(defn- get-bot-msg-id
-  [chat-id msg-keys]
-  (let [ensured-msg-keys (utils/ensure-coll msg-keys)]
-    (get-in (get-chat-data chat-id) (into [:bot-messages] ensured-msg-keys))))
-
-(defn- set-bot-msg-id!
-  [chat-id msg-keys ?msg-id]
-  (let [full-path (utils/collect [:bot-messages] msg-keys)]
-    (assoc-in-chat-data! chat-id full-path ?msg-id))
-  ?msg-id)
-
-(defn- is-reply-to-bot?
-  [chat-id message bot-msg-keys]
-  (tg-api/is-reply-to? (get-bot-msg-id chat-id bot-msg-keys) message))
-
-(defn- get-bot-msg-state
+(defn- get-bot-msg
   [chat-data msg-id]
-  (get-in chat-data [:bot-messages :states msg-id]))
+  (get-in chat-data [:bot-messages msg-id]))
+
+(defn- set-bot-msg!
+  [chat-id msg-id {:keys [type] :as ?props}]
+  {:pre [(or (nil? ?props) (some? type))]}
+  (assoc-in-chat-data! chat-id [:bot-messages msg-id] ?props))
+
+(defn- find-bot-messages
+  [chat-id {:keys [type to-user] :as _props}]
+  (cond->> (:bot-messages (get-chat-data chat-id))
+           (some? type) (filter #(= type (-> % val :type)))
+           (some? to-user) (filter #(= to-user (-> % val :to-user)))))
+
+(defn- drop-bot-msg!
+  [chat-id {:keys [type to-user] :as props}]
+  {:pre [(or (some? type) (some? to-user))]}
+  (let [to-drop (map key (find-bot-messages chat-id props))]
+    (update-chat-data! chat-id
+                       update-in [:bot-messages] #(apply dissoc % to-drop))))
+
+(defn- get-original-bot-msg
+  [chat-id reply-msg]
+  ;; NB: There's always only one original msg.
+  (->> (:bot-messages (get-chat-data chat-id))
+       (filter #(tg-api/is-reply-to? (key %) reply-msg))
+       (map (fn [[k v]] (assoc v :msg-id k)))
+       first))
+
+(defn- check-bot-msg
+  [bot-msg {:keys [type to-user] :as props}]
+  {:pre [(or (some? type) (some? to-user))]}
+  (every? #(= (val %) (-> % key bot-msg)) props))
 
 (defn- change-bot-msg-state!
-  [chat-id msg-type msg-id msg-states new-state]
+  [chat-id msg-id msg-type-states new-state]
   (let [updated-chat-data
         (update-chat-data!
           chat-id
           (fn [chat-data]
-            (let [curr-state (get-bot-msg-state chat-data msg-id)]
-              (if (or (nil? curr-state)
-                      (and (= msg-type (first curr-state))
-                           (contains? (get msg-states (second curr-state)) new-state)))
-                (assoc-in chat-data [:bot-messages :states msg-id] [msg-type new-state])
+            (let [bot-msg (get-bot-msg chat-data msg-id)
+                  curr-state (:state bot-msg)]
+              (if (or (nil? curr-state) ;; to set an initial state
+                      (contains? (get msg-type-states curr-state) new-state))
+                (assoc-in chat-data [:bot-messages msg-id :state] new-state)
                 (do
-                  (log/errorf "Failed to change state to '%s' for message=%s in chat=%s with current state '%s'"
-                              new-state msg-id chat-id curr-state)
+                  (log/errorf "Failed to change state from '%s' to '%s' for message=%s in chat=%s"
+                              curr-state new-state msg-id chat-id)
                   chat-data)))))]
-    (get-bot-msg-state updated-chat-data msg-id)))
+    (:state (get-bot-msg updated-chat-data msg-id))))
 
 ;; - CHATS > GROUP CHAT > USER INPUT
 
@@ -1488,36 +1504,37 @@
 (defn- handle-chat-state-transition!
   [chat-id event]
   (let [chat-type (first (:transition event))
-        chat-states (case chat-type
-                      :chat-type/group group-chat-states
-                      :chat-type/private private-chat-states)
-        change-state-fn (partial change-chat-state! chat-id chat-states)]
+        chat-type-states (case chat-type
+                           :chat-type/group group-chat-states
+                           :chat-type/private private-chat-states)
+        change-state-fn (partial change-chat-state! chat-id chat-type-states)]
     (handle-state-transition! event chat-state-transitions change-state-fn)))
 
 ; message states
 
-(def ^:private settings-msg-states
-  {:initial #{:accounts-mgmt
-              :expense-items-mgmt
-              :shares-mgmt}
+(def ^:private group-msg-states
+  {:settings
+   {:initial #{:accounts-mgmt
+               :expense-items-mgmt
+               :shares-mgmt}
 
-   :accounts-mgmt #{:account-type-selection
-                    :account-renaming
-                    :account-revocation
-                    :account-reinstatement
-                    :initial}
-   :account-type-selection #{:accounts-mgmt
+    :accounts-mgmt #{:account-type-selection
+                     :account-renaming
+                     :account-revocation
+                     :account-reinstatement
+                     :initial}
+    :account-type-selection #{:accounts-mgmt
+                              :initial}
+    :account-renaming #{:accounts-mgmt
+                        :initial}
+    :account-revocation #{:accounts-mgmt
+                          :initial}
+    :account-reinstatement #{:accounts-mgmt
                              :initial}
-   :account-renaming #{:accounts-mgmt
-                       :initial}
-   :account-revocation #{:accounts-mgmt
-                         :initial}
-   :account-reinstatement #{:accounts-mgmt
-                            :initial}
 
-   :expense-items-mgmt #{:initial}
+    :expense-items-mgmt #{:initial}
 
-   :shares-mgmt #{:initial}})
+    :shares-mgmt #{:initial}}})
 
 (def ^:private msg-state-transitions
   {:chat-type/group
@@ -1548,16 +1565,14 @@
      {:to-state :initial
       :response [:settings :restored-settings-msg]}}}})
 
-(defn- change-bot-msg-state!*
-  [chat-id msg-type msg-id new-state]
-  (let [msg-states (case msg-type
-                     :settings settings-msg-states)]
-    (change-bot-msg-state! chat-id msg-type msg-id msg-states new-state)))
-
 (defn- handle-msg-state-transition!
   [chat-id msg-id msg-event]
-  (let [msg-type (second (:transition msg-event))
-        change-state-fn (partial change-bot-msg-state!* chat-id msg-type msg-id)]
+  (let [chat-type (first (:transition msg-event))
+        all-msg-types-states (case chat-type
+                               :chat-type/group group-msg-states)
+        msg-type (second (:transition msg-event))
+        msg-type-states (get all-msg-types-states msg-type)
+        change-state-fn (partial change-bot-msg-state! chat-id msg-id msg-type-states)]
     (handle-state-transition! msg-event msg-state-transitions change-state-fn)))
 
 
@@ -1863,7 +1878,7 @@
     {:transition [:chat-type/group :request-acc-names]
      :param-vals {:existing-chat? existing-chat?
                   :chat-members ?new-chat-members}}
-    :on-success #(->> % :message_id (set-bot-msg-id! chat-id :name-request-msg-id))))
+    :on-success #(set-bot-msg! chat-id (:message_id %) {:type :name-request})))
 
 (defn- proceed-with-group-chat-finalization!
   [chat-id show-settings?]
@@ -1878,7 +1893,8 @@
     (respond!* {:chat-id chat-id}
                [:chat-type/group :settings-msg]
                :param-vals {:first-time? true}
-               :on-success #(change-bot-msg-state!* chat-id :settings (:message_id %) :initial))))
+               :on-success #(set-bot-msg! chat-id (:message_id %) {:type :settings
+                                                                   :state :initial}))))
 
 (defn- proceed-with-personal-accounts-check!
   ([chat-id]
@@ -1890,14 +1906,14 @@
    ;;     Users with an existing active personal account are ignored.
    (let [pers-accs-missing (get-number-of-missing-personal-accounts chat-id)]
      (if (> pers-accs-missing 0)
-       (if (and (some? (get-bot-msg-id chat-id :name-request-msg-id))
+       (if (and (seq (find-bot-messages chat-id {:type :name-request}))
                 (not (is-chat-evicted? chat-id))) ;; just in case, to not stuck
          (respond!* {:chat-id chat-id}
                     [:chat-type/group :personal-accounts-left-msg]
                     :param-vals {:count pers-accs-missing})
          (proceed-with-personal-accounts-creation! chat-id existing-chat? nil))
        (do
-         (set-bot-msg-id! chat-id :name-request-msg-id nil)
+         (drop-bot-msg! chat-id {:type :name-request})
          (proceed-with-group-chat-finalization! chat-id (not existing-chat?)))))))
 
 (defn- proceed-with-new-chat-members!
@@ -1935,15 +1951,16 @@
     {:chat-id chat-id}
     {:transition [:chat-type/group :request-acc-name]
      :param-vals {:user user}}
-    :on-success #(->> % :message_id
-                      (set-bot-msg-id! chat-id [:to-user user-id :request-acc-name-msg-id]))))
+    :on-success #(set-bot-msg! chat-id (:message_id %) {:to-user user-id
+                                                        :type :request-acc-name})))
 
 (defn- proceed-with-the-name-is-already-taken!
-  [chat-id user bot-msg-key]
+  [chat-id {user-id :id :as user} bot-msg-type]
   (respond!* {:chat-id chat-id}
              [:chat-type/group :the-name-is-already-taken-msg]
              :param-vals {:user user}
-             :on-success #(->> % :message_id (set-bot-msg-id! chat-id bot-msg-key))))
+             :on-success #(set-bot-msg! chat-id (:message_id %) {:to-user user-id
+                                                                 :type bot-msg-type})))
 
 (defn- proceed-with-account-creation!
   [chat-id acc-type {user-id :id :as user}]
@@ -2005,8 +2022,8 @@
     {:transition [:chat-type/group :request-acc-new-name]
      :param-vals {:user user
                   :acc-name (:name acc-to-rename)}}
-    :on-success #(->> % :message_id
-                      (set-bot-msg-id! chat-id [:to-user user-id :request-rename-msg-id]))))
+    :on-success #(set-bot-msg! chat-id (:message_id %) {:to-user user-id
+                                                        :type :request-rename})))
 
 (defn- proceed-with-restoring-group-chat-intro!
   [chat-id user-id msg-id]
@@ -2084,7 +2101,8 @@
   (respond!* {:chat-id chat-id}
              [:chat-type/group :settings-msg]
              :param-vals {:first-time? false}
-             :on-success #(change-bot-msg-state!* chat-id :settings (:message_id %) :initial)))
+             :on-success #(set-bot-msg! chat-id (:message_id %) {:type :settings
+                                                                 :state :initial})))
 
 
 ;; API RESPONSES
@@ -2167,8 +2185,8 @@
                 :message (:message upd)
                 :callback_query (-> upd :callback_query :message)
                 nil)
-          chat-data (or (get-chat-data (:id chat))
-                        (get-chat-data (:id (:chat msg))))]
+          chat-data (get-chat-data (or (:id chat)
+                                       (:id (:chat msg))))]
       (cond-> nil
               (some? chat)
               (merge {:chat-type (cond
@@ -2176,8 +2194,8 @@
                                    (tg-api/is-group? chat) :chat-type/group)
                       :chat-state (get-chat-state chat-data)})
               (some? msg)
-              (merge (when-let [msg-state (get-bot-msg-state chat-data (:message_id msg))]
-                       {:msg-state msg-state})))))
+              (merge (when-some [bot-msg (get-bot-msg chat-data (:message_id msg))]
+                       {:bot-msg bot-msg})))))
 
   ;; - BOT COMMANDS
 
@@ -2268,7 +2286,8 @@
         callback-btn-data :data
         :as callback-query}]
       (when (and (= :chat-type/group (:chat-type callback-query))
-                 (= [:settings :initial] (:msg-state callback-query))
+                 (= :settings (-> callback-query :bot-msg :type))
+                 (= :initial (-> callback-query :bot-msg :state))
                  (= cd-accounts callback-btn-data))
         (do-when-chat-is-ready-or-send-notification!
           (:chat-state callback-query) callback-query-id
@@ -2291,7 +2310,8 @@
         callback-btn-data :data
         :as callback-query}]
       (when (and (= :chat-type/group (:chat-type callback-query))
-                 (= [:settings :accounts-mgmt] (:msg-state callback-query)))
+                 (= :settings (-> callback-query :bot-msg :type))
+                 (= :accounts-mgmt (-> callback-query :bot-msg :state)))
         (do-when-chat-is-ready-or-send-notification!
           (:chat-state callback-query) callback-query-id
           (try-with-message-lock-or-send-notification!
@@ -2327,7 +2347,8 @@
         callback-btn-data :data
         :as callback-query}]
       (when (and (= :chat-type/group (:chat-type callback-query))
-                 (= [:settings :account-type-selection] (:msg-state callback-query))
+                 (= :settings (-> callback-query :bot-msg :type))
+                 (= :account-type-selection (-> callback-query :bot-msg :state))
                  (str/starts-with? callback-btn-data cd-account-type-prefix))
         (do-when-chat-is-ready-or-send-notification!
           (:chat-state callback-query) callback-query-id
@@ -2398,7 +2419,8 @@
         callback-btn-data :data
         :as callback-query}]
       (when (and (= :chat-type/group (:chat-type callback-query))
-                 (= [:settings :account-renaming] (:msg-state callback-query))
+                 (= :settings (-> callback-query :bot-msg :type))
+                 (= :account-renaming (-> callback-query :bot-msg :state))
                  (str/starts-with? callback-btn-data cd-account-prefix))
         (do-when-chat-is-ready-or-send-notification!
           (:chat-state callback-query) callback-query-id
@@ -2420,7 +2442,8 @@
         callback-btn-data :data
         :as callback-query}]
       (when (and (= :chat-type/group (:chat-type callback-query))
-                 (= [:settings :account-revocation] (:msg-state callback-query))
+                 (= :settings (-> callback-query :bot-msg :type))
+                 (= :account-revocation (-> callback-query :bot-msg :state))
                  (str/starts-with? callback-btn-data cd-account-prefix))
         (do-when-chat-is-ready-or-send-notification!
           (:chat-state callback-query) callback-query-id
@@ -2449,7 +2472,8 @@
         callback-btn-data :data
         :as callback-query}]
       (when (and (= :chat-type/group (:chat-type callback-query))
-                 (= [:settings :account-reinstatement] (:msg-state callback-query))
+                 (= :settings (-> callback-query :bot-msg :type))
+                 (= :account-reinstatement (-> callback-query :bot-msg :state))
                  (str/starts-with? callback-btn-data cd-account-prefix))
         (do-when-chat-is-ready-or-send-notification!
           (:chat-state callback-query) callback-query-id
@@ -2480,7 +2504,8 @@
         callback-btn-data :data
         :as callback-query}]
       (when (and (= :chat-type/group (:chat-type callback-query))
-                 (= [:settings :initial] (:msg-state callback-query))
+                 (= :settings (-> callback-query :bot-msg :type))
+                 (= :initial (-> callback-query :bot-msg :state))
                  (= cd-expense-items callback-btn-data))
         (do-when-chat-is-ready-or-send-notification!
           (:chat-state callback-query) callback-query-id
@@ -2503,7 +2528,8 @@
         callback-btn-data :data
         :as callback-query}]
       (when (and (= :chat-type/group (:chat-type callback-query))
-                 (= [:settings :initial] (:msg-state callback-query))
+                 (= :settings (-> callback-query :bot-msg :type))
+                 (= :initial (-> callback-query :bot-msg :state))
                  (= cd-shares callback-btn-data))
         (do-when-chat-is-ready-or-send-notification!
           (:chat-state callback-query) callback-query-id
@@ -2526,14 +2552,14 @@
         callback-btn-data :data
         :as callback-query}]
       (when (and (= :chat-type/group (:chat-type callback-query))
-                 (= :settings (first (:msg-state callback-query)))
+                 (= :settings (-> callback-query :bot-msg :type))
                  (= cd-back callback-btn-data))
         (do-when-chat-is-ready-or-send-notification!
           (:chat-state callback-query) callback-query-id
           (try-with-message-lock-or-send-notification!
             chat-id user-id msg-id callback-query-id
 
-            (case (second (:msg-state callback-query))
+            (case (-> callback-query :bot-msg :state)
               (:initial ;; for when something went wrong
                 :accounts-mgmt :expense-items-mgmt :shares-mgmt)
               (proceed-with-restoring-group-chat-intro! chat-id user-id msg-id)
@@ -2765,7 +2791,8 @@
       ;; TODO: Figure out how to proceed if someone accidentally closes the reply.
       (when (and (= :chat-type/group (:chat-type message))
                  ;(= :waiting (:chat-state message)) ;; TODO: May conflict w/ new acc/renaming. Check & fix.
-                 (is-reply-to-bot? chat-id message :name-request-msg-id))
+                 (check-bot-msg (get-original-bot-msg chat-id message)
+                                {:type :name-request}))
         ;; NB: Here the 'user-id' exists for sure, since it is the User's response.
         (when-some [_new-chat (setup-new-private-chat! user-id chat-id)]
           (update-private-chat-groups! user-id chat-id))
@@ -2778,7 +2805,7 @@
               nil ;; TODO: Send a reply that a possible new name has been ignored?
 
               :failure/the-account-name-is-already-taken
-              (proceed-with-the-name-is-already-taken! chat-id user :name-request-msg-id))
+              (proceed-with-the-name-is-already-taken! chat-id user :name-request))
             (report-to-user! user-id
                              [:chat-type/private :added-to-new-group-msg]
                              {:chat-title chat-title})))
@@ -2795,8 +2822,8 @@
         :as message}]
       (when (and (= :chat-type/group (:chat-type message))
                  ;(= :waiting (:chat-state message)) ;; TODO: May conflict w/ new chat members. Check & fix.
-                 (is-reply-to-bot? chat-id message
-                                   [:to-user user-id :request-acc-name-msg-id]))
+                 (check-bot-msg (get-original-bot-msg chat-id message)
+                                {:to-user user-id, :type :request-acc-name}))
         ;; NB: Here the 'user-id' exists for sure, since it is the User's response.
         (let [chat-data (get-chat-data chat-id)
               input-data (get-user-input-data chat-data user-id :create-account)
@@ -2812,12 +2839,11 @@
           (if (is-failure? create-acc-res)
             (case create-acc-res
               :failure/the-account-name-is-already-taken
-              (proceed-with-the-name-is-already-taken! chat-id user
-                                                       [:to-user user-id :request-acc-name-msg-id])
+              (proceed-with-the-name-is-already-taken! chat-id user :request-acc-name)
               (throw (ex-info "Unexpected operation result" {:result create-acc-res})))
             (do
               ;; TODO: Extract this common functionality into a dedicated cleanup fn.
-              (set-bot-msg-id! chat-id [:to-user user-id :request-acc-name-msg-id] nil)
+              (drop-bot-msg! chat-id {:to-user user-id, :type :request-acc-name})
               (set-user-input-data! chat-id user-id :create-account nil)
 
               (proceed-with-chat-and-respond!
@@ -2834,8 +2860,8 @@
         :as message}]
       (when (and (= :chat-type/group (:chat-type message))
                  ;(= :waiting (:chat-state message)) ;; TODO: May conflict w/ new chat members. Check & fix.
-                 (is-reply-to-bot? chat-id message
-                                   [:to-user user-id :request-rename-msg-id]))
+                 (check-bot-msg (get-original-bot-msg chat-id message)
+                                {:to-user user-id, :type :request-rename}))
         ;; NB: Here the 'user-id' exists for sure, since it is the User's response.
         (let [chat-data (get-chat-data chat-id)
               input-data (get-user-input-data chat-data user-id :rename-account)
@@ -2846,12 +2872,11 @@
           (if (is-failure? update-acc-res)
             (case update-acc-res
               :failure/the-account-name-is-already-taken
-              (proceed-with-the-name-is-already-taken! chat-id user
-                                                       [:to-user user-id :request-rename-msg-id])
+              (proceed-with-the-name-is-already-taken! chat-id user :request-rename)
               (throw (ex-info "Unexpected operation result" {:result update-acc-res})))
             (do
               ;; TODO: Extract this common functionality into a dedicated cleanup fn.
-              (set-bot-msg-id! chat-id [:to-user user-id :request-rename-msg-id] nil)
+              (drop-bot-msg! chat-id {:to-user user-id, :type :request-rename})
               (set-user-input-data! chat-id user-id :rename-account nil)
 
               (proceed-with-chat-and-respond!

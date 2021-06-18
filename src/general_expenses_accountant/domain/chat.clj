@@ -14,9 +14,9 @@
    :groups set
 
    ;; group chat-specific
-   :bot-messages {:states [db/restore-numeric-keys
-                           {:* (partial mapv keyword)}]
-                  :to-user db/restore-numeric-keys}
+   :bot-messages [db/restore-numeric-keys
+                  {:* {:type keyword
+                       :state (partial mapv keyword)}}]
    :input [db/restore-numeric-keys
            {:* {:create-account {:account-type keyword
                                  :account-members {:* {:type keyword}}}
