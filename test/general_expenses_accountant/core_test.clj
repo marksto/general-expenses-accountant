@@ -834,21 +834,26 @@
     :bind {:account-to-reinstate-cd :virtual-personal-account-cd
            :account-to-reinstate-name :virtual-personal-account-name}))
 
+(def virtual-personal-account-test-group
+  {:type :test/group
+   :name "Virtual personal account"
+   :bind {:virtual-personal-account-name (generate-name-str "Acc/")
+          :virtual-personal-account-cd "ac::personal::1"}
+   :test [create-virtual-personal-account-test-group
+          [enter-the-accounts-menu
+           #{[revoke-virtual-personal-account-test-group
+              reinstate-virtual-personal-account-test-group]
+             rename-virtual-personal-account-test-group}]]})
+
 (def accounts-mgmt-test-group
   {:type :test/group
    :name "2-1 Accounts Management"
-   :bind {:virtual-personal-account-name (generate-name-str "Acc/")
-          :virtual-personal-account-cd "ac::personal::1"}
    :test [enter-the-accounts-menu
 
           #{no-eligible-accounts-for-revocation
             no-eligible-accounts-for-reinstatement}
-          #{[create-virtual-personal-account-test-group
-             [enter-the-accounts-menu
-              #{[revoke-virtual-personal-account-test-group
-                 reinstate-virtual-personal-account-test-group]
-                rename-virtual-personal-account-test-group}]]
-            rename-user-personal-account-test-group
+          #{rename-user-personal-account-test-group
+            virtual-personal-account-test-group
 
             exit-the-accounts-menu}]})
 
