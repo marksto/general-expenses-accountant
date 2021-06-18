@@ -1474,7 +1474,7 @@
     :declare-readiness
     {:to-state :ready
      :response :bot-readiness-msg}
-    :notify-changes-success
+    :notify-changes-succeeded
     {:to-state :ready
      :response :successful-changes-msg}
 
@@ -2859,7 +2859,7 @@
                                              :name :create-account}]})
               (proceed-with-chat-and-respond!
                 {:chat-id chat-id}
-                {:transition [:chat-type/group :notify-changes-success]}))))
+                {:transition [:chat-type/group :notify-changes-succeeded]}))))
         op-succeed)
       send-retry-message!))
 
@@ -2894,7 +2894,7 @@
                                              :name :rename-account}]})
               (proceed-with-chat-and-respond!
                 {:chat-id chat-id}
-                {:transition [:chat-type/group :notify-changes-success]}))))
+                {:transition [:chat-type/group :notify-changes-succeeded]}))))
         op-succeed)
       send-retry-message!))
 
