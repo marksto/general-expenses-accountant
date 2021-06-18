@@ -1119,6 +1119,15 @@
   (update-chat-data! chat-id
                      update-in [:input] dissoc user-id))
 
+(defn- clean-up-chat-data!
+  [chat-id {:keys [bot-messages input]}]
+  (doseq [bot-msg bot-messages]
+    (drop-bot-msg! chat-id bot-msg))
+  (doseq [user-input input]
+    (if (contains? user-input :name)
+      (set-user-input-data! chat-id (:user user-input) (:name user-input) nil)
+      (drop-user-input-data! chat-id (:user user-input)))))
+
 (defn- release-message-lock!
   "Releases the \"input lock\" acquired by the user for the message in chat."
   [chat-id user-id msg-id]
@@ -2822,6 +2831,7 @@
         :as message}]
       (when (and (= :chat-type/group (:chat-type message))
                  ;(= :waiting (:chat-state message)) ;; TODO: May conflict w/ new chat members. Check & fix.
+                 ;; TODO: Extract all of the following logic into a dedicated fn.
                  (check-bot-msg (get-original-bot-msg chat-id message)
                                 {:to-user user-id, :type :request-acc-name}))
         ;; NB: Here the 'user-id' exists for sure, since it is the User's response.
@@ -2842,10 +2852,11 @@
               (proceed-with-the-name-is-already-taken! chat-id user :request-acc-name)
               (throw (ex-info "Unexpected operation result" {:result create-acc-res})))
             (do
-              ;; TODO: Extract this common functionality into a dedicated cleanup fn.
-              (drop-bot-msg! chat-id {:to-user user-id, :type :request-acc-name})
-              (set-user-input-data! chat-id user-id :create-account nil)
-
+              (clean-up-chat-data! chat-id
+                                   {:bot-messages [{:to-user user-id
+                                                    :type :request-acc-name}]
+                                    :input [{:user user-id
+                                             :name :create-account}]})
               (proceed-with-chat-and-respond!
                 {:chat-id chat-id}
                 {:transition [:chat-type/group :notify-changes-success]}))))
@@ -2860,6 +2871,7 @@
         :as message}]
       (when (and (= :chat-type/group (:chat-type message))
                  ;(= :waiting (:chat-state message)) ;; TODO: May conflict w/ new chat members. Check & fix.
+                 ;; TODO: Extract all of the following logic into a dedicated fn.
                  (check-bot-msg (get-original-bot-msg chat-id message)
                                 {:to-user user-id, :type :request-rename}))
         ;; NB: Here the 'user-id' exists for sure, since it is the User's response.
@@ -2875,10 +2887,11 @@
               (proceed-with-the-name-is-already-taken! chat-id user :request-rename)
               (throw (ex-info "Unexpected operation result" {:result update-acc-res})))
             (do
-              ;; TODO: Extract this common functionality into a dedicated cleanup fn.
-              (drop-bot-msg! chat-id {:to-user user-id, :type :request-rename})
-              (set-user-input-data! chat-id user-id :rename-account nil)
-
+              (clean-up-chat-data! chat-id
+                                   {:bot-messages [{:to-user user-id
+                                                    :type :request-rename}]
+                                    :input [{:user user-id
+                                             :name :rename-account}]})
               (proceed-with-chat-and-respond!
                 {:chat-id chat-id}
                 {:transition [:chat-type/group :notify-changes-success]}))))
