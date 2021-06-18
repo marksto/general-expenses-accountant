@@ -26,8 +26,8 @@
 (defalias get-members-count core/get-members-count)
 (defalias get-chat-state core/get-chat-state)
 (defalias get-bot-msg core/get-bot-msg)
+(defalias find-bot-messages core/find-bot-messages)
 (defalias find-account-by-name core/find-account-by-name)
-(defalias get-personal-account core/get-personal-account)
 
 ; Shared State
 
@@ -190,11 +190,13 @@
   (loop [resps all-resps
          preds resp-assert-preds]
     (if (empty? preds)
-      true ;; some resps match all predicates, finish!
+      {:success true
+       :desc "[some] responses match all predicates"}
       (let [pred (first preds)
             resp (filter pred resps)]
         (if (empty? resp)
-          false ;; none of resps match some predicate!
+          {:success false
+           :desc (str "no response matching the predicate\n" (quote pred))}
           (recur (if (< 1 (count resp))
                    resps ;; loose matches are retained
                    (remove #(= (first resp) %) resps))
@@ -251,29 +253,21 @@
                        "<accounts/revoke>" "<accounts/reinstate>"])))
 
 (defn- valid-new-account-name-request-msg?
-  [res chat-id user-name user-id]
+  [res chat-id user-name]
   (and (= chat-id (-> res :chat :id))
        (some? (:reply_markup res))
        (-> res :reply_markup :force_reply)
        (-> res :reply_markup :selective)
-       (str/includes? (:text res) user-name)
-       (let [bot-msg (get-bot-msg (get-chat-data chat-id)
-                                  (:message_id res))]
-         (and (= user-id (:to-user bot-msg))
-              (= :request-acc-name (:type bot-msg))))))
+       (str/includes? (:text res) user-name)))
 
 (defn- valid-account-rename-request-msg?
-  [res chat-id user-name user-id account-to-rename-old-name]
+  [res chat-id user-name account-to-rename-old-name]
   (and (= chat-id (-> res :chat :id))
        (some? (:reply_markup res))
        (-> res :reply_markup :force_reply)
        (-> res :reply_markup :selective)
        (str/includes? (:text res) user-name)
-       (str/includes? (:text res) account-to-rename-old-name)
-       (let [bot-msg (get-bot-msg (get-chat-data chat-id)
-                                  (:message_id res))]
-         (and (= user-id (:to-user bot-msg))
-              (= :request-rename (:type bot-msg))))))
+       (str/includes? (:text res) account-to-rename-old-name)))
 
 ; Test Cases
 
@@ -295,7 +289,8 @@
                              :new_chat_member {:user bot-user :status "member"}})}
            :checks {:result op-succeed
                     :chat-data {:members-count 2
-                                :chat-state :waiting}
+                                :chat-state :waiting
+                                :bot-messages {:mandatory [{:type :name-request}]}}
                     :responses {:total 2
                                 :assert-preds (fn [ctx]
                                                 [(fn [res]
@@ -328,7 +323,12 @@
                     :chat-data {:members-count 2
                                 :chat-state :ready
                                 :accounts (fn [ctx]
-                                            [{:name (:user-personal-account-name ctx)}])}
+                                            [{:name (:user-personal-account-name ctx)}])
+                                :bot-messages (fn [ctx]
+                                                {:mandatory [{:type :settings
+                                                              :state :initial}]
+                                                 :forbidden [{:msg-id (-> ctx :deps :name-request-msg :message_id)
+                                                              :type :name-request}]})}
                     :responses {:total 3
                                 :assert-preds (fn [ctx]
                                                 [(fn [res]
@@ -340,11 +340,7 @@
                                                         (= "https://t.me/number_one_bot"
                                                            (:url (get-inline-kbd-btn res 0 0)))))
                                                  (fn [res]
-                                                   (and (valid-settings-msg? res (:chat-id ctx))
-                                                        (let [bot-msg (get-bot-msg (get-chat-data (:chat-id ctx))
-                                                                                   (:message_id res))]
-                                                          (and (= :settings (:type bot-msg))
-                                                               (= :initial (:state bot-msg))))))])}}
+                                                   (valid-settings-msg? res (:chat-id ctx)))])}}
            :return-fn (fn [ctx responses]
                         (let [resp-pred #(valid-settings-msg? % (:chat-id ctx))]
                           (first (filter resp-pred responses))))}]})
@@ -369,9 +365,9 @@
                        :callback_query_id (:callback-query-id ctx)})
             :chat-data {:chat-state :ready
                         :bot-messages (fn [ctx]
-                                        [{:msg-id (-> ctx :deps :settings-msg :message_id)
-                                          :type :settings
-                                          :state :accounts-mgmt}])}
+                                        {:mandatory [{:msg-id (-> ctx :deps :settings-msg :message_id)
+                                                      :type :settings
+                                                      :state :accounts-mgmt}]})}
             :responses {:total 1
                         :assert-preds (fn [ctx]
                                         [(fn [res]
@@ -399,9 +395,9 @@
                        :callback_query_id (:callback-query-id ctx)})
             :chat-data {:chat-state :ready
                         :bot-messages (fn [ctx]
-                                        [{:msg-id (-> ctx :deps :settings-msg :message_id)
-                                          :type :settings
-                                          :state :initial}])}
+                                        {:mandatory [{:msg-id (-> ctx :deps :settings-msg :message_id)
+                                                      :type :settings
+                                                      :state :initial}]})}
             :responses {:total 1
                         :assert-preds (fn [ctx]
                                         [(fn [res]
@@ -430,9 +426,9 @@
                                :callback_query_id (:callback-query-id ctx)})
                     :chat-data {:chat-state :ready
                                 :bot-messages (fn [ctx]
-                                                [{:msg-id (-> ctx :deps :settings-msg :message_id)
-                                                  :type :settings
-                                                  :state :account-type-selection}])}
+                                                {:mandatory [{:msg-id (-> ctx :deps :settings-msg :message_id)
+                                                              :type :settings
+                                                              :state :account-type-selection}]})}
                     :responses {:total 1
                                 :assert-preds (fn [ctx]
                                                 [(fn [res]
@@ -462,9 +458,11 @@
                                :callback_query_id (:callback-query-id ctx)})
                     :chat-data {:chat-state :waiting
                                 :bot-messages (fn [ctx]
-                                                [{:msg-id (-> ctx :deps :settings-msg :message_id)
-                                                  :type :settings
-                                                  :state :initial}])}
+                                                {:mandatory [{:msg-id (-> ctx :deps :settings-msg :message_id)
+                                                              :type :settings
+                                                              :state :initial}
+                                                             {:to-user (:user-id ctx)
+                                                              :type :request-acc-name}]})}
                     :responses {:total 2
                                 :assert-preds (fn [ctx]
                                                 [(fn [res]
@@ -472,7 +470,7 @@
                                                                         (-> ctx :deps :settings-msg :message_id)))
                                                  (fn [res]
                                                    (valid-new-account-name-request-msg?
-                                                     res (:chat-id ctx) (:user-name ctx) (:user-id ctx)))])}}
+                                                     res (:chat-id ctx) (:user-name ctx)))])}}
            :return-fn (fn [ctx responses]
                         (let [[res1 res2] responses]
                           ;; NB: Need to return responses in a proper order (see the ':give').
@@ -534,9 +532,9 @@
                                :callback_query_id (:callback-query-id ctx)})
                     :chat-data {:chat-state :ready
                                 :bot-messages (fn [ctx]
-                                                [{:msg-id (-> ctx :deps :settings-msg :message_id)
-                                                  :type :settings
-                                                  :state :account-renaming}])}
+                                                {:mandatory [{:msg-id (-> ctx :deps :settings-msg :message_id)
+                                                              :type :settings
+                                                              :state :account-renaming}]})}
                     :responses {:total 1
                                 :assert-preds (fn [ctx]
                                                 [(fn [res]
@@ -566,9 +564,11 @@
                                :callback_query_id (:callback-query-id ctx)})
                     :chat-data {:chat-state :waiting
                                 :bot-messages (fn [ctx]
-                                                [{:msg-id (-> ctx :deps :settings-msg :message_id)
-                                                  :type :settings
-                                                  :state :initial}])}
+                                                {:mandatory [{:msg-id (-> ctx :deps :settings-msg :message_id)
+                                                              :type :settings
+                                                              :state :initial}
+                                                             {:to-user (:user-id ctx)
+                                                              :type :request-rename}]})}
                     :responses {:total 2
                                 :assert-preds (fn [ctx]
                                                 [(fn [res]
@@ -576,11 +576,11 @@
                                                                         (-> ctx :deps :settings-msg :message_id)))
                                                  (fn [res]
                                                    (valid-account-rename-request-msg?
-                                                     res (:chat-id ctx) (:user-name ctx) (:user-id ctx)
+                                                     res (:chat-id ctx) (:user-name ctx)
                                                      (:account-to-rename-old-name ctx)))])}}
            :return-fn (fn [ctx responses]
                         (let [resp-pred #(valid-account-rename-request-msg?
-                                           % (:chat-id ctx) (:user-name ctx) (:user-id ctx)
+                                           % (:chat-id ctx) (:user-name ctx)
                                            (:account-to-rename-old-name ctx))]
                           (first (filter resp-pred responses))))}
 
@@ -665,9 +665,9 @@
                                :callback_query_id (:callback-query-id ctx)})
                     :chat-data {:chat-state :ready
                                 :bot-messages (fn [ctx]
-                                                [{:msg-id (-> ctx :deps :settings-msg :message_id)
-                                                  :type :settings
-                                                  :state :account-revocation}])}
+                                                {:mandatory [{:msg-id (-> ctx :deps :settings-msg :message_id)
+                                                              :type :settings
+                                                              :state :account-revocation}]})}
                     :responses {:total 1
                                 :assert-preds (fn [ctx]
                                                 [(fn [res]
@@ -703,9 +703,9 @@
                                :callback_query_id (:callback-query-id ctx)})
                     :chat-data {:chat-state :ready
                                 :bot-messages (fn [ctx]
-                                                [{:msg-id (-> ctx :deps :settings-msg :message_id)
-                                                  :type :settings
-                                                  :state :initial}])
+                                                {:mandatory [{:msg-id (-> ctx :deps :settings-msg :message_id)
+                                                              :type :settings
+                                                              :state :initial}]})
                                 :accounts (fn [ctx]
                                             [{:name (:account-to-revoke-name ctx)
                                               :pred #(:revoked %)
@@ -773,9 +773,9 @@
                                :callback_query_id (:callback-query-id ctx)})
                     :chat-data {:chat-state :ready
                                 :bot-messages (fn [ctx]
-                                                [{:msg-id (-> ctx :deps :settings-msg :message_id)
-                                                  :type :settings
-                                                  :state :account-reinstatement}])}
+                                                {:mandatory [{:msg-id (-> ctx :deps :settings-msg :message_id)
+                                                              :type :settings
+                                                              :state :account-reinstatement}]})}
                     :responses {:total 1
                                 :assert-preds (fn [ctx]
                                                 [(fn [res]
@@ -810,9 +810,9 @@
                                :callback_query_id (:callback-query-id ctx)})
                     :chat-data {:chat-state :ready
                                 :bot-messages (fn [ctx]
-                                                [{:msg-id (-> ctx :deps :settings-msg :message_id)
-                                                  :type :settings
-                                                  :state :initial}])
+                                                {:mandatory [{:msg-id (-> ctx :deps :settings-msg :message_id)
+                                                              :type :settings
+                                                              :state :initial}]})
                                 :accounts (fn [ctx]
                                             [{:name (:account-to-reinstate-name ctx)
                                               :pred #(not (:revoked %))
@@ -882,40 +882,55 @@
                                 [result (collect-responses)]))]
     ;; operation code / immediate response
     (when-some [exp-result (get-value-with-ctx checks :result)]
-      (is (= exp-result result)))
+      (is (= exp-result result)
+          "unexpected update result"))
 
     ;; chat data state
     (encore/when-some [exp-chat-data (:chat-data checks)
                        chat-data (get-chat-data (:chat-id ctx))]
       (when (some? (:members-count exp-chat-data))
-        (is (= (:members-count exp-chat-data) (get-members-count chat-data))
-            "members count"))
+        (is (= (:members-count exp-chat-data)
+               (get-members-count chat-data))
+            "wrong number of chat members"))
       (when (some? (:chat-state exp-chat-data))
-        (is (= (:chat-state exp-chat-data) (get-chat-state chat-data))
-            "chat state"))
+        (is (= (:chat-state exp-chat-data)
+               (get-chat-state chat-data))
+            "chat is in the wrong state"))
       (doseq [exp-acc (get-value-with-ctx exp-chat-data :accounts)]
         (is (when-some [acc (find-account-by-name chat-data :acc-type/personal (:name exp-acc))]
               (and (some? acc)
                    (or (not (contains? exp-acc :pred))
                        ((:pred exp-acc) acc))))
             (or (:desc exp-acc)
-                "an account with the specified name exists")))
-      (doseq [exp-bot-msg (get-value-with-ctx exp-chat-data :bot-messages)]
-        (is (when-some [bot-msg (get-bot-msg chat-data (:msg-id exp-bot-msg))]
-              (and (= (:type exp-bot-msg)
-                      (:type bot-msg))
-                   (= (:state exp-bot-msg)
-                      (:state bot-msg))))
-            "msg state")))
+                "no account found with the specified name")))
+      (when-some [{:keys [mandatory forbidden]} (get-value-with-ctx exp-chat-data :bot-messages)]
+        (doseq [exp-bot-msg mandatory]
+          (if (contains? exp-bot-msg :msg-id)
+            (when-some [bot-msg (get-bot-msg chat-data (:msg-id exp-bot-msg))]
+              (is (or (not (contains? exp-bot-msg :type))
+                      (= (:type exp-bot-msg)
+                         (:type bot-msg))) "bot msg is of the wrong type")
+              (is (or (not (contains? exp-bot-msg :state))
+                      (= (:state exp-bot-msg)
+                         (:state bot-msg))) "bot msg is in the wrong state")
+              (is (or (not (contains? exp-bot-msg :to-user))
+                      (= (:to-user exp-bot-msg)
+                         (:to-user bot-msg))) "bot msg is addressed to the wrong user"))
+            (is (seq (find-bot-messages (:chat-id ctx) exp-bot-msg))
+                "no bot msg found with the specified properties")))
+        (doseq [unexp-bot-msg forbidden]
+          (is (empty? (find-bot-messages (:chat-id ctx) unexp-bot-msg))
+              "outdated bot msg is still in the chat data"))))
 
     ;; bot responses
     (when-some [exp-responses (:responses checks)]
       (when (some? (:total exp-responses))
         (is (= (:total exp-responses) (count responses))
-            "total responses"))
-      (when-some [resp-assert-preds (get-value-with-ctx exp-responses :assert-preds)]
-        (is (apply do-responses-match? responses resp-assert-preds)
-            "responses match all predicates")))
+            "wrong number of responses"))
+      (encore/when-some [resp-assert-preds (get-value-with-ctx exp-responses :assert-preds)
+                         resp-assert-result (apply do-responses-match? responses resp-assert-preds)]
+        (is (:success resp-assert-result)
+            (:desc resp-assert-result))))
 
     (when (some? return-fn)
       (return-fn ctx responses))))
