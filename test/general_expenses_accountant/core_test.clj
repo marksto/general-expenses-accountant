@@ -649,7 +649,7 @@
            :name "Should prompt the user to select an account to revoke"
            :tags [:revoke-account]
            :bind {:callback-query-id (generate-callback-query-id)
-                  :contains-all [:virtual-personal-account-name]}
+                  :contains-all [:account-to-revoke-name]}
            :take [:accounts-mgmt-msg :created-account]
            :give :account-to-revoke-selection-msg
 
@@ -685,9 +685,7 @@
           {:type :test/case
            :name "Should restore the settings message & mark the selected account as revoked"
            :tags [:revoke-account]
-           :bind {:callback-query-id (generate-callback-query-id)
-                  :account-to-revoke-cd :virtual-personal-account-cd
-                  :account-to-revoke-name :virtual-personal-account-name}
+           :bind {:callback-query-id (generate-callback-query-id)}
            :take :account-to-revoke-selection-msg
            :give [:settings-msg :revoked-account]
 
@@ -728,6 +726,11 @@
           enter-the-accounts-menu
           no-eligible-accounts-for-revocation]})
 
+(def revoke-virtual-personal-account-test-group
+  (assoc revoke-account-test-group
+    :bind {:account-to-revoke-cd :virtual-personal-account-cd
+           :account-to-revoke-name :virtual-personal-account-name}))
+
 ;; NB: To be run twice: 1. when there are no accs; 2. after reinstating an acc.
 (def no-eligible-accounts-for-reinstatement
   {:type :test/case
@@ -757,7 +760,7 @@
            :name "Should prompt the user to select an account to reinstate"
            :tags [:reinstate-account]
            :bind {:callback-query-id (generate-callback-query-id)
-                  :contains-all [:virtual-personal-account-name]}
+                  :contains-all [:account-to-reinstate-name]}
            :take [:accounts-mgmt-msg :revoked-account]
            :give :account-to-reinstate-selection-msg
 
@@ -793,9 +796,7 @@
           {:type :test/case
            :name "Should restore the settings message & reinstate the selected account"
            :tags [:reinstate-account]
-           :bind {:callback-query-id (generate-callback-query-id)
-                  :account-to-reinstate-cd :virtual-personal-account-cd
-                  :account-to-reinstate-name :virtual-personal-account-name}
+           :bind {:callback-query-id (generate-callback-query-id)}
            :take :account-to-reinstate-selection-msg
 
            :update {:type :callback_query
@@ -828,6 +829,11 @@
           enter-the-accounts-menu
           no-eligible-accounts-for-reinstatement]})
 
+(def reinstate-virtual-personal-account-test-group
+  (assoc reinstate-account-test-group
+    :bind {:account-to-reinstate-cd :virtual-personal-account-cd
+           :account-to-reinstate-name :virtual-personal-account-name}))
+
 (def accounts-mgmt-test-group
   {:type :test/group
    :name "2-1 Accounts Management"
@@ -839,8 +845,8 @@
             no-eligible-accounts-for-reinstatement}
           #{[create-virtual-personal-account-test-group
              [enter-the-accounts-menu
-              #{[revoke-account-test-group
-                 reinstate-account-test-group]
+              #{[revoke-virtual-personal-account-test-group
+                 reinstate-virtual-personal-account-test-group]
                 rename-virtual-personal-account-test-group}]]
             rename-user-personal-account-test-group
 
