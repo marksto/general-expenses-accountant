@@ -133,10 +133,12 @@
 
 ;; TODO: What about <language_and_currency>?
 
-(def ^:private cd-group-chat-prefix "gc::")
-(def ^:private cd-expense-item-prefix "ei::")
-(def ^:private cd-account-prefix "ac::")
-(def ^:private cd-account-type-prefix "at::")
+(def ^:private id-separator "::")
+
+(def ^:private cd-group-chat-prefix (str "gc" id-separator))
+(def ^:private cd-expense-item-prefix (str "ei" id-separator))
+(def ^:private cd-account-prefix (str "ac" id-separator))
+(def ^:private cd-account-type-prefix (str "at" id-separator))
 
 (def ^:private cd-digits-set #{"1" "2" "3" "4" "5" "6" "7" "8" "9" "0" ","})
 (def ^:private cd-ar-ops-set #{"+" "–"})
@@ -192,19 +194,31 @@
     (update-in inline-kbd-markup [:reply_markup :inline_keyboard] into extra-buttons)
     inline-kbd-markup))
 
+(defn- get-group-ref-option-id
+  [group-ref]
+  (str cd-group-chat-prefix (:id group-ref)))
+
 (defn- group-refs->options
   [group-refs]
   (build-select-items-options group-refs
                               :title
                               (constantly :callback_data)
-                              #(str cd-group-chat-prefix (:id %))))
+                              get-group-ref-option-id))
+
+(defn- get-expense-item-option-id
+  [exp-item]
+  (str cd-expense-item-prefix (:code exp-item)))
 
 (defn- expense-items->options
   [expense-items]
   (build-select-items-options expense-items
                               :desc
                               (constantly :callback_data)
-                              #(str cd-expense-item-prefix (:code %))))
+                              get-expense-item-option-id))
+
+(defn- get-account-option-id
+  [acc]
+  (str cd-account-prefix (name (:type acc)) id-separator (:id acc)))
 
 (defn- accounts->options
   [accounts & extra-buttons]
@@ -212,8 +226,12 @@
     (build-select-items-options accounts
                                 :name
                                 (constantly :callback_data)
-                                #(str cd-account-prefix (name (:type %)) "::" (:id %)))
+                                get-account-option-id)
     extra-buttons))
+
+(defn- get-account-type-option-id
+  [acc-type]
+  (str cd-account-type-prefix (name acc-type)))
 
 (defn- account-types->options
   [account-types & extra-buttons]
@@ -221,7 +239,7 @@
     (build-select-items-options account-types
                                 account-types-names
                                 (constantly :callback_data)
-                                #(str cd-account-type-prefix (name %)))
+                                get-account-type-option-id)
     extra-buttons))
 
 (def ^:private back-button
@@ -1016,7 +1034,7 @@
   "Retrieves a group chat's account by parsing the callback button data."
   [callback-btn-data group-chat-data]
   (let [account (str/replace-first callback-btn-data cd-account-prefix "")
-        account-path (str/split account #"::")]
+        account-path (str/split account (re-pattern id-separator))]
     (get-group-chat-account group-chat-data
                             (keyword "acc-type" (nth account-path 0))
                             (.intValue (biginteger (nth account-path 1))))))

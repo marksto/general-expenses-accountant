@@ -4,6 +4,7 @@
             [clojure.core.async :refer [go chan >! <!! close! reduce]]
             [clojure.set :as set]
             [clojure.string :as str]
+            [clojure.walk :as walk]
             [clojure.zip :as zip]
 
             [taoensso.encore :as encore :refer [defalias]]
@@ -22,6 +23,8 @@
 
 ; Aliases (of required private "getter" fns)
 
+(defalias get-account-option-id core/get-account-option-id)
+(defalias get-account-type-option-id core/get-account-type-option-id)
 (defalias get-chat-data core/get-chat-data)
 (defalias get-members-count core/get-members-count)
 (defalias get-chat-state core/get-chat-state)
@@ -221,6 +224,18 @@
                ~mock-fns)
         ~test-func))))
 
+; Common Fns
+
+(defn- build-account-cd
+  [chat-id acc-type acc-name]
+  (-> (get-chat-data chat-id)
+      (find-account-by-name acc-type acc-name)
+      get-account-option-id))
+
+(defn- build-acc-type-cd
+  [acc-type]
+  (get-account-type-option-id acc-type))
+
 ; Assertions
 
 (defn- valid-name-request-msg?
@@ -323,7 +338,8 @@
                     :chat-data {:members-count 2
                                 :chat-state :ready
                                 :accounts (fn [ctx]
-                                            [{:name (:user-personal-account-name ctx)}])
+                                            [{:type :acc-type/personal
+                                              :name (:user-personal-account-name ctx)}])
                                 :bot-messages (fn [ctx]
                                                 {:mandatory [{:type :settings
                                                               :state :initial}]
@@ -435,7 +451,8 @@
                                                    (and (= (:chat-id ctx) (-> res :chat :id))
                                                         (some? (:reply_markup res))
                                                         (contains-all? res :callback_data
-                                                                       ["at::group" "at::personal"])))])}}
+                                                                       [(build-acc-type-cd :acc-type/group)
+                                                                        (build-acc-type-cd :acc-type/personal)])))])}}
            :return-fn (fn [_ responses]
                         (first responses))}
 
@@ -452,7 +469,7 @@
                              :chat {:id (:chat-id ctx) :title (:chat-title ctx) :type "group"}
                              :from {:id (:user-id ctx) :first_name (:user-name ctx) :language_code "ru"}
                              :message (-> ctx :deps :create-account-msg)
-                             :data (:account-type ctx)})}
+                             :data (build-acc-type-cd (:account-type ctx))})}
            :checks {:result (fn [ctx]
                               {:method "answerCallbackQuery"
                                :callback_query_id (:callback-query-id ctx)})
@@ -495,20 +512,21 @@
            :checks {:result op-succeed
                     :chat-data {:chat-state :ready
                                 :accounts (fn [ctx]
-                                            [{:name (:account-name ctx)}])}
+                                            [{:type (:account-type ctx)
+                                              :name (:account-name ctx)}])}
                     :responses {:total 1
                                 :assert-preds (fn [ctx]
                                                 [(fn [res]
                                                    (= (:chat-id ctx) (-> res :chat :id)))])}}
            :return-fn (fn [ctx _]
                         (find-account-by-name (get-chat-data (:chat-id ctx))
-                                              :acc-type/personal
+                                              (:account-type ctx)
                                               (:account-name ctx)))}]})
 
 (def create-virtual-personal-account-test-group
   (assoc create-account-test-group
-    :bind {:account-type "at::personal"
-           :account-name :virtual-personal-account-name}))
+    :bind {:account-type :acc-type/personal
+           :account-name ::virtual-personal-account-name}))
 
 (def rename-account-test-group
   {:type :test/group
@@ -558,7 +576,8 @@
                              :chat {:id (:chat-id ctx) :title (:chat-title ctx) :type "group"}
                              :from {:id (:user-id ctx) :first_name (:user-name ctx) :language_code "ru"}
                              :message (-> ctx :deps :account-to-rename-selection-msg)
-                             :data (:account-to-rename-cd ctx)})}
+                             :data (build-account-cd (:chat-id ctx) (:account-type ctx)
+                                                     (:account-to-rename-old-name ctx))})}
            :checks {:result (fn [ctx]
                               {:method "answerCallbackQuery"
                                :callback_query_id (:callback-query-id ctx)})
@@ -602,7 +621,8 @@
            :checks {:result op-succeed
                     :chat-data {:chat-state :ready
                                 :accounts (fn [ctx]
-                                            [{:name (:account-to-rename-new-name ctx)}])}
+                                            [{:type (:account-type ctx)
+                                              :name (:account-to-rename-new-name ctx)}])}
                     :responses {:total 1
                                 :assert-preds (fn [ctx]
                                                 [(fn [res]
@@ -610,14 +630,14 @@
 
 (def rename-user-personal-account-test-group
   (assoc rename-account-test-group
-    :bind {:account-to-rename-cd :user-personal-account-cd
-           :account-to-rename-old-name :user-personal-account-name
+    :bind {:account-type :acc-type/personal
+           :account-to-rename-old-name ::user-personal-account-name
            :account-to-rename-new-name (generate-name-str "Acc/")}))
 
 (def rename-virtual-personal-account-test-group
   (assoc rename-account-test-group
-    :bind {:account-to-rename-cd :virtual-personal-account-cd
-           :account-to-rename-old-name :virtual-personal-account-name
+    :bind {:account-type :acc-type/personal
+           :account-to-rename-old-name ::virtual-personal-account-name
            :account-to-rename-new-name (generate-name-str "Acc/")}))
 
 ;; NB: To be run twice: 1. when there are no accs; 2. after revoking an acc.
@@ -649,7 +669,7 @@
            :name "Should prompt the user to select an account to revoke"
            :tags [:revoke-account]
            :bind {:callback-query-id (generate-callback-query-id)
-                  :contains-all [:account-to-revoke-name]}
+                  :contains-all [::account-to-revoke-name]}
            :take [:accounts-mgmt-msg :created-account]
            :give :account-to-revoke-selection-msg
 
@@ -695,7 +715,8 @@
                              :chat {:id (:chat-id ctx) :title (:chat-title ctx) :type "group"}
                              :from {:id (:user-id ctx) :first_name (:user-name ctx) :language_code "ru"}
                              :message (-> ctx :deps :account-to-revoke-selection-msg)
-                             :data (:account-to-revoke-cd ctx)})}
+                             :data (build-account-cd (:chat-id ctx) (:account-type ctx)
+                                                     (:account-to-revoke-name ctx))})}
            :checks {:result (fn [ctx]
                               {:method "answerCallbackQuery"
                                :callback_query_id (:callback-query-id ctx)})
@@ -705,7 +726,8 @@
                                                               :type :settings
                                                               :state :initial}]})
                                 :accounts (fn [ctx]
-                                            [{:name (:account-to-revoke-name ctx)
+                                            [{:type (:account-type ctx)
+                                              :name (:account-to-revoke-name ctx)
                                               :pred #(:revoked %)
                                               :desc "the selected account is marked as revoked"}])}
                     :responses {:total 2
@@ -718,7 +740,7 @@
            :return-fn (fn [ctx responses]
                         (let [resp-pred #(valid-settings-msg? % (:chat-id ctx))
                               revoked-acc (find-account-by-name (get-chat-data (:chat-id ctx))
-                                                                :acc-type/personal
+                                                                (:account-type ctx)
                                                                 (:account-to-revoke-name ctx))]
                           [(first (filter resp-pred responses))
                            revoked-acc]))}
@@ -728,8 +750,8 @@
 
 (def revoke-virtual-personal-account-test-group
   (assoc revoke-account-test-group
-    :bind {:account-to-revoke-cd :virtual-personal-account-cd
-           :account-to-revoke-name :virtual-personal-account-name}))
+    :bind {:account-type :acc-type/personal
+           :account-to-revoke-name ::virtual-personal-account-name}))
 
 ;; NB: To be run twice: 1. when there are no accs; 2. after reinstating an acc.
 (def no-eligible-accounts-for-reinstatement
@@ -760,7 +782,7 @@
            :name "Should prompt the user to select an account to reinstate"
            :tags [:reinstate-account]
            :bind {:callback-query-id (generate-callback-query-id)
-                  :contains-all [:account-to-reinstate-name]}
+                  :contains-all [::account-to-reinstate-name]}
            :take [:accounts-mgmt-msg :revoked-account]
            :give :account-to-reinstate-selection-msg
 
@@ -805,7 +827,8 @@
                              :chat {:id (:chat-id ctx) :title (:chat-title ctx) :type "group"}
                              :from {:id (:user-id ctx) :first_name (:user-name ctx) :language_code "ru"}
                              :message (-> ctx :deps :account-to-reinstate-selection-msg)
-                             :data (:account-to-reinstate-cd ctx)})}
+                             :data (build-account-cd (:chat-id ctx) (:account-type ctx)
+                                                     (:account-to-reinstate-name ctx))})}
            :checks {:result (fn [ctx]
                               {:method "answerCallbackQuery"
                                :callback_query_id (:callback-query-id ctx)})
@@ -815,7 +838,8 @@
                                                               :type :settings
                                                               :state :initial}]})
                                 :accounts (fn [ctx]
-                                            [{:name (:account-to-reinstate-name ctx)
+                                            [{:type (:account-type ctx)
+                                              :name (:account-to-reinstate-name ctx)
                                               :pred #(not (:revoked %))
                                               :desc "the selected account is reinstated"}])}
                     :responses {:total 2
@@ -831,14 +855,13 @@
 
 (def reinstate-virtual-personal-account-test-group
   (assoc reinstate-account-test-group
-    :bind {:account-to-reinstate-cd :virtual-personal-account-cd
-           :account-to-reinstate-name :virtual-personal-account-name}))
+    :bind {:account-type :acc-type/personal
+           :account-to-reinstate-name ::virtual-personal-account-name}))
 
 (def virtual-personal-account-test-group
   {:type :test/group
    :name "Virtual personal account"
-   :bind {:virtual-personal-account-name (generate-name-str "Acc/")
-          :virtual-personal-account-cd "ac::personal::1"}
+   :bind {:virtual-personal-account-name (generate-name-str "Acc/")}
    :test [create-virtual-personal-account-test-group
           [enter-the-accounts-menu
            #{[revoke-virtual-personal-account-test-group
@@ -871,8 +894,7 @@
             :name "Group Chat"
             :bind {:chat-id (generate-chat-id)
                    :chat-title (generate-name-str 3 "Group/")
-                   :user-personal-account-name (generate-name-str "Acc/")
-                   :user-personal-account-cd "ac::personal::0"}
+                   :user-personal-account-name (generate-name-str "Acc/")}
             :test [start-new-chat-test-group
                    settings-test-group]}]}])
 
@@ -908,7 +930,7 @@
                (get-chat-state chat-data))
             "chat is in the wrong state"))
       (doseq [exp-acc (get-value-with-ctx exp-chat-data :accounts)]
-        (is (when-some [acc (find-account-by-name chat-data :acc-type/personal (:name exp-acc))]
+        (is (when-some [acc (find-account-by-name chat-data (:type exp-acc) (:name exp-acc))]
               (and (some? acc)
                    (or (not (contains? exp-acc :pred))
                        ((:pred exp-acc) acc))))
@@ -965,16 +987,26 @@
                     missing-params (:name case)))))
 
 (defn- set-bindings
-  [ctx binds]
-  (into ctx (map #(cond
-                    (keyword? (val %))
-                    [(key %) (get ctx (val %))]
-
-                    (vector? (val %))
-                    [(key %) (replace ctx (val %))]
-
-                    :else %)
-                 binds)))
+  [ctx bindings]
+  (let [test-ns "general-expenses-accountant.core-test"
+        prep-ns (fn [kwd]
+                  (keyword test-ns (name kwd)))
+        map-key (fn [f e]
+                  [(f (key e)) (val e)])
+        prep-ctx (into {} (map #(map-key prep-ns %) ctx))]
+    (into ctx
+          (walk/prewalk-replace prep-ctx bindings))))
+(comment
+  (= (set-bindings {:x "xXx", :y "yYy", :z :x}
+                   {:bind-val ::x
+                    :bind-vec [::x ::y]
+                    :bind-map {:-> ::x
+                               ::z "<- zZz"}})
+     {:x "xXx", :y "yYy", :z :x
+      :bind-val "xXx"
+      :bind-vec ["xXx" "yYy"]
+      :bind-map {:-> "xXx"
+                 :x "<- zZz"}}))
 
 (defn- should-run-independently?
   [node run-independently]
@@ -986,9 +1018,12 @@
 (defn- run-test-group
   [test-group ctx results independants]
   (let [run-fn (fn []
-                 (let [tg-zipper (to-zipper (:test test-group))]
-                   (testing (str (:name test-group) " ::")
-                     (traverse-tests tg-zipper ctx results))))]
+                 (let [tg-zipper (to-zipper (:test test-group))
+                       traverser (fn []
+                                   (traverse-tests tg-zipper ctx results))]
+                   (if (contains? test-group :name)
+                     (testing (str (:name test-group) " ::") (traverser))
+                     (traverser))))]
     (if (should-run-independently? test-group independants)
       (do
         (reset-bot-data-afterwards run-fn)
