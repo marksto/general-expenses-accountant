@@ -300,6 +300,10 @@
   {:type :callback
    :options {:text "Ожидание ответа пользователя в чате"}})
 
+(def ^:private waiting-for-other-user-notification
+  {:type :callback
+   :options {:text "Ответ ожидается от другого пользователя"}})
+
 (def ^:private message-already-in-use-notification
   {:type :callback
    :options {:text "С этим сообщением уже взаимодействуют"}})
@@ -359,11 +363,11 @@
               (escape-markdown-v2 ", данное имя счёта уже занято. Выберите другое имя."))
    :options force-reply-options})
 
-(defn- get-new-member-selection-msg
+(defn- get-group-members-selection-msg
   [accounts]
   (get-account-selection-msg
     accounts
-    "Выберите члена группы:"
+    "Выберите члена(ов) группы:" ;; TODO: Mention the user to whom is this message?
     [(tg-api/build-inline-kbd-btn undo-button-text :callback_data cd-undo)
      (tg-api/build-inline-kbd-btn done-button-text :callback_data cd-done)]))
 
@@ -375,6 +379,10 @@
               (->> acc-names ;; TODO: Extract into a dedicated fn + reuse above.
                    (map #(str "- " %))
                    (str/join "\n")))})
+
+(def ^:private no-group-members-selected-notification
+  {:type :callback
+   :options {:text "Не выбрано ни одного участника группы"}})
 
 (defn- get-account-rename-request-msg
   [user acc-name]
@@ -390,6 +398,10 @@
 (def ^:private successful-changes-msg
   {:type :text
    :text "Изменения внесены успешно."})
+
+(def ^:private canceled-changes-msg
+  {:type :text
+   :text "Внесение изменений отменено."})
 
 ;; TODO: Add messages for 'expense items' here.
 
@@ -681,6 +693,14 @@
                               new-state chat-id curr-state)
                   chat-data)))))]
     (get-chat-state updated-chat-data)))
+
+(defn- is-chat-ready?
+  [{?chat-id :chat-id ?chat-state :chat-state}]
+  {:pre [(or (some? ?chat-id) (some? ?chat-state))]}
+  (let [chat-state (or ?chat-state
+                       (and (does-chat-exist? ?chat-id)
+                            (get-chat-state (get-chat-data ?chat-id))))]
+    (= :ready chat-state)))
 
 (defn- is-chat-evicted?
   [chat-id]
@@ -1331,8 +1351,8 @@
     {:response-fn get-the-name-is-already-taken-msg
      :response-params [:user]}
 
-    :new-member-selection-msg
-    {:response-fn get-new-member-selection-msg
+    :group-members-selection-msg
+    {:response-fn get-group-members-selection-msg
      :response-params [:accounts]}
 
     :new-group-members-msg
@@ -1345,14 +1365,20 @@
 
     :successful-changes-msg
     {:response-fn (constantly successful-changes-msg)}
+    :canceled-changes-msg
+    {:response-fn (constantly canceled-changes-msg)}
 
     :waiting-for-user-input-notification
     {:response-fn (constantly waiting-for-user-input-notification)}
+    :waiting-for-other-user-notification
+    {:response-fn (constantly waiting-for-other-user-notification)}
     :message-already-in-use-notification
     {:response-fn (constantly message-already-in-use-notification)}
 
     :no-eligible-accounts-notification
     {:response-fn (constantly no-eligible-accounts-notification)}
+    :no-group-members-selected-notification
+    {:response-fn (constantly no-group-members-selected-notification)}
 
     ; message-specific
 
@@ -1495,6 +1521,9 @@
     :notify-changes-succeeded
     {:to-state :ready
      :response :successful-changes-msg}
+    :notify-changes-canceled
+    {:to-state :ready
+     :response :canceled-changes-msg}
 
     :mark-evicted
     {:to-state :evicted}}
@@ -1950,12 +1979,12 @@
 
 (defn- proceed-with-left-chat-member!
   [chat-id left-chat-member]
+  (update-members-count! chat-id dec)
+  (proceed-with-personal-accounts-check! chat-id (is-chat-ready? {:chat-id chat-id}))
+
   (encore/when-let [chat-data (get-chat-data chat-id)
                     user-id (:id left-chat-member)
                     pers-acc (get-personal-account chat-data {:user-id user-id})]
-    (update-members-count! chat-id dec)
-    (proceed-with-personal-accounts-check! chat-id (= :ready (get-chat-state chat-data)))
-
     (change-personal-account-activity-status! chat-id pers-acc
                                               {:revoke? true
                                                :datetime (get-datetime-in-tg-format)})
@@ -2002,7 +2031,9 @@
       (proceed-with-chat-and-respond!
         {:chat-id chat-id}
         {:transition [:chat-type/group :select-group-members]
-         :param-vals {:accounts personal-accs}}))))
+         :param-vals {:accounts personal-accs}} ;; TODO: Pass both 'selected' and 'remaining'.
+        :on-success #(set-bot-msg! chat-id (:message_id %) {:to-user user-id
+                                                            :type :group-members-selection})))))
 
 (defn- proceed-with-account-member-selection!
   [chat-id msg-id already-selected-account-members]
@@ -2013,8 +2044,8 @@
         accounts-remain? (seq remaining-accs)]
     (when accounts-remain?
       (respond!* {:chat-id chat-id :msg-id msg-id}
-                 [:chat-type/group :new-member-selection-msg]
-                 :param-vals {:accounts remaining-accs}
+                 [:chat-type/group :group-members-selection-msg]
+                 :param-vals {:accounts remaining-accs} ;; TODO: Pass both 'selected' and 'remaining'.
                  :replace? true))
     accounts-remain?))
 
@@ -2060,14 +2091,22 @@
     {:transition [:chat-type/group :settings :restore]}))
 
 
-;; TODO: Make the call of these 2 macros linearized. Make a wrapper macro.
+;; TODO: Linearize calls to these macros with a wrapper macro & a map.
 
 (defmacro do-when-chat-is-ready-or-send-notification!
   [chat-state callback-query-id & body]
-  `(if (= :ready ~chat-state)
+  `(if (is-chat-ready? {:chat-state ~chat-state})
      (do ~@body)
      (respond!* {:callback-query-id ~callback-query-id}
                 [:chat-type/group :waiting-for-user-input-notification])))
+
+(defmacro do-with-expected-user-or-send-notification!
+  [chat-id user-id msg-id callback-query-id & body]
+  `(if (check-bot-msg (get-bot-msg (get-chat-data ~chat-id) ~msg-id)
+                      {:to-user ~user-id})
+     (do ~@body)
+     (respond!* {:callback-query-id ~callback-query-id}
+                [:chat-type/group :waiting-for-other-user-notification])))
 
 (defmacro try-with-message-lock-or-send-notification!
   [chat-id user-id msg-id callback-query-id & body]
@@ -2397,23 +2436,51 @@
         {msg-id :message_id {chat-id :id} :chat} :message
         callback-btn-data :data
         :as callback-query}]
-      ;; TODO: Think out if this message also requires (by design) state mgmt.
       (when (and (= :chat-type/group (:chat-type callback-query))
-                 (= :waiting (:chat-state callback-query))
+                 (= :group-members-selection (-> callback-query :bot-msg :type))
                  (str/starts-with? callback-btn-data cd-account-prefix))
-        (let [chat-data (get-chat-data chat-id)
-              new-member (data->account callback-btn-data chat-data)
-              input-data (-> (get-user-input-data chat-data user-id :create-account)
-                             (update :account-members conj new-member))
-              can-proceed? (proceed-with-account-member-selection!
-                             chat-id msg-id (:account-members input-data))]
-          (set-user-input-data! chat-id user-id :create-account input-data)
-          (when-not can-proceed?
-            (proceed-with-account-naming! chat-id user)))
+        (do-when-chat-is-ready-or-send-notification!
+          (:chat-state callback-query) callback-query-id
+          (do-with-expected-user-or-send-notification!
+            chat-id user-id msg-id callback-query-id
+
+            (let [chat-data (get-chat-data chat-id)
+                  new-member (data->account callback-btn-data chat-data)
+                  input-data (-> (get-user-input-data chat-data user-id :create-account)
+                                 (update :account-members conj new-member))
+                  can-proceed? (proceed-with-account-member-selection!
+                                 chat-id msg-id (:account-members input-data))]
+              (set-user-input-data! chat-id user-id :create-account input-data)
+              (when-not can-proceed?
+                (proceed-with-account-naming! chat-id user)))))
         (cb-succeed callback-query-id))
       send-retry-callback-query!))
 
-  ;; TODO: Implement an 'undo' button processing: remove the last added member.
+  (m-hlr/callback-fn
+    (handle-with-care!
+      [{callback-query-id :id
+        {user-id :id} :from
+        {msg-id :message_id {chat-id :id} :chat} :message
+        callback-btn-data :data
+        :as callback-query}]
+      (when (and (= :chat-type/group (:chat-type callback-query))
+                 (= :group-members-selection (-> callback-query :bot-msg :type))
+                 (= cd-undo callback-btn-data))
+        (do-when-chat-is-ready-or-send-notification!
+          (:chat-state callback-query) callback-query-id
+          (do-with-expected-user-or-send-notification!
+            chat-id user-id msg-id callback-query-id
+
+            (drop-bot-msg! chat-id {:to-user user-id
+                                    :type :group-members-selection})
+            (set-user-input-data! chat-id user-id :create-account nil)
+            (delete-response! {:chat-id chat-id :msg-id msg-id})
+
+            (proceed-with-chat-and-respond!
+              {:chat-id chat-id}
+              {:transition [:chat-type/group :notify-changes-canceled]})))
+        (cb-succeed callback-query-id))
+      send-retry-callback-query!))
 
   (m-hlr/callback-fn
     (handle-with-care!
@@ -2422,20 +2489,29 @@
         {msg-id :message_id {chat-id :id} :chat} :message
         callback-btn-data :data
         :as callback-query}]
-      ;; TODO: Think out if this message also requires (by design) state mgmt.
       (when (and (= :chat-type/group (:chat-type callback-query))
-                 (= :waiting (:chat-state callback-query))
+                 (= :group-members-selection (-> callback-query :bot-msg :type))
                  (= cd-done callback-btn-data))
-        (let [chat-data (get-chat-data chat-id)
-              input-data (get-user-input-data chat-data user-id :create-account)
-              members (map :name (:account-members input-data))]
-          ;; TODO: Send a warning notification in case no members are selected.
-          (respond!* {:chat-id chat-id :msg-id msg-id}
-                     [:chat-type/group :new-group-members-msg]
-                     :param-vals {:acc-names members}
-                     :replace? true)
-          (proceed-with-account-naming! chat-id user))
-        (cb-succeed callback-query-id))
+        (do-when-chat-is-ready-or-send-notification!
+          (:chat-state callback-query) callback-query-id
+          (do-with-expected-user-or-send-notification!
+            chat-id user-id msg-id callback-query-id
+
+            (let [chat-data (get-chat-data chat-id)
+                  input-data (get-user-input-data chat-data user-id :create-account)
+                  members (map :name (:account-members input-data))]
+              (if (seq members)
+                (do
+                  (drop-bot-msg! chat-id {:to-user user-id
+                                          :type :group-members-selection})
+                  (respond!* {:chat-id chat-id :msg-id msg-id}
+                             [:chat-type/group :new-group-members-msg]
+                             :param-vals {:acc-names members}
+                             :replace? true)
+                  (proceed-with-account-naming! chat-id user)
+                  (cb-succeed callback-query-id))
+                (respond!* {:callback-query-id callback-query-id}
+                           [:chat-type/group :no-group-members-selected-notification]))))))
       send-retry-callback-query!))
 
   (m-hlr/callback-fn
