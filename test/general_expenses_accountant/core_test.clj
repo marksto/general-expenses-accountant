@@ -1,6 +1,6 @@
 (ns general-expenses-accountant.core-test
   (:refer-clojure :exclude [reduce])
-  (:require [clojure.test :refer [use-fixtures deftest testing is run-tests]]
+  (:require [clojure.test :refer [use-fixtures deftest testing is testing-contexts-str run-tests]]
             [clojure.core.async :refer [go chan >! <!! close! reduce]]
             [clojure.set :as set]
             [clojure.string :as str]
@@ -44,10 +44,10 @@
 
 (defn- start-required-states [f]
   (-> (mount/only #{;#'config/loader ;; TODO: Use another config for tests.
-                    #'general-expenses-accountant.core/bot-user
-                    #'general-expenses-accountant.core/*bot-data})
-      (mount/swap {#'general-expenses-accountant.core/bot-user bot-user
-                   #'general-expenses-accountant.core/*bot-data *bot-data})
+                    #'core/bot-user
+                    #'core/*bot-data})
+      (mount/swap {#'core/bot-user bot-user
+                   #'core/*bot-data *bot-data})
       mount/start)
   (f))
 
@@ -534,7 +534,8 @@
    :test [{:type :test/case
            :name "Should prompt the user to select an account to rename"
            :tags [:rename-account]
-           :bind {:callback-query-id (generate-callback-query-id)}
+           :bind {:callback-query-id (generate-callback-query-id)
+                  :contains-all [::account-to-rename-old-name]}
            :take :accounts-mgmt-msg
            :give :account-to-rename-selection-msg
 
@@ -558,8 +559,7 @@
                                                 [(fn [res]
                                                    (and (= (:chat-id ctx) (-> res :chat :id))
                                                         (some? (:reply_markup res))
-                                                        (contains-all? res :text
-                                                                       [(:account-to-rename-old-name ctx)])))])}}
+                                                        (contains-all? res :text (:contains-all ctx))))])}}
            :return-fn (fn [_ responses]
                         (first responses))}
 
@@ -632,13 +632,13 @@
   (assoc rename-account-test-group
     :bind {:account-type :acc-type/personal
            :account-to-rename-old-name ::user-personal-account-name
-           :account-to-rename-new-name (generate-name-str "Acc/")}))
+           :account-to-rename-new-name (generate-name-str "PersAcc/")}))
 
 (def rename-virtual-personal-account-test-group
   (assoc rename-account-test-group
     :bind {:account-type :acc-type/personal
            :account-to-rename-old-name ::virtual-personal-account-name
-           :account-to-rename-new-name (generate-name-str "Acc/")}))
+           :account-to-rename-new-name (generate-name-str "PersAcc/")}))
 
 ;; NB: To be run twice: 1. when there are no accs; 2. after revoking an acc.
 (def no-eligible-accounts-for-revocation
@@ -669,7 +669,9 @@
            :name "Should prompt the user to select an account to revoke"
            :tags [:revoke-account]
            :bind {:callback-query-id (generate-callback-query-id)
-                  :contains-all [::account-to-revoke-name]}
+                  :contains-all [::account-to-revoke-name]
+                  ;; NB: User cannot revoke their own personal account.
+                  :not-contains [::user-personal-account-name]}
            :take [:accounts-mgmt-msg :created-account]
            :give :account-to-revoke-selection-msg
 
@@ -694,11 +696,7 @@
                                                    (and (= (:chat-id ctx) (-> res :chat :id))
                                                         (some? (:reply_markup res))
                                                         (contains-all? res :text (:contains-all ctx))
-                                                        ;; NB: User cannot revoke their own personal account.
-                                                        (let [chat-data (get-chat-data (:chat-id ctx))
-                                                              ids {:user-id (:user-id ctx)}
-                                                              user-pers-acc (get-personal-account chat-data ids)]
-                                                          (not-contains? res :text [(:name user-pers-acc)]))))])}}
+                                                        (not-contains? res :text (:not-contains ctx))))])}}
            :return-fn (fn [_ responses]
                         (first responses))}
 
@@ -782,7 +780,9 @@
            :name "Should prompt the user to select an account to reinstate"
            :tags [:reinstate-account]
            :bind {:callback-query-id (generate-callback-query-id)
-                  :contains-all [::account-to-reinstate-name]}
+                  :contains-all [::account-to-reinstate-name]
+                  ;; NB: User cannot revoke their own personal account.
+                  :not-contains [::user-personal-account-name]}
            :take [:accounts-mgmt-msg :revoked-account]
            :give :account-to-reinstate-selection-msg
 
@@ -807,11 +807,7 @@
                                                    (and (= (:chat-id ctx) (-> res :chat :id))
                                                         (some? (:reply_markup res))
                                                         (contains-all? res :text (:contains-all ctx))
-                                                        ;; NB: User cannot reinstate their own personal account.
-                                                        (let [chat-data (get-chat-data (:chat-id ctx))
-                                                              ids {:user-id (:user-id ctx)}
-                                                              user-pers-acc (get-personal-account chat-data ids)]
-                                                          (not-contains? res :text [(:name user-pers-acc)]))))])}}
+                                                        (not-contains? res :text (:not-contains ctx))))])}}
            :return-fn (fn [_ responses]
                         (first responses))}
 
@@ -861,7 +857,7 @@
 (def virtual-personal-account-test-group
   {:type :test/group
    :name "Virtual personal account"
-   :bind {:virtual-personal-account-name (generate-name-str "Acc/")}
+   :bind {:virtual-personal-account-name (generate-name-str "PersAcc/")}
    :test [create-virtual-personal-account-test-group
           [enter-the-accounts-menu
            #{[revoke-virtual-personal-account-test-group
@@ -887,18 +883,25 @@
 
 (def use-cases
   [{:type :test/group
-    :name "Use Case 1. Personal accounting (single user)"
+    :name "Use Case 1. Personal accounting" ;; <=> single user
     :bind {:user-id (generate-user-id)
            :user-name (generate-name-str "User/")}
     :test [{:type :test/group
             :name "Group Chat"
             :bind {:chat-id (generate-chat-id)
                    :chat-title (generate-name-str 3 "Group/")
-                   :user-personal-account-name (generate-name-str "Acc/")}
+                   :user-personal-account-name (generate-name-str "PersAcc/")}
             :test [start-new-chat-test-group
                    settings-test-group]}]}])
 
 ; Tests Composition
+
+(defmacro with-printing-test-case-name
+  [& body]
+  `(let [res# (do (println (testing-contexts-str))
+                  ~@body)]
+     (println)
+     res#))
 
 (defn- unit-update-test
   "A unit test of the incoming update for a Telegram bot."
@@ -1039,7 +1042,8 @@
                                (set-bindings (:bind test-case)))]
                    (assert-test-params ctx test-case)
                    (testing (:name test-case)
-                     (unit-update-test test-case ctx))))
+                     (with-printing-test-case-name
+                       (unit-update-test test-case ctx)))))
         get-give (fn [case]
                    (utils/ensure-vec (:give case)))]
     (if (should-run-independently? test-case independants)
