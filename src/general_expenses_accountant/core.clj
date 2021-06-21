@@ -1502,17 +1502,17 @@
 (def ^:private chat-state-transitions
   {:chat-type/group
    {:request-acc-names
-    {:to-state :waiting
+    {:to-state :waiting ;; TODO: Shouldn't it be ':ready'? Or just be omitted (as a transition) at all?
      :response :personal-account-name-request-msg}
 
     :request-acc-name
-    {:to-state :waiting
+    {:to-state :ready
      :response :new-account-name-request-msg}
     :select-group-members
-    {:to-state :waiting
-     :response :new-member-selection-msg}
+    {:to-state :ready
+     :response :group-members-selection-msg}
     :request-acc-new-name
-    {:to-state :waiting
+    {:to-state :ready
      :response :account-rename-request-msg}
 
     :declare-readiness

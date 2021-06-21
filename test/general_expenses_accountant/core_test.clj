@@ -473,7 +473,7 @@
            :checks {:result (fn [ctx]
                               {:method "answerCallbackQuery"
                                :callback_query_id (:callback-query-id ctx)})
-                    :chat-data {:chat-state :waiting
+                    :chat-data {:chat-state :ready
                                 :bot-messages (fn [ctx]
                                                 {:mandatory [{:msg-id (-> ctx :deps :settings-msg :message_id)
                                                               :type :settings
@@ -581,7 +581,7 @@
            :checks {:result (fn [ctx]
                               {:method "answerCallbackQuery"
                                :callback_query_id (:callback-query-id ctx)})
-                    :chat-data {:chat-state :waiting
+                    :chat-data {:chat-state :ready
                                 :bot-messages (fn [ctx]
                                                 {:mandatory [{:msg-id (-> ctx :deps :settings-msg :message_id)
                                                               :type :settings
