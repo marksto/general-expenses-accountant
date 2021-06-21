@@ -195,9 +195,10 @@
 (def ^:private collect-responses (constantly []))
 
 (defn- do-responses-match?
-  [all-resps & resp-assert-preds]
+  [all-resps resp-assert-preds]
   (loop [resps all-resps
-         preds resp-assert-preds]
+         preds resp-assert-preds
+         predN 1]
     (if (empty? preds)
       {:success true
        :desc "[some] responses match all predicates"}
@@ -205,11 +206,12 @@
             resp (filter pred resps)]
         (if (empty? resp)
           {:success false
-           :desc (str "no response matching the predicate\n" (quote pred))}
+           :desc (str "no response matching the predicate #" predN)}
           (recur (if (< 1 (count resp))
                    resps ;; loose matches are retained
                    (remove #(= (first resp) %) resps))
-                 (rest preds)))))))
+                 (rest preds)
+                 (inc predN)))))))
 
 (defmacro with-mock-send
   ([test-func]
@@ -974,7 +976,7 @@
         (is (= (:total exp-responses) (count responses))
             "wrong number of responses"))
       (encore/when-some [resp-assert-preds (get-value-with-ctx exp-responses :assert-preds)
-                         resp-assert-result (apply do-responses-match? responses resp-assert-preds)]
+                         resp-assert-result (do-responses-match? responses resp-assert-preds)]
         (is (:success resp-assert-result)
             (:desc resp-assert-result))))
 
