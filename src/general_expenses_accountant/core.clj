@@ -2053,6 +2053,16 @@
                  :replace? true))
     accounts-remain?))
 
+(defn- proceed-with-end-of-account-members-selection!
+  [chat-id msg-id {user-id :id :as user} members]
+  (drop-bot-msg! chat-id {:to-user user-id
+                          :type :group-members-selection})
+  (respond!* {:chat-id chat-id :msg-id msg-id}
+             [:chat-type/group :new-group-members-msg]
+             :param-vals {:acc-names (map :name members)}
+             :replace? true)
+  (proceed-with-account-naming! chat-id user))
+
 (defn- proceed-with-account-selection!
   ([chat-id msg-id callback-query-id
     state-transition-name]
@@ -2452,11 +2462,12 @@
                   new-member (data->account callback-btn-data chat-data)
                   input-data (-> (get-user-input-data chat-data user-id :create-account)
                                  (update :account-members conj new-member))
+                  members (:account-members input-data)
                   can-proceed? (proceed-with-account-member-selection!
-                                 chat-id msg-id (:account-members input-data))]
+                                 chat-id msg-id members)]
               (set-user-input-data! chat-id user-id :create-account input-data)
               (when-not can-proceed?
-                (proceed-with-account-naming! chat-id user)))))
+                (proceed-with-end-of-account-members-selection! chat-id msg-id user members)))))
         (cb-succeed callback-query-id))
       send-retry-callback-query!))
 
@@ -2503,16 +2514,10 @@
 
             (let [chat-data (get-chat-data chat-id)
                   input-data (get-user-input-data chat-data user-id :create-account)
-                  members (map :name (:account-members input-data))]
+                  members (:account-members input-data)]
               (if (seq members)
                 (do
-                  (drop-bot-msg! chat-id {:to-user user-id
-                                          :type :group-members-selection})
-                  (respond!* {:chat-id chat-id :msg-id msg-id}
-                             [:chat-type/group :new-group-members-msg]
-                             :param-vals {:acc-names members}
-                             :replace? true)
-                  (proceed-with-account-naming! chat-id user)
+                  (proceed-with-end-of-account-members-selection! chat-id msg-id user members)
                   (cb-succeed callback-query-id))
                 (respond!* {:callback-query-id callback-query-id}
                            [:chat-type/group :no-group-members-selected-notification]))))))
