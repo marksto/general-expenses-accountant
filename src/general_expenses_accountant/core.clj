@@ -1756,6 +1756,12 @@
     (respond! ids response
               (assoc ?options :replace? true))))
 
+(defn- delete-text!
+  [token {:keys [chat-id msg-id] :as _ids}]
+  (if (is-chat-evicted? chat-id)
+    (log/debug "Dropped deleting the bot's response from an evicted chat=" chat-id)
+    (m-api/delete-text token chat-id msg-id)))
+
 (defn- delete-response!
   "Deletes one of the bot's previous response messages.
    NB: - A message can only be deleted if it was sent less than 48 hours ago.
@@ -1763,14 +1769,12 @@
    This fn takes an optional parameter, which is an options map of a specific API method."
   ([ids]
    (delete-response! ids nil))
-  ([{:keys [chat-id msg-id] :as ids} ?options]
-   (if (is-chat-evicted? chat-id)
-     (log/debug "Dropped deleting the bot's response from an evicted chat=" chat-id)
-     (make-tg-bot-api-request!
-       (fn [token]
-         (m-api/delete-text token chat-id msg-id))
-       (assoc ?options
-         :on-failure #(log/errorf % "Failed to delete the response message %s" ids))))))
+  ([ids ?options]
+   (make-tg-bot-api-request!
+     (fn [token]
+       (delete-text! token ids))
+     (assoc ?options
+       :on-failure #(log/errorf % "Failed to delete the response message %s" ids)))))
 
 ;; - SPECIFIC ACTIONS
 

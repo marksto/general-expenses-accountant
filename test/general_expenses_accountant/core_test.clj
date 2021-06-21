@@ -105,29 +105,31 @@
   "Mimics a successful Telegram Bot API response"
   [ids response opts]
   ;; TODO: Implement other cases: inline queries, non-empty callbacks?
-  (let [result (case (:type response)
-                 :text (let [drop-nil-vals #(into {} (filter (comp some? val) %))
-                             chat (-> (get @*bot-data (:chat-id ids))
-                                      (select-keys [:id :title :type])
-                                      (update :type name))]
-                         (drop-nil-vals
-                           (if (true? (:replace? opts))
-                             {:message_id (:msg-id ids)
-                              :from bot-user
-                              :chat chat
-                              :date (get-datetime-in-tg-format) ;; don't remember
-                              :edit_date (get-datetime-in-tg-format)
-                              :text (:text response)
-                              :entities (:entities response)
-                              :reply_markup (-> response :options :reply_markup)}
-                             {:message_id (generate-message-id)
-                              :from bot-user
-                              :chat chat
-                              :date (get-datetime-in-tg-format)
-                              :text (:text response)
-                              :entities (:entities response)
-                              :reply_markup (-> response :options :reply_markup)})))
-                 :callback true)]
+  (let [result (if (nil? response)
+                 true ;; the 'deleteMessage' case
+                 (case (:type response)
+                   :text (let [drop-nil-vals #(into {} (filter (comp some? val) %))
+                               chat (-> (get @*bot-data (:chat-id ids))
+                                        (select-keys [:id :title :type])
+                                        (update :type name))]
+                           (drop-nil-vals
+                             (if (true? (:replace? opts))
+                               {:message_id (:msg-id ids)
+                                :from bot-user
+                                :chat chat
+                                :date (get-datetime-in-tg-format) ;; don't remember
+                                :edit_date (get-datetime-in-tg-format)
+                                :text (:text response)
+                                :entities (:entities response)
+                                :reply_markup (-> response :options :reply_markup)}
+                               {:message_id (generate-message-id)
+                                :from bot-user
+                                :chat chat
+                                :date (get-datetime-in-tg-format)
+                                :text (:text response)
+                                :entities (:entities response)
+                                :reply_markup (-> response :options :reply_markup)})))
+                   :callback true))]
     {:ok true
      :result result}))
 
@@ -210,16 +212,20 @@
    `(with-mock-send {} ~test-func))
   ([mock-fns test-func]
    `(let [resp-chan# (chan)
-          mock-send# (fn [_# ids# response# opts#]
-                       (let [tg-response# (to-tg-response ids# response# opts#)]
-                         (go (>! resp-chan# (:result tg-response#)))
-                         tg-response#))
+          mock-send# (fn mock-send#
+                       ([token# ids#]
+                        (mock-send# token# ids# nil nil))
+                       ([_# ids# response# opts#]
+                        (let [tg-response# (to-tg-response ids# response# opts#)]
+                          (go (>! resp-chan# (:result tg-response#)))
+                          tg-response#)))
           responses# (memoize (fn []
                                 (Thread/sleep 50)
                                 (close! resp-chan#)
                                 (<!! (reduce conj [] resp-chan#))))]
       (with-mock-db
         (merge {#'core/send! mock-send#
+                #'core/delete-text! mock-send#
                 #'collect-responses responses#}
                ~mock-fns)
         ~test-func))))
