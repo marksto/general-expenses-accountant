@@ -129,7 +129,11 @@
                                 :text (:text response)
                                 :entities (:entities response)
                                 :reply_markup (-> response :options :reply_markup)})))
-                   :callback true))]
+                   :callback (do
+                               (let [text (-> response :options :text)]
+                                 (when-not (empty? text)
+                                   (println (format "Received the text notification: \"%s\"" text))))
+                               true)))]
     {:ok true
      :result result}))
 
