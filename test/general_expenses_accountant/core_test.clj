@@ -31,6 +31,7 @@
 (defalias get-bot-msg core/get-bot-msg)
 (defalias find-bot-messages core/find-bot-messages)
 (defalias find-account-by-name core/find-account-by-name)
+(defalias get-group-chat-account core/get-group-chat-account)
 
 ; Shared State
 
@@ -362,8 +363,8 @@
                     :chat-data {:members-count 2
                                 :chat-state :ready
                                 :accounts (fn [ctx]
-                                            [{:type :acc-type/personal
-                                              :name (:user-personal-account-name ctx)}])
+                                            {:mandatory [{:type :acc-type/personal
+                                                          :name (:user-personal-account-name ctx)}]})
                                 :bot-messages (fn [ctx]
                                                 {:mandatory [{:type :settings
                                                               :state :initial}]
@@ -496,8 +497,9 @@
    :checks {:result op-succeed
             :chat-data {:chat-state :ready
                         :accounts (fn [ctx]
-                                    [{:type (:account-type ctx)
-                                      :name (:account-name ctx)}])}
+                                    {:mandatory [{:type (:account-type ctx)
+                                                  :name (:account-name ctx)}]
+                                     :forbidden [{:type :acc-type/general}]})}
             :responses {:total 1
                         :assert-preds (fn [ctx]
                                         [(fn [res]
@@ -880,8 +882,8 @@
            :checks {:result op-succeed
                     :chat-data {:chat-state :ready
                                 :accounts (fn [ctx]
-                                            [{:type (:account-type ctx)
-                                              :name (:account-to-rename-new-name ctx)}])}
+                                            {:mandatory [{:type (:account-type ctx)
+                                                          :name (:account-to-rename-new-name ctx)}]})}
                     :responses {:total 1
                                 :assert-preds (fn [ctx]
                                                 [(fn [res]
@@ -989,10 +991,11 @@
                                                               :type :settings
                                                               :state :initial}]})
                                 :accounts (fn [ctx]
-                                            [{:type (:account-type ctx)
-                                              :name (:account-to-revoke-name ctx)
-                                              :pred #(:revoked %)
-                                              :desc "the selected account is marked as revoked"}])}
+                                            {:mandatory [{:type (:account-type ctx)
+                                                          :name (:account-to-revoke-name ctx)
+                                                          :pred #(:revoked %)
+                                                          :desc "the selected account is marked as revoked"}]
+                                             :forbidden [{:type :acc-type/general}]})}
                     :responses {:total 2
                                 :assert-preds (fn [ctx]
                                                 [(fn [res]
@@ -1015,6 +1018,11 @@
   (assoc revoke-account-test-group
     :bind {:account-type :acc-type/personal
            :account-to-revoke-name ::virtual-personal-account-name}))
+
+(def revoke-group-account-test-group
+  (assoc revoke-account-test-group
+    :bind {:account-type :acc-type/group
+           :account-to-revoke-name ::group-account-name}))
 
 ;; NB: To be run twice: 1. when there are no accs; 2. after reinstating an acc.
 (def no-eligible-accounts-for-reinstatement
@@ -1099,10 +1107,10 @@
                                                               :type :settings
                                                               :state :initial}]})
                                 :accounts (fn [ctx]
-                                            [{:type (:account-type ctx)
-                                              :name (:account-to-reinstate-name ctx)
-                                              :pred #(not (:revoked %))
-                                              :desc "the selected account is reinstated"}])}
+                                            {:mandatory [{:type (:account-type ctx)
+                                                          :name (:account-to-reinstate-name ctx)
+                                                          :pred #(not (:revoked %))
+                                                          :desc "the selected account is reinstated"}]})}
                     :responses {:total 2
                                 :assert-preds (fn [ctx]
                                                 [(fn [res]
@@ -1118,6 +1126,11 @@
   (assoc reinstate-account-test-group
     :bind {:account-type :acc-type/personal
            :account-to-reinstate-name ::virtual-personal-account-name}))
+
+(def reinstate-group-account-test-group
+  (assoc reinstate-account-test-group
+    :bind {:account-type :acc-type/group
+           :account-to-reinstate-name ::group-account-name}))
 
 (def virtual-personal-account-test-group
   {:type :test/group
@@ -1137,8 +1150,8 @@
            ;; TODO: Make all these rename/revoke/reinstate tests auto-occur upon ANY account creation.
            [create-group-account-with-single-member-test-group ;; any SHOULD do!
             enter-the-accounts-menu
-            #{;[revoke-group-account-test-group
-              ; reinstate-group-account-test-group]
+            #{[revoke-group-account-test-group
+               reinstate-group-account-test-group]
               rename-group-account-test-group}]}})
 
 (def accounts-mgmt-test-group
@@ -1210,13 +1223,19 @@
         (is (= (:chat-state exp-chat-data)
                (get-chat-state chat-data))
             "chat is in the wrong state"))
-      (doseq [exp-acc (get-value-with-ctx exp-chat-data :accounts)]
-        (is (when-some [acc (find-account-by-name chat-data (:type exp-acc) (:name exp-acc))]
-              (and (some? acc)
-                   (or (not (contains? exp-acc :pred))
-                       ((:pred exp-acc) acc))))
-            (or (:desc exp-acc)
-                "no account found with the specified name")))
+      (when-some [{:keys [mandatory forbidden]} (get-value-with-ctx exp-chat-data :accounts)]
+        (doseq [exp-acc mandatory
+                :when (some? exp-acc)]
+          (is (when-some [acc (get-group-chat-account chat-data exp-acc)]
+                (and (some? acc)
+                     (or (not (contains? exp-acc :pred))
+                         ((:pred exp-acc) acc))))
+              (or (:desc exp-acc)
+                  "no account found with the specified name")))
+        (doseq [unexp-acc forbidden
+                :when (some? unexp-acc)]
+          (is (empty? (get-group-chat-account chat-data unexp-acc))
+              "outdated account is still in the chat data")))
       (when-some [{:keys [mandatory forbidden]} (get-value-with-ctx exp-chat-data :bot-messages)]
         (doseq [exp-bot-msg mandatory]
           (if (contains? exp-bot-msg :msg-id)
