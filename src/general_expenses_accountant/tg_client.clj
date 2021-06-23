@@ -65,7 +65,7 @@
 (defn- await-for-sec
   "Waits a bit (1 sec) just for async operations to catch up."
   []
-  (Thread/sleep 1000))
+  (Thread/sleep 1000)) ;; TODO: Make this timeout configurable.
 
 (defn- not-polling?
   []
@@ -85,7 +85,7 @@
 
   (start-long-polling! token upd-handler)
 
-  ;; TODO: Make this an async task that aims to "re-spawn" the long-polling.
+  ;; TODO: Make this an async task that aims to "re-spawn" the long-polling. Make the re-spawns configurable.
   (await-for-sec)
   (when (not-polling?)
     (log/fatal "Fatal error during the long-polling setup")
