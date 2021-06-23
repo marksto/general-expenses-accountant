@@ -1237,7 +1237,8 @@
           (is (empty? (get-group-chat-account chat-data unexp-acc))
               "outdated account is still in the chat data")))
       (when-some [{:keys [mandatory forbidden]} (get-value-with-ctx exp-chat-data :bot-messages)]
-        (doseq [exp-bot-msg mandatory]
+        (doseq [exp-bot-msg mandatory
+                :when (some? exp-bot-msg)]
           (if (contains? exp-bot-msg :msg-id)
             (when-some [bot-msg (get-bot-msg chat-data (:msg-id exp-bot-msg))]
               (is (or (not (contains? exp-bot-msg :type))
@@ -1249,10 +1250,11 @@
               (is (or (not (contains? exp-bot-msg :to-user))
                       (= (:to-user exp-bot-msg)
                          (:to-user bot-msg))) "bot msg is addressed to the wrong user"))
-            (is (seq (find-bot-messages (:chat-id ctx) exp-bot-msg))
+            (is (seq (find-bot-messages chat-data exp-bot-msg))
                 "no bot msg found with the specified properties")))
-        (doseq [unexp-bot-msg forbidden]
-          (is (empty? (find-bot-messages (:chat-id ctx) unexp-bot-msg))
+        (doseq [unexp-bot-msg forbidden
+                :when (some? unexp-bot-msg)]
+          (is (empty? (find-bot-messages chat-data unexp-bot-msg))
               "outdated bot msg is still in the chat data"))))
 
     ;; bot responses

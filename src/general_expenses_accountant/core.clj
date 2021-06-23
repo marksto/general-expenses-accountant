@@ -1109,15 +1109,15 @@
   (assoc-in-chat-data! chat-id [:bot-messages msg-id] ?props))
 
 (defn- find-bot-messages
-  [chat-id {:keys [type to-user] :as _props}]
-  (cond->> (:bot-messages (get-chat-data chat-id))
+  [chat-data {:keys [type to-user] :as _props}]
+  (cond->> (:bot-messages chat-data)
            (some? type) (filter #(= type (-> % val :type)))
            (some? to-user) (filter #(= to-user (-> % val :to-user)))))
 
 (defn- drop-bot-msg!
   [chat-id {:keys [type to-user] :as props}]
   {:pre [(or (some? type) (some? to-user))]}
-  (let [to-drop (map key (find-bot-messages chat-id props))]
+  (let [to-drop (map key (find-bot-messages (get-chat-data chat-id) props))]
     (update-chat-data! chat-id
                        update-in [:bot-messages] #(apply dissoc % to-drop))))
 
@@ -1980,7 +1980,7 @@
    ;;     Users with an existing active personal account are ignored.
    (let [pers-accs-missing (get-number-of-missing-personal-accounts chat-id)]
      (if (> pers-accs-missing 0)
-       (if (and (seq (find-bot-messages chat-id {:type :name-request}))
+       (if (and (seq (find-bot-messages (get-chat-data chat-id) {:type :name-request}))
                 (not (is-chat-evicted? chat-id))) ;; just in case, to not stuck
          (respond!* {:chat-id chat-id}
                     [:chat-type/group :personal-accounts-left-msg]
