@@ -101,13 +101,13 @@
    required for it to be used for the general expenses accounting."
   3)
 
-;; TODO: Cerebrate the approach to the design of the "virtual members"
-;;       (those who aren't real chat members, but nevertheless occupy
-;;       a personal account) in a personal accounting case.
-;;       - Do they count when determining the use case for a chat?
-;;         At the moment, they DO NOT count.
-;;       - Are they merely different accounts for personal budgeting?
-;;         This bot was not intended for a full-featured accounting.
+;; NB: The approach to the design of the "virtual members" (those who aren't
+;;     backed with a user but nevertheless occupy a personal account) in the
+;;     personal accounting case.
+;;     - Do they count when determining the use case for a chat?
+;;       At the moment, they DO NOT count. Only real chat members do.
+;;     - Are they merely different accounts for personal budgeting?
+;;       This bot was not intended for a full-featured accounting.
 (defn- is-chat-for-group-accounting?
   "Determines the use case for a chat by the number of its members."
   [chat-members-count]
@@ -587,6 +587,7 @@
       (update-bot-data! assoc chat-id new-chat)
       new-chat)))
 
+;; TODO: Add a logical ID attr, e.g. UID, to track all group versions.
 (defn- setup-new-group-chat!
   [chat-id chat-title chat-members-count]
   (setup-new-chat! chat-id {:type :chat-type/group
@@ -760,6 +761,10 @@
    (cond->> (get-accounts-of-type chat-data acc-type)
             (some? ?filter-pred) (filter ?filter-pred))))
 
+(defn- get-account-by-id
+  [chat-data acc-type acc-id]
+  (get-in chat-data [:accounts acc-type acc-id]))
+
 (defn- get-accounts-next-id
   [chat-data]
   (-> chat-data :accounts :last-id inc))
@@ -852,6 +857,7 @@
 ;; - CHATS > ACCOUNTS > PERSONAL
 
 (defn- get-personal-account-id
+  "A convenient way to get both user and virtual accounts ID."
   [chat-data {?user-id :user-id ?acc-name :name :as _ids}]
   {:pre [(or (some? ?user-id) (some? ?acc-name))]}
   (if (some? ?user-id)
@@ -864,18 +870,18 @@
   (assoc-in chat-data [:user-account-mapping user-id] pers-acc-id))
 
 (defn- get-personal-account
-  [chat-data {?user-id :user-id ?acc-name :name ?acc-id :acc-id :as ids}]
+  [chat-data {?user-id :user-id ?acc-name :name ?acc-id :id :as ids}]
   {:pre [(or (some? ?user-id) (some? ?acc-name) (some? ?acc-id))]}
   (cond
-    (some? ?user-id)
-    (let [pers-acc-id (get-personal-account-id chat-data ids)]
-      (get-in chat-data [:accounts :acc-type/personal pers-acc-id]))
+    (some? ?acc-id)
+    (get-account-by-id chat-data :acc-type/personal ?acc-id)
 
     (some? ?acc-name)
     (find-account-by-name chat-data :acc-type/personal ?acc-name)
 
-    (some? ?acc-id)
-    (get-in chat-data [:accounts :acc-type/personal ?acc-id])))
+    (some? ?user-id)
+    (let [pers-acc-id (get-personal-account-id chat-data ids)]
+      (get-account-by-id chat-data :acc-type/personal pers-acc-id))))
 
 (defn- create-personal-account!
   [chat-id acc-name created-dt & {?user-id :user-id ?first-msg-id :first-msg-id :as _opts}]
@@ -891,31 +897,17 @@
                   (some? ?user-id) (set-personal-account-id ?user-id acc-id)))))
     :failure/user-already-has-an-active-account))
 
-(defn- update-personal-account!
-  [chat-id ids {:keys [revoke? reinstate? datetime] :as _upd}]
-  (let [pers-acc-id (get-personal-account-id (get-chat-data chat-id) ids)] ;; petty RC
-    (when (some? pers-acc-id)
-      (let [updated-chat-data
-            (update-chat-data!
-              chat-id
-              (fn [chat-data]
-                (let [upd-acc-revoked-fn
-                      (fn [cd]
-                        (if (true? revoke?)
-                          (assoc-in cd [:accounts :acc-type/personal pers-acc-id :revoked] datetime)
-                          cd))
-
-                      upd-acc-reinstated-fn
-                      (fn [cd]
-                        (if (true? reinstate?)
-                          (update-in cd [:accounts :acc-type/personal pers-acc-id] dissoc :revoked)
-                          cd))]
-                  (-> chat-data
-                      upd-acc-revoked-fn
-                      upd-acc-reinstated-fn))))]
-        (get-personal-account updated-chat-data ids)))))
-
 ;; - CHATS > ACCOUNTS > GROUP
+
+(defn- get-group-account
+  [chat-data {?acc-name :name ?acc-id :id :as _ids}]
+  {:pre [(or (some? ?acc-name) (some? ?acc-id))]}
+  (cond
+    (some? ?acc-id)
+    (get-account-by-id chat-data :acc-type/group ?acc-id)
+
+    (some? ?acc-name)
+    (find-account-by-name chat-data :acc-type/group ?acc-name)))
 
 (defn- create-group-account!
   [chat-id members acc-name created-dt]
@@ -1040,14 +1032,21 @@
     (is-account-revoked? acc)))
 
 (defn- get-group-chat-account
-  [group-chat-data acc-type acc-id]
-  (get-in group-chat-data [:accounts acc-type acc-id]))
+  [chat-data {acc-type :type :as props}]
+  (case acc-type
+    :acc-type/personal
+    (get-personal-account chat-data props)
+    :acc-type/group
+    (get-group-account chat-data props)
+    :acc-type/general
+    (get-current-general-account chat-data)))
 
 (defn- is-group-chat-eligible-for-selection?
+  "Checks the ability of a specified user to select a given group chat."
   [chat-id user-id]
   (let [group-chat-data (get-chat-data chat-id)
-        pers-acc-id (get-personal-account-id group-chat-data {:user-id user-id})
-        pers-acc (get-group-chat-account group-chat-data :acc-type/personal pers-acc-id)]
+        pers-acc (get-group-chat-account group-chat-data {:type :acc-type/personal
+                                                          :user-id user-id})]
     (is-account-active? pers-acc)))
 
 (defn- data->account
@@ -1056,8 +1055,8 @@
   (let [account (str/replace-first callback-btn-data cd-account-prefix "")
         account-path (str/split account (re-pattern id-separator))]
     (get-group-chat-account group-chat-data
-                            (keyword "acc-type" (nth account-path 0))
-                            (.intValue (biginteger (nth account-path 1))))))
+                            {:type (keyword "acc-type" (nth account-path 0))
+                             :id (nums/parse-int (nth account-path 1))})))
 
 (defn- change-group-chat-account-name!
   [chat-id acc-type acc-id new-acc-name]
@@ -1067,22 +1066,36 @@
           #(nil? (find-account-by-name % acc-type new-acc-name))
           assoc-in [:accounts acc-type acc-id :name] new-acc-name)]
     (if (some? updated-chat-data)
-      (get-group-chat-account updated-chat-data acc-type acc-id)
+      (get-group-chat-account updated-chat-data {:type acc-type
+                                                 :id acc-id})
       :failure/the-account-name-is-already-taken)))
 
-(defn- change-personal-account-activity-status!
-  "Changes the activity status of the personal account and updates all related
-   general (revokes and creates a new version, if needed) and group accounts."
-  [chat-id acc-to-change
-   {:keys [revoke? reinstate? datetime] :as upd}]
-  (let [changed-pers-acc (update-personal-account! chat-id acc-to-change upd)
-        changed-pers-acc-id (:id changed-pers-acc)
-        member-opts (cond
-                      (true? revoke?) [:remove-member changed-pers-acc-id]
-                      (true? reinstate?) [:add-member changed-pers-acc-id])]
-    ;; TODO: Update group accs of which the 'changed-pers-acc-id' is a member.
-    (apply create-general-account! chat-id datetime member-opts)
-    changed-pers-acc-id))
+(defn- change-account-activity-status!
+  "Changes the activity status of a personal or group account (just marks it as
+   'revoked' or removes this mark) and, for personal accounts only, updates the
+   general account (revokes an existing and creates a new version, if needed)."
+  [chat-id acc {:keys [revoke? reinstate? datetime] :as _activity_status_upd}]
+  {:pre [(or (some? revoke?) (some? reinstate?))
+         (not (and (some? revoke?) (some? reinstate?)))
+         (contains? #{:acc-type/personal :acc-type/group} (:type acc))]}
+  (let [acc-id (:id acc)
+        acc-type (:type acc)
+        updated-chat-data
+        (conditionally-update-chat-data!
+          chat-id
+          #(some? (get-account-by-id % acc-type acc-id))
+          (fn [chat-data]
+            (cond-> chat-data
+                    (true? revoke?)
+                    (assoc-in [:accounts acc-type acc-id :revoked] datetime)
+                    (true? reinstate?)
+                    (update-in [:accounts acc-type acc-id] dissoc :revoked))))]
+    (when (= :acc-type/personal (:type acc))
+      (let [member-action (cond
+                            (true? revoke?) :remove-member
+                            (true? reinstate?) :add-member)]
+        (create-general-account! chat-id datetime member-action acc-id)))
+    (get-account-by-id updated-chat-data acc-type acc-id)))
 
 ;; - CHATS > GROUP CHAT > BOT MESSAGES
 
@@ -1839,7 +1852,8 @@
               payer-acc-name (when-not (or (= pers-accs-count 1)
                                            (= payer-acc-id debtor-acc-id))
                                (:name (get-group-chat-account
-                                        group-chat-data :acc-type/personal payer-acc-id)))
+                                        group-chat-data {:type :acc-type/personal
+                                                         :id payer-acc-id})))
               debtor-acc-name (when-not (= pers-accs-count 1)
                                 (:name debtor-acc))]
           (respond!* {:chat-id group-chat-id}
@@ -1988,10 +2002,10 @@
 
   (encore/when-let [chat-data (get-chat-data chat-id)
                     user-id (:id left-chat-member)
-                    pers-acc (get-personal-account chat-data {:user-id user-id})]
-    (change-personal-account-activity-status! chat-id pers-acc
-                                              {:revoke? true
-                                               :datetime (get-datetime-in-tg-format)})
+                    pers-acc (get-personal-account chat-data {:user-id user-id})
+                    datetime (get-datetime-in-tg-format)]
+    (change-account-activity-status! chat-id pers-acc
+                                     {:revoke? true :datetime datetime})
     (drop-user-input-data! chat-id user-id)
     (report-to-user! user-id
                      [:chat-type/private :removed-from-group-msg]
@@ -2565,11 +2579,8 @@
             (let [chat-data (get-chat-data chat-id)
                   account-to-revoke (data->account callback-btn-data chat-data)
                   datetime (get-datetime-in-tg-format)]
-              (case (:type account-to-revoke)
-                :acc-type/personal (change-personal-account-activity-status!
-                                     chat-id account-to-revoke {:revoke? true
-                                                                :datetime datetime})
-                :acc-type/group (throw (Exception. "Not implemented yet")))) ;; TODO!
+              (change-account-activity-status! chat-id account-to-revoke
+                                               {:revoke? true :datetime datetime}))
 
             (proceed-with-restoring-group-chat-intro! chat-id user-id msg-id)
             (respond!* {:chat-id chat-id} [:chat-type/group :successful-changes-msg])))
@@ -2595,13 +2606,8 @@
             (let [chat-data (get-chat-data chat-id)
                   account-to-reinstate (data->account callback-btn-data chat-data)
                   datetime (get-datetime-in-tg-format)]
-              ;; TODO: Check whether we can simply update an existing personal account
-              ;;       rather than create a new version w/ 'create-personal-account!'.
-              (case (:type account-to-reinstate)
-                :acc-type/personal (change-personal-account-activity-status!
-                                     chat-id account-to-reinstate {:reinstate? true
-                                                                   :datetime datetime})
-                :acc-type/group (throw (Exception. "Not implemented yet")))) ;; TODO!
+              (change-account-activity-status! chat-id account-to-reinstate
+                                               {:reinstate? true :datetime datetime}))
 
             (proceed-with-restoring-group-chat-intro! chat-id user-id msg-id)
             (respond!* {:chat-id chat-id} [:chat-type/group :successful-changes-msg])))
