@@ -25,9 +25,12 @@
 ;;          - 'clj-http' — the same as for 'cheshire', but with extra care for existing tests
 ;;          - 'clojure.tools.macro' — only a single fn is used => inline it in 'utils'
 ;;          - 'clj-stacktrace' — is it even used? no references within 'src'
-;;       2. Improve error logging:
+;;       2. Improve the error logging:
 ;;          - surround all outgoing HTTP requests w/ 'try-catch'
 ;;          - on '::api/error' log the error itself (channel message ':description')
+;;       3. Add explicit type hints in order to avoid unnecessary reflective calls:
+;;          - Reflection warning, morse/api.clj:137:28 - reference to field getName can't be resolved.
+;;          - Reflection warning, morse/api.clj:137:28 - call to method endsWith can't be resolved (target class is unknown).
 
 ;; UPDATES SETUP
 
