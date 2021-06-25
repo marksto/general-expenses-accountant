@@ -728,11 +728,12 @@
           (some? ?msg-id) (assoc :msg-id ?msg-id)))
 
 (defn- ->group-account
-  [id name created members]
+  [id name created created-by members]
   {:id id
    :type :acc-type/group
    :name name
    :created created
+   :created-by created-by
    :members (set members)})
 
 (defn- is-account-revoked?
@@ -910,11 +911,11 @@
     (find-account-by-name chat-data :acc-type/group ?acc-name)))
 
 (defn- create-group-account!
-  [chat-id members acc-name created-dt]
+  [chat-id members acc-name created-dt created-by]
   (create-named-account!
     chat-id :acc-type/group acc-name
     (fn [chat-data acc-id]
-      (let [group-acc (->group-account acc-id acc-name created-dt members)]
+      (let [group-acc (->group-account acc-id acc-name created-dt created-by members)]
         (assoc-in chat-data [:accounts :acc-type/group acc-id] group-acc)))))
 
 ;; - CHATS > GROUP CHAT
@@ -997,10 +998,20 @@
     (- chat-members-count existing-pers-accs 1)))
 
 (defn- is-group-acc-member?
-  [group-acc chat-id user-id]
-  (let [group-chat-data (get-chat-data chat-id)
-        pers-acc-id (get-personal-account-id group-chat-data {:user-id user-id})]
-    (contains? (:members group-acc) pers-acc-id)))
+  [chat-id group-acc user-id]
+  (let [chat-data (get-chat-data chat-id)
+        pers-acc-id (get-personal-account-id chat-data {:user-id user-id})
+        group-acc-members (:members group-acc)]
+    (contains? group-acc-members pers-acc-id)))
+
+(defn- all-group-acc-members-are-inactive?
+  [chat-id group-acc]
+  (let [group-acc-members (:members group-acc)]
+    (->> {:acc-types [:acc-type/personal]
+          :filter-pred #(and (is-account-active? %)
+                             (contains? group-acc-members (:id %)))}
+         (get-group-chat-accounts chat-id)
+         empty?)))
 
 (defn- can-rename-account?
   [chat-id user-id]
@@ -1008,11 +1019,10 @@
     (and (is-account-active? acc)
          (or (and (= :acc-type/personal (:type acc))
                   (contains? #{user-id nil} (:user-id acc)))
-             ;; TODO: There's a case that is missing: a creator
-             ;;       of a group who did not include themselves
-             ;;       into the group. Needs to be able as well.
              (and (= :acc-type/group (:type acc))
-                  (is-group-acc-member? acc chat-id user-id))))))
+                  (or (= (:created-by acc) user-id)
+                      (is-group-acc-member? chat-id acc user-id)
+                      (all-group-acc-members-are-inactive? chat-id acc)))))))
 
 (defn- can-revoke-account?
   [chat-id user-id]
@@ -1020,11 +1030,10 @@
     (and (is-account-active? acc)
          (or (and (= :acc-type/personal (:type acc))
                   (not= (:user-id acc) user-id))
-             ;; TODO: There's a case that is missing: a creator
-             ;;       of a group who did not include themselves
-             ;;       into the group. Needs to be able as well.
              (and (= :acc-type/group (:type acc))
-                  (is-group-acc-member? acc chat-id user-id))))))
+                  (or (= (:created-by acc) user-id)
+                      (is-group-acc-member? chat-id acc user-id)
+                      (all-group-acc-members-are-inactive? chat-id acc)))))))
 
 (defn- can-reinstate-account?
   [_chat-id _user-id]
@@ -1044,17 +1053,17 @@
 (defn- is-group-chat-eligible-for-selection?
   "Checks the ability of a specified user to select a given group chat."
   [chat-id user-id]
-  (let [group-chat-data (get-chat-data chat-id)
-        pers-acc (get-group-chat-account group-chat-data {:type :acc-type/personal
-                                                          :user-id user-id})]
+  (let [chat-data (get-chat-data chat-id)
+        pers-acc (get-group-chat-account chat-data {:type :acc-type/personal
+                                                    :user-id user-id})]
     (is-account-active? pers-acc)))
 
 (defn- data->account
   "Retrieves a group chat's account by parsing the callback button data."
-  [callback-btn-data group-chat-data]
+  [callback-btn-data chat-data]
   (let [account (str/replace-first callback-btn-data cd-account-prefix "")
         account-path (str/split account (re-pattern id-separator))]
-    (get-group-chat-account group-chat-data
+    (get-group-chat-account chat-data
                             {:type (keyword "acc-type" (nth account-path 0))
                              :id (nums/parse-int (nth account-path 1))})))
 
@@ -2954,7 +2963,7 @@
                 :acc-type/personal (when-some [pers-acc (create-personal-account! chat-id text date)]
                                      (create-general-account! chat-id date)
                                      pers-acc)
-                :acc-type/group (create-group-account! chat-id members text date))]
+                :acc-type/group (create-group-account! chat-id members text date user-id))]
           (if (is-failure? create-acc-res)
             (case create-acc-res
               :failure/the-account-name-is-already-taken

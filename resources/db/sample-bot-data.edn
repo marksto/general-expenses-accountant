@@ -86,6 +86,7 @@
                                                    :name "Alice & Bob"
                                                    :created 426307670
                                                    :revoked 432500000
+                                                   :created-by 1400000000
                                                    :members #{1 2}}}
                                :last-id 6}
                     ;; TODO: Re-implement ':items' with another data structure.
