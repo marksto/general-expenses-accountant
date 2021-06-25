@@ -1143,7 +1143,8 @@
 (defn- check-bot-msg
   [bot-msg {:keys [type to-user] :as props}]
   {:pre [(or (some? type) (some? to-user))]}
-  (every? #(= (val %) (-> % key bot-msg)) props))
+  (when (some? bot-msg)
+    (every? #(= (val %) (-> % key bot-msg)) props)))
 
 (defn- change-bot-msg-state!
   [chat-id msg-id msg-type-states new-state]
