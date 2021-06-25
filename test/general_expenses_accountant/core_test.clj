@@ -1,7 +1,6 @@
 (ns general-expenses-accountant.core-test
-  (:refer-clojure :exclude [reduce])
   (:require [clojure.test :refer [use-fixtures deftest testing is testing-contexts-str run-tests]]
-            [clojure.core.async :refer [go chan >! <!! close! reduce]]
+            [clojure.core.async :as a :refer [go chan >! <!! close!]]
             [clojure.set :as set]
             [clojure.string :as str]
             [clojure.walk :as walk]
@@ -31,6 +30,7 @@
 (defalias get-bot-msg core/get-bot-msg)
 (defalias find-bot-messages core/find-bot-messages)
 (defalias find-account-by-name core/find-account-by-name)
+(defalias get-accounts-of-type core/get-accounts-of-type)
 (defalias get-group-chat-account core/get-group-chat-account)
 
 ; Shared State
@@ -100,7 +100,7 @@
   []
   (.incrementAndGet latest-callback-query-id))
 
-; Aux Fns
+; Update & Response Fns
 
 (defn- to-tg-response
   "Mimics a successful Telegram Bot API response"
@@ -174,6 +174,16 @@
   (and (not-any? (set (map key (get-inline-kbd-row res 0))) text-vals)
        (not-any? (set (map key (get-inline-kbd-col res 0))) text-vals)))
 
+; Test Subs Fns
+
+(defn- append-to-each
+  "For test cases to be executed immediately after any test in the 'tests-coll'."
+  [tests-coll to-append]
+  (reduce (fn [acc test]
+            (conj acc [test to-append]))
+          (empty tests-coll)
+          tests-coll))
+
 ; Mocks > DB
 
 (def ^:private mock-db-queries
@@ -229,7 +239,7 @@
           responses# (memoize (fn []
                                 (Thread/sleep 50)
                                 (close! resp-chan#)
-                                (<!! (reduce conj [] resp-chan#))))]
+                                (<!! (a/reduce conj [] resp-chan#))))]
       (with-mock-db
         (merge {#'core/send! mock-send#
                 #'core/delete-text! mock-send#
@@ -601,7 +611,7 @@
                   ;; NB: Need to return responses in a proper order (see the ':give').
                   (if (valid-settings-msg? res1 (:chat-id ctx)) responses [res2 res1])))})
 
-(def create-group-account-with-single-member-test-group
+(def create-group-account-test-group
   (assoc create-account-test-group
     :bind {:account-type :acc-type/group
            :account-name ::group-account-name}
@@ -610,184 +620,166 @@
 
            ;; TODO: Add a TC that checks that other interactions are ineffectual at this point.
 
-           {:type :test/case
-            :name "Should allow the user to select their own personal account as a group member"
-            :tags [:create-account]
-            :bind {:callback-query-id (generate-callback-query-id)}
-            :take :group-members-selection-msg
-            :give :new-account-name-request-msg
-
-            :update {:type :callback_query
-                     :data (fn [ctx]
-                             {:id (:callback-query-id ctx)
-                              :chat {:id (:chat-id ctx) :title (:chat-title ctx) :type "group"}
-                              :from {:id (:user-id ctx) :first_name (:user-name ctx) :language_code "ru"}
-                              :message (-> ctx :deps :group-members-selection-msg)
-                              :data (build-account-cd (:chat-id ctx) :acc-type/personal
-                                                      (:user-personal-account-name ctx))})}
-            :checks {:result (fn [ctx]
-                               {:method "answerCallbackQuery"
-                                :callback_query_id (:callback-query-id ctx)})
-                     :chat-data {:chat-state :ready
-                                 :bot-messages (fn [ctx]
-                                                 {:mandatory [{:to-user (:user-id ctx)
-                                                               :type :request-acc-name}]})}
-                     :responses {:total 2
-                                 :assert-preds (fn [ctx]
-                                                 [(fn [res]
-                                                    (valid-new-account-name-request-msg?
-                                                      res (:chat-id ctx) (:user-name ctx)))
-                                                  (fn [res]
-                                                    (valid-new-group-members-msg?
-                                                      res (:chat-id ctx)
-                                                      (:user-personal-account-name ctx)))])}}
-            :return-fn (fn [ctx responses]
-                         (let [resp-pred #(valid-new-account-name-request-msg?
-                                            % (:chat-id ctx) (:user-name ctx))]
-                           (first (filter resp-pred responses))))}
+           ::group-acc-specific-creation-steps
 
            ;; TODO: Add a TC that checks that other interactions are ineffectual at this point.
 
            reply-with-name-and-check-account-created]))
+
+(def create-group-account-with-single-member-test-group
+  (update create-group-account-test-group :test-subs merge
+          {::group-acc-specific-creation-steps
+           [{:type :test/case
+             :name "Should allow the user to select their own personal account as a group member"
+             :tags [:create-account]
+             :bind {:callback-query-id (generate-callback-query-id)}
+             :take :group-members-selection-msg
+             :give :new-account-name-request-msg
+
+             :update {:type :callback_query
+                      :data (fn [ctx]
+                              {:id (:callback-query-id ctx)
+                               :chat {:id (:chat-id ctx) :title (:chat-title ctx) :type "group"}
+                               :from {:id (:user-id ctx) :first_name (:user-name ctx) :language_code "ru"}
+                               :message (-> ctx :deps :group-members-selection-msg)
+                               :data (build-account-cd (:chat-id ctx) :acc-type/personal
+                                                       (:user-personal-account-name ctx))})}
+             :checks {:result (fn [ctx]
+                                {:method "answerCallbackQuery"
+                                 :callback_query_id (:callback-query-id ctx)})
+                      :chat-data {:chat-state :ready
+                                  :bot-messages (fn [ctx]
+                                                  {:mandatory [{:to-user (:user-id ctx)
+                                                                :type :request-acc-name}]})}
+                      :responses {:total 2
+                                  :assert-preds (fn [ctx]
+                                                  [(fn [res]
+                                                     (valid-new-account-name-request-msg?
+                                                       res (:chat-id ctx) (:user-name ctx)))
+                                                   (fn [res]
+                                                     (valid-new-group-members-msg?
+                                                       res (:chat-id ctx)
+                                                       (:user-personal-account-name ctx)))])}}
+             :return-fn (fn [ctx responses]
+                          (let [resp-pred #(valid-new-account-name-request-msg?
+                                             % (:chat-id ctx) (:user-name ctx))]
+                            (first (filter resp-pred responses))))}]}))
+
+(def create-group-account-with-multiple-members-test-group
+  {:type :test/group
+   :bind {:virtual-personal-account-name (generate-name-str "PersAcc/")}
+   :test [create-virtual-personal-account-test-group
+          enter-the-accounts-menu
+
+          create-group-account-test-group]})
 
 (def create-group-account-with-1of2-members-test-group
-  (assoc create-account-test-group
-    :bind {:account-type :acc-type/group
-           :account-name ::group-account-name}
-    :test [enter-the-create-account-submenu
-           pick-the-group-account-type-option
+  (update create-group-account-with-multiple-members-test-group :test-subs merge
+          {::group-acc-specific-creation-steps
+           [{:type :test/case
+             :name "Should allow the user to select their own personal account as a group member"
+             :tags [:create-account]
+             :bind {:callback-query-id (generate-callback-query-id)}
+             :take :group-members-selection-msg
 
-           ;; TODO: Add a TC that checks that other interactions are ineffectual at this point.
+             :update {:type :callback_query
+                      :data (fn [ctx]
+                              {:id (:callback-query-id ctx)
+                               :chat {:id (:chat-id ctx) :title (:chat-title ctx) :type "group"}
+                               :from {:id (:user-id ctx) :first_name (:user-name ctx) :language_code "ru"}
+                               :message (-> ctx :deps :group-members-selection-msg)
+                               :data (build-account-cd (:chat-id ctx) :acc-type/personal
+                                                       (:user-personal-account-name ctx))})}}
 
-           {:type :test/case
-            :name "Should allow the user to select their own personal account as a group member"
-            :tags [:create-account]
-            :bind {:callback-query-id (generate-callback-query-id)}
-            :take :group-members-selection-msg
+            {:type :test/case
+             :name "Should allow the user to short-circuit the group member accounts selection & prompt the user for an account name"
+             :tags [:create-account]
+             :bind {:callback-query-id (generate-callback-query-id)}
+             :take :group-members-selection-msg
+             :give :new-account-name-request-msg
 
-            :update {:type :callback_query
-                     :data (fn [ctx]
-                             {:id (:callback-query-id ctx)
-                              :chat {:id (:chat-id ctx) :title (:chat-title ctx) :type "group"}
-                              :from {:id (:user-id ctx) :first_name (:user-name ctx) :language_code "ru"}
-                              :message (-> ctx :deps :group-members-selection-msg)
-                              :data (build-account-cd (:chat-id ctx) :acc-type/personal
-                                                      (:user-personal-account-name ctx))})}}
-
-           {:type :test/case
-            :name "Should allow the user to short-circuit the group member accounts selection & prompt the user for an account name"
-            :tags [:create-account]
-            :bind {:callback-query-id (generate-callback-query-id)}
-            :take :group-members-selection-msg
-            :give :new-account-name-request-msg
-
-            :update {:type :callback_query
-                     :data (fn [ctx]
-                             {:id (:callback-query-id ctx)
-                              :chat {:id (:chat-id ctx) :title (:chat-title ctx) :type "group"}
-                              :from {:id (:user-id ctx) :first_name (:user-name ctx) :language_code "ru"}
-                              :message (-> ctx :deps :group-members-selection-msg)
-                              :data "<done>"})}
-            :checks {:result (fn [ctx]
-                               {:method "answerCallbackQuery"
-                                :callback_query_id (:callback-query-id ctx)})
-                     :chat-data {:chat-state :ready
-                                 :bot-messages (fn [ctx]
-                                                 {:mandatory [{:to-user (:user-id ctx)
-                                                               :type :request-acc-name}]})}
-                     :responses {:total 2
-                                 :assert-preds (fn [ctx]
-                                                 [(fn [res]
-                                                    (valid-new-account-name-request-msg?
-                                                      res (:chat-id ctx) (:user-name ctx)))
-                                                  (fn [res]
-                                                    (valid-new-group-members-msg?
-                                                      res (:chat-id ctx)
-                                                      (:user-personal-account-name ctx)))])}}
-            :return-fn (fn [ctx responses]
-                         (let [resp-pred #(valid-new-account-name-request-msg?
-                                            % (:chat-id ctx) (:user-name ctx))]
-                           (first (filter resp-pred responses))))}
-
-           ;; TODO: Add a TC that checks that other interactions are ineffectual at this point.
-
-           reply-with-name-and-check-account-created]))
+             :update {:type :callback_query
+                      :data (fn [ctx]
+                              {:id (:callback-query-id ctx)
+                               :chat {:id (:chat-id ctx) :title (:chat-title ctx) :type "group"}
+                               :from {:id (:user-id ctx) :first_name (:user-name ctx) :language_code "ru"}
+                               :message (-> ctx :deps :group-members-selection-msg)
+                               :data "<done>"})}
+             :checks {:result (fn [ctx]
+                                {:method "answerCallbackQuery"
+                                 :callback_query_id (:callback-query-id ctx)})
+                      :chat-data {:chat-state :ready
+                                  :bot-messages (fn [ctx]
+                                                  {:mandatory [{:to-user (:user-id ctx)
+                                                                :type :request-acc-name}]})}
+                      :responses {:total 2
+                                  :assert-preds (fn [ctx]
+                                                  [(fn [res]
+                                                     (valid-new-account-name-request-msg?
+                                                       res (:chat-id ctx) (:user-name ctx)))
+                                                   (fn [res]
+                                                     (valid-new-group-members-msg?
+                                                       res (:chat-id ctx)
+                                                       (:user-personal-account-name ctx)))])}}
+             :return-fn (fn [ctx responses]
+                          (let [resp-pred #(valid-new-account-name-request-msg?
+                                             % (:chat-id ctx) (:user-name ctx))]
+                            (first (filter resp-pred responses))))}]}))
 
 (def create-group-account-with-2of2-members-test-group
-  (assoc create-account-test-group
-    :bind {:account-type :acc-type/group
-           :account-name ::group-account-name}
-    :test [enter-the-create-account-submenu
-           pick-the-group-account-type-option
+  (update create-group-account-with-multiple-members-test-group :test-subs merge
+          {::group-acc-specific-creation-steps
+           [{:type :test/case
+             :name "Should allow the user to select their own personal account as a group member"
+             :tags [:create-account]
+             :bind {:callback-query-id (generate-callback-query-id)}
+             :take :group-members-selection-msg
 
-           ;; TODO: Add a TC that checks that other interactions are ineffectual at this point.
+             :update {:type :callback_query
+                      :data (fn [ctx]
+                              {:id (:callback-query-id ctx)
+                               :chat {:id (:chat-id ctx) :title (:chat-title ctx) :type "group"}
+                               :from {:id (:user-id ctx) :first_name (:user-name ctx) :language_code "ru"}
+                               :message (-> ctx :deps :group-members-selection-msg)
+                               :data (build-account-cd (:chat-id ctx) :acc-type/personal
+                                                       (:user-personal-account-name ctx))})}}
 
-           {:type :test/case
-            :name "Should allow the user to select their own personal account as a group member"
-            :tags [:create-account]
-            :bind {:callback-query-id (generate-callback-query-id)}
-            :take :group-members-selection-msg
+            {:type :test/case
+             :name "Should allow the user to select a virtual personal account as a group member & prompt the user for an account name"
+             :tags [:create-account]
+             :bind {:callback-query-id (generate-callback-query-id)}
+             :take :group-members-selection-msg
+             :give :new-account-name-request-msg
 
-            :update {:type :callback_query
-                     :data (fn [ctx]
-                             {:id (:callback-query-id ctx)
-                              :chat {:id (:chat-id ctx) :title (:chat-title ctx) :type "group"}
-                              :from {:id (:user-id ctx) :first_name (:user-name ctx) :language_code "ru"}
-                              :message (-> ctx :deps :group-members-selection-msg)
-                              :data (build-account-cd (:chat-id ctx) :acc-type/personal
-                                                      (:user-personal-account-name ctx))})}}
-
-           {:type :test/case
-            :name "Should allow the user to select a virtual personal account as a group member & prompt the user for an account name"
-            :tags [:create-account]
-            :bind {:callback-query-id (generate-callback-query-id)}
-            :take :group-members-selection-msg
-            :give :new-account-name-request-msg
-
-            :update {:type :callback_query
-                     :data (fn [ctx]
-                             {:id (:callback-query-id ctx)
-                              :chat {:id (:chat-id ctx) :title (:chat-title ctx) :type "group"}
-                              :from {:id (:user-id ctx) :first_name (:user-name ctx) :language_code "ru"}
-                              :message (-> ctx :deps :group-members-selection-msg)
-                              :data (build-account-cd (:chat-id ctx) :acc-type/personal
-                                                      (:virtual-personal-account-name ctx))})}
-            :checks {:result (fn [ctx]
-                               {:method "answerCallbackQuery"
-                                :callback_query_id (:callback-query-id ctx)})
-                     :chat-data {:chat-state :ready
-                                 :bot-messages (fn [ctx]
-                                                 {:mandatory [{:to-user (:user-id ctx)
-                                                               :type :request-acc-name}]})}
-                     :responses {:total 2
-                                 :assert-preds (fn [ctx]
-                                                 [(fn [res]
-                                                    (valid-new-account-name-request-msg?
-                                                      res (:chat-id ctx) (:user-name ctx)))
-                                                  (fn [res]
-                                                    (valid-new-group-members-msg?
-                                                      res (:chat-id ctx)
-                                                      (:user-personal-account-name ctx)
-                                                      (:virtual-personal-account-name ctx)))])}}
-            :return-fn (fn [ctx responses]
-                         (let [resp-pred #(valid-new-account-name-request-msg?
-                                            % (:chat-id ctx) (:user-name ctx))]
-                           (first (filter resp-pred responses))))}
-
-           ;; TODO: Add a TC that checks that other interactions are ineffectual at this point.
-
-           reply-with-name-and-check-account-created]))
-
-(def create-group-account-test-group
-  {:type :test/group
-   :test #{create-group-account-with-single-member-test-group
-           {:type :test/group
-            :bind {:virtual-personal-account-name (generate-name-str "PersAcc/")}
-            :test [create-virtual-personal-account-test-group
-
-                   enter-the-accounts-menu
-                   #{create-group-account-with-1of2-members-test-group
-                     create-group-account-with-2of2-members-test-group}]}}})
+             :update {:type :callback_query
+                      :data (fn [ctx]
+                              {:id (:callback-query-id ctx)
+                               :chat {:id (:chat-id ctx) :title (:chat-title ctx) :type "group"}
+                               :from {:id (:user-id ctx) :first_name (:user-name ctx) :language_code "ru"}
+                               :message (-> ctx :deps :group-members-selection-msg)
+                               :data (build-account-cd (:chat-id ctx) :acc-type/personal
+                                                       (:virtual-personal-account-name ctx))})}
+             :checks {:result (fn [ctx]
+                                {:method "answerCallbackQuery"
+                                 :callback_query_id (:callback-query-id ctx)})
+                      :chat-data {:chat-state :ready
+                                  :bot-messages (fn [ctx]
+                                                  {:mandatory [{:to-user (:user-id ctx)
+                                                                :type :request-acc-name}]})}
+                      :responses {:total 2
+                                  :assert-preds (fn [ctx]
+                                                  [(fn [res]
+                                                     (valid-new-account-name-request-msg?
+                                                       res (:chat-id ctx) (:user-name ctx)))
+                                                   (fn [res]
+                                                     (valid-new-group-members-msg?
+                                                       res (:chat-id ctx)
+                                                       (:user-personal-account-name ctx)
+                                                       (:virtual-personal-account-name ctx)))])}}
+             :return-fn (fn [ctx responses]
+                          (let [resp-pred #(valid-new-account-name-request-msg?
+                                             % (:chat-id ctx) (:user-name ctx))]
+                            (first (filter resp-pred responses))))}]}))
 
 (def rename-account-test-group
   {:type :test/group
@@ -927,7 +919,15 @@
                        :callback_query_id (:callback-query-id ctx)})
             :chat-data {:chat-state :ready}
             :responses {:total 1
-                        :assert-preds [#(= true %)]}}})
+                        :assert-preds (fn [ctx]
+                                        [(fn [res]
+                                           (or (= true res) ;; no eligible accounts at all
+                                               (when-some [accs (get-accounts-of-type
+                                                                  (get-chat-data (:chat-id ctx))
+                                                                  (:no-eligible-accounts-of-type ctx))]
+                                                 (and (= (:chat-id ctx) (-> res :chat :id))
+                                                      (some? (:reply_markup res))
+                                                      (not-contains? res :text (map :name accs))))))])}}})
 
 (def revoke-account-test-group
   {:type :test/group
@@ -1011,18 +1011,20 @@
                           [(first (filter resp-pred responses))
                            revoked-acc]))}
 
-          enter-the-accounts-menu
-          no-eligible-accounts-for-revocation]})
+          #{[enter-the-accounts-menu
+             no-eligible-accounts-for-revocation]}]})
 
 (def revoke-virtual-personal-account-test-group
   (assoc revoke-account-test-group
     :bind {:account-type :acc-type/personal
-           :account-to-revoke-name ::virtual-personal-account-name}))
+           :account-to-revoke-name ::virtual-personal-account-name
+           :no-eligible-accounts-of-type :acc-type/personal}))
 
 (def revoke-group-account-test-group
   (assoc revoke-account-test-group
     :bind {:account-type :acc-type/group
-           :account-to-revoke-name ::group-account-name}))
+           :account-to-revoke-name ::group-account-name
+           :no-eligible-accounts-of-type :acc-type/group}))
 
 ;; NB: To be run twice: 1. when there are no accs; 2. after reinstating an acc.
 (def no-eligible-accounts-for-reinstatement
@@ -1119,8 +1121,8 @@
                                                  (fn [res]
                                                    (= (:chat-id ctx) (-> res :chat :id)))])}}}
 
-          enter-the-accounts-menu
-          no-eligible-accounts-for-reinstatement]})
+          #{[enter-the-accounts-menu
+             no-eligible-accounts-for-reinstatement]}]})
 
 (def reinstate-virtual-personal-account-test-group
   (assoc reinstate-account-test-group
@@ -1139,6 +1141,7 @@
    :test [create-virtual-personal-account-test-group
           [enter-the-accounts-menu
            #{[revoke-virtual-personal-account-test-group
+              enter-the-accounts-menu
               reinstate-virtual-personal-account-test-group]
              rename-virtual-personal-account-test-group}]]})
 
@@ -1146,13 +1149,16 @@
   {:type :test/group
    :name "Group account"
    :bind {:group-account-name (generate-name-str "GroupAcc/")}
-   :test #{create-group-account-test-group
-           ;; TODO: Make all these rename/revoke/reinstate tests auto-occur upon ANY account creation.
-           [create-group-account-with-single-member-test-group ;; any SHOULD do!
-            enter-the-accounts-menu
+   :test (append-to-each
+           #{create-group-account-with-single-member-test-group
+             create-group-account-with-1of2-members-test-group
+             create-group-account-with-2of2-members-test-group}
+
+           [enter-the-accounts-menu
             #{[revoke-group-account-test-group
+               enter-the-accounts-menu
                reinstate-group-account-test-group]
-              rename-group-account-test-group}]}})
+              rename-group-account-test-group}])})
 
 (def accounts-mgmt-test-group
   {:type :test/group
@@ -1310,6 +1316,12 @@
       :bind-map {:-> "xXx"
                  :x "<- zZz"}}))
 
+(defn- set-test-subs
+  [ctx test-subs]
+  (if (some? test-subs)
+    (update ctx :test-subs merge test-subs)
+    ctx))
+
 (defn- should-run-independently?
   [node run-independently]
   (and (seq run-independently)
@@ -1397,8 +1409,20 @@
        (set? node)
        (recur (zip/next loc) ctx results (set/union independants node))
 
+       ;; This is the point for test substitutions, that is, running that part of the
+       ;; test scenarios that distinguishes the tests of the test group.
+       (keyword? node)
+       (let [test-sub (get-in ctx [:test-subs node])
+             next-or-upd-loc (if (some? test-sub)
+                               (zip/edit loc (fn [_] {:type :test/group
+                                                      :test test-sub}))
+                               (zip/next loc))]
+         (recur next-or-upd-loc ctx results independants))
+
        (= :test/group (:type node))
-       (let [ctx (set-bindings ctx (:bind node)) ;; should promote further
+       (let [ctx (-> ctx ;; should promote further
+                     (set-bindings (:bind node))
+                     (set-test-subs (:test-subs node)))
              [results independants] (run-test-group node ctx results independants)]
          (recur (zip/right loc) ctx results independants))
 
