@@ -339,7 +339,7 @@
                              :new_chat_member {:user bot-user :status "member"}})}
            :checks {:result op-succeed
                     :chat-data {:members-count 2
-                                :chat-state :waiting
+                                :chat-state :initial
                                 :bot-messages {:mandatory [{:type :name-request}]}}
                     :responses {:total 2
                                 :assert-preds (fn [ctx]
@@ -371,7 +371,7 @@
                              :text (:user-personal-account-name ctx)})}
            :checks {:result op-succeed
                     :chat-data {:members-count 2
-                                :chat-state :ready
+                                :chat-state :managed
                                 :accounts (fn [ctx]
                                             {:mandatory [{:type :acc-type/personal
                                                           :name (:user-personal-account-name ctx)}]})
@@ -414,7 +414,7 @@
    :checks {:result (fn [ctx]
                       {:method "answerCallbackQuery"
                        :callback_query_id (:callback-query-id ctx)})
-            :chat-data {:chat-state :ready
+            :chat-data {:chat-state :managed
                         :bot-messages (fn [ctx]
                                         {:mandatory [{:msg-id (-> ctx :deps :settings-msg :message_id)
                                                       :type :settings
@@ -444,7 +444,7 @@
    :checks {:result (fn [ctx]
                       {:method "answerCallbackQuery"
                        :callback_query_id (:callback-query-id ctx)})
-            :chat-data {:chat-state :ready
+            :chat-data {:chat-state :managed
                         :bot-messages (fn [ctx]
                                         {:mandatory [{:msg-id (-> ctx :deps :settings-msg :message_id)
                                                       :type :settings
@@ -473,7 +473,7 @@
    :checks {:result (fn [ctx]
                       {:method "answerCallbackQuery"
                        :callback_query_id (:callback-query-id ctx)})
-            :chat-data {:chat-state :ready
+            :chat-data {:chat-state :managed
                         :bot-messages (fn [ctx]
                                         {:mandatory [{:msg-id (-> ctx :deps :settings-msg :message_id)
                                                       :type :settings
@@ -505,7 +505,7 @@
                      :reply_to_message (-> ctx :deps :new-account-name-request-msg)
                      :text (:account-name ctx)})}
    :checks {:result op-succeed
-            :chat-data {:chat-state :ready
+            :chat-data {:chat-state :managed
                         :accounts (fn [ctx]
                                     {:mandatory [{:type (:account-type ctx)
                                                   :name (:account-name ctx)}]
@@ -549,7 +549,7 @@
             :checks {:result (fn [ctx]
                                {:method "answerCallbackQuery"
                                 :callback_query_id (:callback-query-id ctx)})
-                     :chat-data {:chat-state :ready
+                     :chat-data {:chat-state :managed
                                  :bot-messages (fn [ctx]
                                                  {:mandatory [{:msg-id (-> ctx :deps :settings-msg :message_id)
                                                                :type :settings
@@ -591,7 +591,7 @@
    :checks {:result (fn [ctx]
                       {:method "answerCallbackQuery"
                        :callback_query_id (:callback-query-id ctx)})
-            :chat-data {:chat-state :ready
+            :chat-data {:chat-state :managed
                         :bot-messages (fn [ctx]
                                         {:mandatory [{:msg-id (-> ctx :deps :settings-msg :message_id)
                                                       :type :settings
@@ -647,7 +647,7 @@
              :checks {:result (fn [ctx]
                                 {:method "answerCallbackQuery"
                                  :callback_query_id (:callback-query-id ctx)})
-                      :chat-data {:chat-state :ready
+                      :chat-data {:chat-state :managed
                                   :bot-messages (fn [ctx]
                                                   {:mandatory [{:to-user (:user-id ctx)
                                                                 :type :request-acc-name}]})}
@@ -708,7 +708,7 @@
              :checks {:result (fn [ctx]
                                 {:method "answerCallbackQuery"
                                  :callback_query_id (:callback-query-id ctx)})
-                      :chat-data {:chat-state :ready
+                      :chat-data {:chat-state :managed
                                   :bot-messages (fn [ctx]
                                                   {:mandatory [{:to-user (:user-id ctx)
                                                                 :type :request-acc-name}]})}
@@ -762,7 +762,7 @@
              :checks {:result (fn [ctx]
                                 {:method "answerCallbackQuery"
                                  :callback_query_id (:callback-query-id ctx)})
-                      :chat-data {:chat-state :ready
+                      :chat-data {:chat-state :managed
                                   :bot-messages (fn [ctx]
                                                   {:mandatory [{:to-user (:user-id ctx)
                                                                 :type :request-acc-name}]})}
@@ -802,7 +802,7 @@
            :checks {:result (fn [ctx]
                               {:method "answerCallbackQuery"
                                :callback_query_id (:callback-query-id ctx)})
-                    :chat-data {:chat-state :ready
+                    :chat-data {:chat-state :managed
                                 :bot-messages (fn [ctx]
                                                 {:mandatory [{:msg-id (-> ctx :deps :settings-msg :message_id)
                                                               :type :settings
@@ -834,7 +834,7 @@
            :checks {:result (fn [ctx]
                               {:method "answerCallbackQuery"
                                :callback_query_id (:callback-query-id ctx)})
-                    :chat-data {:chat-state :ready
+                    :chat-data {:chat-state :managed
                                 :bot-messages (fn [ctx]
                                                 {:mandatory [{:msg-id (-> ctx :deps :settings-msg :message_id)
                                                               :type :settings
@@ -872,7 +872,7 @@
                              :reply_to_message (-> ctx :deps :account-rename-request-msg)
                              :text (:account-to-rename-new-name ctx)})}
            :checks {:result op-succeed
-                    :chat-data {:chat-state :ready
+                    :chat-data {:chat-state :managed
                                 :accounts (fn [ctx]
                                             {:mandatory [{:type (:account-type ctx)
                                                           :name (:account-to-rename-new-name ctx)}]})}
@@ -917,7 +917,7 @@
    :checks {:result (fn [ctx]
                       {:method "answerCallbackQuery"
                        :callback_query_id (:callback-query-id ctx)})
-            :chat-data {:chat-state :ready}
+            :chat-data {:chat-state :managed}
             :responses {:total 1
                         :assert-preds (fn [ctx]
                                         [(fn [res]
@@ -952,7 +952,7 @@
            :checks {:result (fn [ctx]
                               {:method "answerCallbackQuery"
                                :callback_query_id (:callback-query-id ctx)})
-                    :chat-data {:chat-state :ready
+                    :chat-data {:chat-state :managed
                                 :bot-messages (fn [ctx]
                                                 {:mandatory [{:msg-id (-> ctx :deps :settings-msg :message_id)
                                                               :type :settings
@@ -985,7 +985,7 @@
            :checks {:result (fn [ctx]
                               {:method "answerCallbackQuery"
                                :callback_query_id (:callback-query-id ctx)})
-                    :chat-data {:chat-state :ready
+                    :chat-data {:chat-state :managed
                                 :bot-messages (fn [ctx]
                                                 {:mandatory [{:msg-id (-> ctx :deps :settings-msg :message_id)
                                                               :type :settings
@@ -1044,7 +1044,7 @@
    :checks {:result (fn [ctx]
                       {:method "answerCallbackQuery"
                        :callback_query_id (:callback-query-id ctx)})
-            :chat-data {:chat-state :ready}
+            :chat-data {:chat-state :managed}
             :responses {:total 1
                         :assert-preds [#(= true %)]}}})
 
@@ -1071,7 +1071,7 @@
            :checks {:result (fn [ctx]
                               {:method "answerCallbackQuery"
                                :callback_query_id (:callback-query-id ctx)})
-                    :chat-data {:chat-state :ready
+                    :chat-data {:chat-state :managed
                                 :bot-messages (fn [ctx]
                                                 {:mandatory [{:msg-id (-> ctx :deps :settings-msg :message_id)
                                                               :type :settings
@@ -1103,7 +1103,7 @@
            :checks {:result (fn [ctx]
                               {:method "answerCallbackQuery"
                                :callback_query_id (:callback-query-id ctx)})
-                    :chat-data {:chat-state :ready
+                    :chat-data {:chat-state :managed
                                 :bot-messages (fn [ctx]
                                                 {:mandatory [{:msg-id (-> ctx :deps :settings-msg :message_id)
                                                               :type :settings
