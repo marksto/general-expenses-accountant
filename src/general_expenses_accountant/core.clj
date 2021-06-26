@@ -986,6 +986,62 @@
       (let [group-acc (->group-account acc-id acc-name created-dt created-by members-ids)]
         (assoc-in chat-data [:accounts :acc-type/group acc-id] group-acc)))))
 
+;; - CHATS > BOT MESSAGES
+
+(defn- get-bot-msg
+  [chat-data msg-id]
+  (get-in chat-data [:bot-messages msg-id]))
+
+(defn- set-bot-msg!
+  [chat-id msg-id {:keys [type] :as ?props}]
+  {:pre [(or (nil? ?props) (some? type))]}
+  (assoc-in-chat-data! chat-id [:bot-messages msg-id] ?props))
+
+(defn- find-bot-messages
+  [chat-data {:keys [type to-user] :as _props}]
+  (cond->> (:bot-messages chat-data)
+           (some? type) (filter #(= type (-> % val :type)))
+           (some? to-user) (filter #(= to-user (-> % val :to-user)))))
+
+(defn- drop-bot-msg!
+  [chat-id {:keys [type to-user] :as props}]
+  {:pre [(or (some? type) (some? to-user))]}
+  (let [to-drop (map key (find-bot-messages (get-chat-data chat-id) props))]
+    (update-chat-data! chat-id
+                       update-in [:bot-messages] #(apply dissoc % to-drop))
+    to-drop))
+
+(defn- get-original-bot-msg
+  [chat-id reply-msg]
+  ;; NB: There's always only one original msg.
+  (->> (:bot-messages (get-chat-data chat-id))
+       (filter #(tg-api/is-reply-to? (key %) reply-msg))
+       (map (fn [[k v]] (assoc v :msg-id k)))
+       first))
+
+(defn- check-bot-msg
+  [bot-msg {:keys [type to-user] :as props}]
+  {:pre [(or (some? type) (some? to-user))]}
+  (when (some? bot-msg)
+    (every? #(= (val %) (-> % key bot-msg)) props)))
+
+(defn- change-bot-msg-state!
+  [chat-id msg-id msg-type-states new-state]
+  (let [updated-chat-data
+        (update-chat-data!
+          chat-id
+          (fn [chat-data]
+            (let [bot-msg (get-bot-msg chat-data msg-id)
+                  curr-state (:state bot-msg)]
+              (if (or (nil? curr-state) ;; to set an initial state
+                      (contains? (get msg-type-states curr-state) new-state))
+                (assoc-in chat-data [:bot-messages msg-id :state] new-state)
+                (do
+                  (log/errorf "Failed to change state from '%s' to '%s' for message=%s in chat=%s"
+                              curr-state new-state msg-id chat-id)
+                  chat-data)))))]
+    (:state (get-bot-msg updated-chat-data msg-id))))
+
 ;; - CHATS > GROUP CHAT
 
 (defn- get-chat-title
@@ -1184,62 +1240,6 @@
                             (true? reinstate?) :add-member)]
         (create-general-account! chat-id datetime member-action acc-id)))
     (get-account-by-id updated-chat-data acc-type acc-id)))
-
-;; - CHATS > GROUP CHAT > BOT MESSAGES ;; TODO: Move this block below to be shared.
-
-(defn- get-bot-msg
-  [chat-data msg-id]
-  (get-in chat-data [:bot-messages msg-id]))
-
-(defn- set-bot-msg!
-  [chat-id msg-id {:keys [type] :as ?props}]
-  {:pre [(or (nil? ?props) (some? type))]}
-  (assoc-in-chat-data! chat-id [:bot-messages msg-id] ?props))
-
-(defn- find-bot-messages
-  [chat-data {:keys [type to-user] :as _props}]
-  (cond->> (:bot-messages chat-data)
-           (some? type) (filter #(= type (-> % val :type)))
-           (some? to-user) (filter #(= to-user (-> % val :to-user)))))
-
-(defn- drop-bot-msg!
-  [chat-id {:keys [type to-user] :as props}]
-  {:pre [(or (some? type) (some? to-user))]}
-  (let [to-drop (map key (find-bot-messages (get-chat-data chat-id) props))]
-    (update-chat-data! chat-id
-                       update-in [:bot-messages] #(apply dissoc % to-drop))
-    to-drop))
-
-(defn- get-original-bot-msg
-  [chat-id reply-msg]
-  ;; NB: There's always only one original msg.
-  (->> (:bot-messages (get-chat-data chat-id))
-       (filter #(tg-api/is-reply-to? (key %) reply-msg))
-       (map (fn [[k v]] (assoc v :msg-id k)))
-       first))
-
-(defn- check-bot-msg
-  [bot-msg {:keys [type to-user] :as props}]
-  {:pre [(or (some? type) (some? to-user))]}
-  (when (some? bot-msg)
-    (every? #(= (val %) (-> % key bot-msg)) props)))
-
-(defn- change-bot-msg-state!
-  [chat-id msg-id msg-type-states new-state]
-  (let [updated-chat-data
-        (update-chat-data!
-          chat-id
-          (fn [chat-data]
-            (let [bot-msg (get-bot-msg chat-data msg-id)
-                  curr-state (:state bot-msg)]
-              (if (or (nil? curr-state) ;; to set an initial state
-                      (contains? (get msg-type-states curr-state) new-state))
-                (assoc-in chat-data [:bot-messages msg-id :state] new-state)
-                (do
-                  (log/errorf "Failed to change state from '%s' to '%s' for message=%s in chat=%s"
-                              curr-state new-state msg-id chat-id)
-                  chat-data)))))]
-    (:state (get-bot-msg updated-chat-data msg-id))))
 
 ;; - CHATS > GROUP CHAT > USER INPUT
 
