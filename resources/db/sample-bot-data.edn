@@ -15,7 +15,10 @@
 
                    ;; interactive input
                    :user-input "50,89 + 171"
-                   :user-error false}}
+
+                   ;; bot response messages
+                   :bot-messages {4 {:type :inline-calculator}
+                                  5 {:type :cancel-disclaimer}}}}
 
  ;; group chat-id -> group-level settings
  -560000000 {:id -560000000

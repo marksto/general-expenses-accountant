@@ -17,3 +17,10 @@
   ((if (coll? val-or-col-2) into conj)
    (ensure-coll val-or-col-1)
    val-or-col-2))
+
+(defn add-or-remove
+  [val coll]
+  (into (empty coll)
+        (if (some (set coll) [val])
+          (disj (set coll) val)
+          (conj coll val))))

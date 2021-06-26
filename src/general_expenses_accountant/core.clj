@@ -153,9 +153,9 @@
 (def ^:private done-button-text "Готово")
 (def ^:private unknown-failure-text "Что-то пошло не так.")
 (def ^:private default-general-acc-name "общие расходы")
-(def ^:private account-types-names {:acc-type/personal "Личный*" ;; TODO: Make this '*' optional.
-                                    :acc-type/group "Групповой"
-                                    :acc-type/general "Общий"})
+(def ^:private account-types-names {:acc-type/personal {:single "Личный" :plural "Личные"}
+                                    :acc-type/group {:single "Групповой" :plural "Групповые"}
+                                    :acc-type/general {:single "Общий"}})
 (def ^:private select-account-txt "Выберите счёт:")
 (def ^:private select-payer-account-txt "Выберите тех, кто понёс расход:")
 ;;                                    "Error while saving data. Please, try again later." (en)
@@ -169,30 +169,49 @@
   [markdown-str]
   (str/replace markdown-str #"[_*\[\]()~`>#+\-=|{}.!]" #(str "\\" %)))
 
+(defn- format-bold
+  [text-str]
+  (str "*" text-str "*"))
+
+(defn- format-list
+  ([items-coll]
+   (format-list items-coll nil))
+  ([items-coll {:keys [bullet item-sep text-map-fn escape-md?]
+                :or {bullet "•"
+                     item-sep "\n"
+                     text-map-fn identity}
+                :as _?opts}]
+   (let [list-str (->> items-coll
+                       (map #(str (when (some? bullet)
+                                    (str bullet " "))
+                                  (text-map-fn %)))
+                       (str/join item-sep))]
+     (if escape-md? (escape-markdown-v2 list-str) list-str))))
+
 (defn- format-currency
   [amount lang]
   (String/format (Locale/forLanguageTag lang)
-                 "%.2f" (to-array [amount])))
+                 "%.2f" ;; receives BigDecimal
+                 (to-array [(bigdec amount)])))
 
 (def ^:private force-reply-options
   (tg-api/build-message-options
     {:reply-markup (tg-api/build-reply-markup :force-reply {:selective true})
      :parse-mode "MarkdownV2"}))
 
-(defn- build-select-items-options
-  [items name-extr-fn key-extr-fn val-extr-fn]
-  (let [select-items (for [item items]
-                       [(tg-api/build-inline-kbd-btn (name-extr-fn item)
-                                                     (key-extr-fn item)
-                                                     (val-extr-fn item))])]
-    (tg-api/build-message-options
-      {:reply-markup (tg-api/build-reply-markup :inline-keyboard (vec select-items))})))
-
-(defn- append-extra-buttons
-  [inline-kbd-markup ?extra-buttons]
-  (if-let [extra-buttons (for [extra-button ?extra-buttons] [extra-button])]
-    (update-in inline-kbd-markup [:reply_markup :inline_keyboard] into extra-buttons)
-    inline-kbd-markup))
+(defn- get-select-one-item-markup
+  ([items name-extr-fn key-extr-fn val-extr-fn]
+   (get-select-one-item-markup items name-extr-fn key-extr-fn val-extr-fn nil))
+  ([items name-extr-fn key-extr-fn val-extr-fn ?extra-buttons]
+   (let [select-items (-> (for [item items]
+                            [(tg-api/build-inline-kbd-btn (name-extr-fn item)
+                                                          (key-extr-fn item)
+                                                          (val-extr-fn item))])
+                          (vec) ;; to keep extra buttons below the regular ones
+                          (into (when (some? ?extra-buttons)
+                                  (for [extra-button ?extra-buttons]
+                                    [extra-button]))))]
+     {:reply-markup (tg-api/build-reply-markup :inline-keyboard select-items)})))
 
 (defn- get-group-ref-option-id
   [group-ref]
@@ -200,9 +219,9 @@
 
 (defn- group-refs->options
   [group-refs]
-  (build-select-items-options group-refs
+  (get-select-one-item-markup group-refs
                               :title
-                              (constantly :callback_data)
+                              (constantly :callback-data)
                               get-group-ref-option-id))
 
 (defn- get-expense-item-option-id
@@ -211,9 +230,9 @@
 
 (defn- expense-items->options
   [expense-items]
-  (build-select-items-options expense-items
+  (get-select-one-item-markup expense-items
                               :desc
-                              (constantly :callback_data)
+                              (constantly :callback-data)
                               get-expense-item-option-id))
 
 (defn- get-account-option-id
@@ -222,12 +241,11 @@
 
 (defn- accounts->options
   [accounts & extra-buttons]
-  (append-extra-buttons
-    (build-select-items-options accounts
-                                :name
-                                (constantly :callback_data)
-                                get-account-option-id)
-    extra-buttons))
+  (get-select-one-item-markup accounts
+                              :name
+                              (constantly :callback-data)
+                              get-account-option-id
+                              extra-buttons))
 
 (defn- get-account-type-option-id
   [acc-type]
@@ -235,15 +253,14 @@
 
 (defn- account-types->options
   [account-types & extra-buttons]
-  (append-extra-buttons
-    (build-select-items-options account-types
-                                account-types-names
-                                (constantly :callback_data)
-                                get-account-type-option-id)
-    extra-buttons))
+  (get-select-one-item-markup account-types
+                              #(get-in account-types-names [% :single])
+                              (constantly :callback-data)
+                              get-account-type-option-id
+                              extra-buttons))
 
 (def ^:private back-button
-  (tg-api/build-inline-kbd-btn back-button-text :callback_data cd-back))
+  (tg-api/build-inline-kbd-btn back-button-text :callback-data cd-back))
 
 
 (defn- get-retry-commands-msg
@@ -287,14 +304,14 @@
    :text (format "%s можно настроить, чтобы учитывались:
 - счета — не только личные, но и групповые;
 - статьи расходов — подходящие по смыслу и удобные вам;
-- доли — по умолчанию равные для всех счетов и статей расходов." ;; TODO: Rewrite copy for "доли".
+- доли — для статей расходов и ситуаций, когда 50/50 вам не подходит." ;; "По умолчанию равны для любых счетов и статей расходов."
                  (if (true? first-time?) "Также меня" "Меня"))
    :options (tg-api/build-message-options
               {:reply-markup (tg-api/build-reply-markup
                                :inline-keyboard
-                               [[(tg-api/build-inline-kbd-btn "Счета" :callback_data cd-accounts)
-                                 (tg-api/build-inline-kbd-btn "Статьи" :callback_data cd-expense-items)
-                                 (tg-api/build-inline-kbd-btn "Доли" :callback_data cd-shares)]])})})
+                               [[(tg-api/build-inline-kbd-btn "Счета" :callback-data cd-accounts)
+                                 (tg-api/build-inline-kbd-btn "Статьи" :callback-data cd-expense-items)
+                                 (tg-api/build-inline-kbd-btn "Доли" :callback-data cd-shares)]])})})
 
 (def ^:private waiting-for-user-input-notification
   {:type :callback
@@ -315,39 +332,58 @@
 (defn- get-accounts-mgmt-options-msg
   [accounts-by-type]
   {:type :text
-   :text (str "Список счетов данной группы\n\n"
-              ;; TODO: Display the general account, if any, in a special way ("Счёт для общих расходов.").
-              (->> accounts-by-type
-                   (map (fn [[acc-type accounts]]
-                          (str (get account-types-names acc-type) ":\n"
-                               (str/join "\n" (map #(str "- " (:name %)) accounts))))) ;; TODO: Escape MDv2!
-                   (str/join "\n\n"))
-              "\n\nВыберите, что вы хотите сделать:")
+   ;; TODO: Extract the logic (of joining individual strings and collections of them into a text) into a fn.
+   :text (str/join "\n\n"
+                   ["Список счетов данной группы:"
+                    (->> accounts-by-type
+                         (map (fn [[acc-type accounts]]
+                                (case acc-type
+                                  (:acc-type/personal :acc-type/group)
+                                  (str (format-bold (get-in account-types-names [acc-type :plural])) "\n"
+                                       (format-list accounts {:text-map-fn :name
+                                                              :escape-md? true}))
+                                  :acc-type/general
+                                  (format-bold "Счёт для общих расходов"))))
+                         (str/join "\n\n"))
+                    "Выберите, что вы хотите сделать:"])
    :options (tg-api/build-message-options
               {:reply-markup (tg-api/build-reply-markup
                                :inline-keyboard
-                               [[(tg-api/build-inline-kbd-btn "Создать новый" :callback_data cd-accounts-create)]
-                                [(tg-api/build-inline-kbd-btn "Переименовать" :callback_data cd-accounts-rename)]
-                                [(tg-api/build-inline-kbd-btn "Упразднить" :callback_data cd-accounts-revoke)]
-                                [(tg-api/build-inline-kbd-btn "Восстановить" :callback_data cd-accounts-reinstate)]
-                                [back-button]])})})
+                               [[(tg-api/build-inline-kbd-btn "Создать новый" :callback-data cd-accounts-create)]
+                                [(tg-api/build-inline-kbd-btn "Переименовать" :callback-data cd-accounts-rename)]
+                                [(tg-api/build-inline-kbd-btn "Упразднить" :callback-data cd-accounts-revoke)]
+                                [(tg-api/build-inline-kbd-btn "Восстановить" :callback-data cd-accounts-reinstate)]
+                                [back-button]])
+               :parse-mode "MarkdownV2"})})
 
 (defn- get-account-selection-msg
   ([accounts txt]
    (get-account-selection-msg accounts txt nil))
-  ([accounts txt ?extra-buttons]
+  ([accounts txt {:keys [extra-buttons extra-options] :as _?extras}]
    {:pre [(seq accounts)]}
    {:type :text
     :text txt
-    :options (apply accounts->options accounts ?extra-buttons)}))
+    :options (tg-api/build-message-options
+               (merge (apply accounts->options accounts extra-buttons)
+                      extra-options))}))
 
 (defn- get-account-type-selection-msg
   [account-types extra-buttons]
   {:pre [(seq account-types)]}
   {:type :text
-   :text "Выберите тип счёта:
-*) на случай, если пользователя нет в Telegram"
-   :options (apply account-types->options account-types extra-buttons)})
+   ;; Group account is used to share the expenses between the group members.
+   ;; Personal account is needed in case the person is not present in Telegram.
+   :text (str/join "\n\n"
+                   ["Какие счета для чего нужны?"
+                    (str/join "\n"
+                              [(str (format-bold (get-in account-types-names [:acc-type/group :single])) " — "
+                                    (escape-markdown-v2 "используется для распределения расходов между членами группы.\n"))
+                               (str (format-bold (get-in account-types-names [:acc-type/personal :single])) " — "
+                                    (escape-markdown-v2 "используется в случае, если человека нет в Telegram, но учитывать его при расчётах нужно."))])
+                    "Выберите тип счёта:"])
+   :options (tg-api/build-message-options
+              (merge (apply account-types->options account-types extra-buttons)
+                     {:parse-mode "MarkdownV2"}))})
 
 (defn- get-new-account-name-request-msg
   [user]
@@ -364,21 +400,24 @@
    :options force-reply-options})
 
 (defn- get-group-members-selection-msg
-  [accounts]
-  (get-account-selection-msg
-    accounts
-    "Выберите члена(ов) группы:" ;; TODO: Mention the user to whom is this message?
-    [(tg-api/build-inline-kbd-btn undo-button-text :callback_data cd-undo)
-     (tg-api/build-inline-kbd-btn done-button-text :callback_data cd-done)]))
+  [user selected remaining]
+  ;; TODO: Extract this logic into a 'get-select-multiple-items-markup' fn?
+  (let [all-accounts-with-ticks (concat (map #(update % :name (partial str "✔ ")) selected)
+                                        remaining)]
+    (get-account-selection-msg
+      all-accounts-with-ticks
+      (str (tg-api/get-user-mention-text user)
+           (escape-markdown-v2 ", выберите члена(ов) группы:"))
+      {:extra-buttons [(tg-api/build-inline-kbd-btn undo-button-text :callback-data cd-undo)
+                       (tg-api/build-inline-kbd-btn done-button-text :callback-data cd-done)]
+       :extra-options {:parse-mode "MarkdownV2"}})))
 
 (defn- get-new-group-members-msg
   [acc-names]
   {:pre [(seq acc-names)]}
   {:type :text
    :text (str "Члены новой группы:\n"
-              (->> acc-names ;; TODO: Extract into a dedicated fn + reuse above.
-                   (map #(str "- " %))
-                   (str/join "\n")))})
+              (format-list acc-names))})
 
 (def ^:private no-group-members-selected-notification
   {:type :callback
@@ -416,9 +455,11 @@
                                            (tg-api/get-user-mention-text user))]
                             (str (str/join " " mentions) ", " request-txt))
                           (str/capitalize request-txt))
-               part-two (when (and existing-chat? (empty? ?chat-members))
-                          (escape-markdown-v2 "Пожалуйста, проигнорийруте это сообщение, если у вас уже есть личный счёт в данной группе."))]
-           (str/trim (str part-one "\n" part-two)))
+               part-two (escape-markdown-v2
+                          (if (and existing-chat? (empty? ?chat-members))
+                            "Пожалуйста, проигнорийруте это сообщение, если у вас уже есть личный счёт в данной группе."
+                            "Пожалуйста, ответьте на данное сообщение."))]
+           (str/trim (str part-one "\n\n" part-two)))
    :options (tg-api/build-message-options
               {:reply-markup (tg-api/build-reply-markup
                                :force-reply {:selective (some? ?chat-members)})
@@ -443,7 +484,7 @@
   [expense-amount expense-details payer-acc-name debtor-acc-name]
   (let [formatted-amount (format-currency expense-amount "ru")
         title-txt (when (some? payer-acc-name)
-                    (str "*" (escape-markdown-v2 payer-acc-name) "*\n"))
+                    (str (format-bold (escape-markdown-v2 payer-acc-name)) "\n"))
         details-txt (->> [(str formatted-amount "₽")
                           debtor-acc-name
                           expense-details]
@@ -469,22 +510,22 @@
 (def ^:private inline-calculator-markup
   (tg-api/build-reply-markup
     :inline-keyboard
-    [[(tg-api/build-inline-kbd-btn "7" :callback_data "7")
-      (tg-api/build-inline-kbd-btn "8" :callback_data "8")
-      (tg-api/build-inline-kbd-btn "9" :callback_data "9")
-      (tg-api/build-inline-kbd-btn "C" :callback_data cd-cancel)]
-     [(tg-api/build-inline-kbd-btn "4" :callback_data "4")
-      (tg-api/build-inline-kbd-btn "5" :callback_data "5")
-      (tg-api/build-inline-kbd-btn "6" :callback_data "6")
-      (tg-api/build-inline-kbd-btn "+" :callback_data "+")]
-     [(tg-api/build-inline-kbd-btn "1" :callback_data "1")
-      (tg-api/build-inline-kbd-btn "2" :callback_data "2")
-      (tg-api/build-inline-kbd-btn "3" :callback_data "3")
-      (tg-api/build-inline-kbd-btn "–" :callback_data "–")]
-     [(tg-api/build-inline-kbd-btn "0" :callback_data "0")
-      (tg-api/build-inline-kbd-btn "," :callback_data ",")
-      (tg-api/build-inline-kbd-btn "←" :callback_data cd-clear)
-      (tg-api/build-inline-kbd-btn "OK" :callback_data cd-enter)]]))
+    [[(tg-api/build-inline-kbd-btn "7" :callback-data "7")
+      (tg-api/build-inline-kbd-btn "8" :callback-data "8")
+      (tg-api/build-inline-kbd-btn "9" :callback-data "9")
+      (tg-api/build-inline-kbd-btn "C" :callback-data cd-cancel)]
+     [(tg-api/build-inline-kbd-btn "4" :callback-data "4")
+      (tg-api/build-inline-kbd-btn "5" :callback-data "5")
+      (tg-api/build-inline-kbd-btn "6" :callback-data "6")
+      (tg-api/build-inline-kbd-btn "+" :callback-data "+")]
+     [(tg-api/build-inline-kbd-btn "1" :callback-data "1")
+      (tg-api/build-inline-kbd-btn "2" :callback-data "2")
+      (tg-api/build-inline-kbd-btn "3" :callback-data "3")
+      (tg-api/build-inline-kbd-btn "–" :callback-data "–")]
+     [(tg-api/build-inline-kbd-btn "0" :callback-data "0")
+      (tg-api/build-inline-kbd-btn "," :callback-data ",")
+      (tg-api/build-inline-kbd-btn "←" :callback-data cd-clear)
+      (tg-api/build-inline-kbd-btn "OK" :callback-data cd-enter)]]))
 
 (defn- get-interactive-input-msg
   ([text]
@@ -498,22 +539,17 @@
 (defn- get-inline-calculator-msg
   [user-input]
   (get-interactive-input-msg
-    (escape-markdown-v2 (if (empty? user-input) "_" user-input)) ;; TODO: Always show '_' in the end of user input.
+    (escape-markdown-v2 (str user-input "_"))
     {:reply-markup inline-calculator-markup}))
 
-(defn- get-calculation-success-msg
+(defn- get-interactive-input-success-msg
   [amount]
   (get-interactive-input-msg
     (escape-markdown-v2 (format-currency amount "ru"))))
 
-(defn- get-calculation-failure-msg
-  [amount]
-  (get-interactive-input-msg
-    (str/join "\n"
-              [amount
-               ;; TODO: Make this disclaimer permanent, i.e. always show it in the 'interactive input' mode.
-               (escape-markdown-v2 "Введите /cancel, чтобы выйти из режима калькуляции и ввести данные вручную.")])
-    {:reply-markup inline-calculator-markup}))
+(def ^:private interactive-input-disclaimer-msg
+  {:type :text
+   :text "Введите /cancel, чтобы выйти из режима калькуляции и ввести данные вручную."})
 
 (def ^:private invalid-input-notification
   {:type :callback
@@ -534,14 +570,16 @@
   {:pre [(seq group-refs)]}
   {:type :text
    :text "Выберите, к какой группе отнести расход:"
-   :options (group-refs->options group-refs)})
+   :options (tg-api/build-message-options
+              (group-refs->options group-refs))})
 
 (defn- get-expense-item-selection-msg
   [expense-items]
   {:pre [(seq expense-items)]}
   {:type :text
    :text "Выберите статью расходов:"
-   :options (expense-items->options expense-items)})
+   :options (tg-api/build-message-options
+              (expense-items->options expense-items))})
 
 (defn- get-expense-manual-description-msg
   [user-name]
@@ -1119,7 +1157,7 @@
         (create-general-account! chat-id datetime member-action acc-id)))
     (get-account-by-id updated-chat-data acc-type acc-id)))
 
-;; - CHATS > GROUP CHAT > BOT MESSAGES
+;; - CHATS > GROUP CHAT > BOT MESSAGES ;; TODO: Move this block below to be shared.
 
 (defn- get-bot-msg
   [chat-data msg-id]
@@ -1141,7 +1179,8 @@
   {:pre [(or (some? type) (some? to-user))]}
   (let [to-drop (map key (find-bot-messages (get-chat-data chat-id) props))]
     (update-chat-data! chat-id
-                       update-in [:bot-messages] #(apply dissoc % to-drop))))
+                       update-in [:bot-messages] #(apply dissoc % to-drop))
+    to-drop))
 
 (defn- get-original-bot-msg
   [chat-id reply-msg]
@@ -1309,9 +1348,11 @@
         cancel
         (fn [old-val]
           (let [trimmed (str/trim old-val)]
-            (-> trimmed
-                (subs 0 (dec (count trimmed)))
-                str/trim)))
+            (if (< 0 (count trimmed))
+              (-> trimmed
+                  (subs 0 (dec (count trimmed)))
+                  str/trim)
+              trimmed)))
         clear
         (constantly nil)
 
@@ -1327,17 +1368,6 @@
                              :clear clear) old-val)]
               (assoc chat-data :user-input new-val))))]
     (get-user-input updated-chat-data)))
-
-(defn- is-user-input-error?
-  [chat-id]
-  (when (does-chat-exist? chat-id)
-    (true? (get (get-chat-data chat-id) :user-error))))
-
-(defn- update-user-input-error-status!
-  [chat-id val]
-  (let [boolean-val (boolean val)]
-    (assoc-in-chat-data! chat-id [:user-error] boolean-val)
-    boolean-val))
 
 ;; - CHATS > SUPERGROUP CHAT
 
@@ -1389,7 +1419,7 @@
 
     :group-members-selection-msg
     {:response-fn get-group-members-selection-msg
-     :response-params [:accounts]}
+     :response-params [:user :selected :remaining]}
 
     :new-group-members-msg
     {:response-fn get-new-group-members-msg
@@ -1442,12 +1472,11 @@
     :inline-calculator-msg
     {:response-fn get-inline-calculator-msg
      :response-params [:new-user-input]}
-    :calculation-success-msg
-    {:response-fn get-calculation-success-msg
+    :interactive-input-success-msg
+    {:response-fn get-interactive-input-success-msg
      :response-params [:parsed-val]}
-    :calculation-failure-msg
-    {:response-fn get-calculation-failure-msg
-     :response-params [:parsed-val]}
+    :interactive-input-disclaimer-msg
+    {:response-fn (constantly interactive-input-disclaimer-msg)}
 
     :invalid-input-msg
     {:response-fn (constantly invalid-input-msg)}
@@ -1935,6 +1964,13 @@
 
 ;; TODO: Abstract away the "selecting N of {M; optional ALL}, M>=N>0" scenario.
 
+(defn- clean-up-interactive-input-data!
+  [chat-id]
+  (let [dropped-msgs (concat (drop-bot-msg! chat-id {:type :inline-calculator})
+                             (drop-bot-msg! chat-id {:type :cancel-disclaimer}))]
+    (doseq [msg-id dropped-msgs]
+      (delete-response! {:chat-id chat-id :msg-id msg-id}))))
+
 ; group chats
 
 (defn- proceed-with-bot-eviction!
@@ -2056,13 +2092,15 @@
                                                  {:acc-types [:acc-type/personal]})]
       (respond!* {:chat-id chat-id}
                  [:chat-type/group :group-members-selection-msg]
-                 :param-vals {:accounts personal-accs} ;; TODO: Pass both 'selected' and 'remaining'.
+                 :param-vals {:user user
+                              :selected nil
+                              :remaining personal-accs}
                  :on-success #(set-bot-msg! chat-id (:message_id %)
                                             {:to-user user-id
                                              :type :group-members-selection})))))
 
 (defn- proceed-with-account-member-selection!
-  [chat-id msg-id already-selected-account-members]
+  [chat-id msg-id user already-selected-account-members]
   (let [personal-accs (set (get-group-chat-accounts chat-id
                                                     {:acc-types [:acc-type/personal]}))
         selected-accs (set already-selected-account-members)
@@ -2071,7 +2109,9 @@
     (when accounts-remain?
       (respond!* {:chat-id chat-id :msg-id msg-id}
                  [:chat-type/group :group-members-selection-msg]
-                 :param-vals {:accounts remaining-accs} ;; TODO: Pass both 'selected' and 'remaining'.
+                 :param-vals {:user user
+                              :selected selected-accs
+                              :remaining remaining-accs}
                  :replace? true))
     accounts-remain?))
 
@@ -2090,7 +2130,7 @@
   (let [members (-> (get-chat-data chat-id)
                     (get-user-input-data user-id :create-account)
                     (get :members))
-        can-proceed? (proceed-with-account-member-selection! chat-id msg-id members)]
+        can-proceed? (proceed-with-account-member-selection! chat-id msg-id user members)]
     (when-not can-proceed?
       (proceed-with-end-of-account-members-selection! chat-id msg-id user members))))
 
@@ -2222,11 +2262,24 @@
     (log/debug "Calculator opened in a private chat:" chat)
     (proceed-with-chat-and-respond!
       {:chat-id chat-id}
-      {:transition [:chat-type/private :show-calculator]})))
+      {:transition [:chat-type/private :show-calculator]}
+      :on-success #(set-bot-msg! chat-id (:message_id %)
+                                 {:type :inline-calculator}))
+    (respond!* {:chat-id chat-id}
+               [:chat-type/private :interactive-input-disclaimer-msg]
+               :on-success #(set-bot-msg! chat-id (:message_id %)
+                                          {:type :cancel-disclaimer}))))
 
 (defn- cmd-private-cancel!
   [{chat-id :id :as chat}]
   (log/debug "The operation is canceled in a private chat:" chat)
+
+  ;; clean-up the messages
+  (case (get-chat-state (get-chat-data chat-id))
+    :interactive-input
+    (clean-up-interactive-input-data! chat-id)
+    nil)
+
   (proceed-with-chat-and-respond!
     {:chat-id chat-id}
     {:transition [:chat-type/private :cancel-input]}))
@@ -2526,10 +2579,10 @@
             chat-id user-id msg-id callback-query-id
 
             (let [chat-data (get-chat-data chat-id)
-                  new-member (data->account callback-btn-data chat-data)
+                  picked-acc (data->account callback-btn-data chat-data)
                   input-data (-> chat-data
                                  (get-user-input-data user-id :create-account)
-                                 (update :members conj new-member))]
+                                 (update :members #(utils/add-or-remove picked-acc %)))]
               (set-user-input-data! chat-id user-id :create-account input-data))
             (proceed-with-next-group-account-creation-steps! chat-id msg-id user)))
         (cb-succeed callback-query-id))
@@ -2809,7 +2862,6 @@
                                             (partial = cd-clear) {:type :cancel}
                                             (partial = cd-cancel) {:type :clear}
                                             nil)]
-          (update-user-input-error-status! chat-id false)
           (let [old-user-input (get-user-input (get-chat-data chat-id))
                 new-user-input (update-user-input! chat-id non-terminal-operation)]
             (when (not= old-user-input new-user-input)
@@ -2824,7 +2876,7 @@
     (handle-with-care!
       [{callback-query-id :id
         {first-name :first_name} :from
-        {msg-id :message_id {chat-id :id} :chat} :message
+        {{chat-id :id} :chat} :message
         callback-btn-data :data
         :as callback-query}]
       (when (and (= :chat-type/private (:chat-type callback-query))
@@ -2832,29 +2884,20 @@
                  (= cd-enter callback-btn-data))
         (let [user-input (get-user-input (get-chat-data chat-id))
               parsed-val (nums/parse-arithmetic-expression user-input)]
-          (if (and (some? parsed-val) (number? parsed-val))
+          (if (and (number? parsed-val) (pos? parsed-val))
             (do
               (log/debug "User input:" parsed-val)
               (assoc-in-chat-data! chat-id [:amount] parsed-val)
+              (clean-up-interactive-input-data! chat-id)
 
-              (update-user-input-error-status! chat-id false)
-              (respond!* {:chat-id chat-id :msg-id msg-id}
-                         [:chat-type/private :calculation-success-msg]
-                         :param-vals {:parsed-val parsed-val}
-                         :replace? true)
-
+              (respond!* {:chat-id chat-id}
+                         [:chat-type/private :interactive-input-success-msg]
+                         :param-vals {:parsed-val parsed-val})
               (proceed-with-group! chat-id first-name))
             (do
               (log/debugf "Invalid user input: \"%s\"" parsed-val)
               (respond!* {:callback-query-id callback-query-id}
-                         [:chat-type/private :invalid-input-notification])
-
-              (when-not (is-user-input-error? chat-id)
-                (update-user-input-error-status! chat-id true)
-                (respond!* {:chat-id chat-id :msg-id msg-id}
-                           [:chat-type/private :calculation-failure-msg]
-                           :param-vals {:parsed-val parsed-val}
-                           :replace? true)))))
+                         [:chat-type/private :invalid-input-notification]))))
         (cb-succeed callback-query-id))
       send-retry-callback-query!))
 
