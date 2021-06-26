@@ -1536,6 +1536,10 @@
 
 ; chat states
 
+;; TODO: There is a serious issue of a chat transition happening right before the exception happens.
+;;       Both private chats state and group chats' message state are vulnerable to this.
+;;       Solution: surround all update handlers with transaction boundaries.
+
 (def ^:private group-chat-states
   {:initial #{:managed
               :evicted}
@@ -2352,6 +2356,7 @@
 ;; TODO: The design should be similar to the Lupapiste web handlers with their 'in-/outjects'.
 
 ;; TODO: Add a rate limiter. Use the 'limiter' from Encore? Or some full-featured RPC library?
+;;       This is to overcome the recent error — HTTP 429 — "Too many requests, retry after X".
 ; The Bots FAQ on the official Telegram website lists the following limits on server requests:
 ; - No more than 1 message per second in a single chat,
 ; - No more than 20 messages per minute in one group,
