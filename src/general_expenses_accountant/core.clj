@@ -329,23 +329,27 @@
   {:type :callback
    :options {:text "Запрос не может быть обработан"}})
 
+(defn- join-into-text
+  ([strings-or-colls]
+   (join-into-text strings-or-colls "\n\n"))
+  ([strings-or-colls sep]
+   (str/join sep (flatten strings-or-colls))))
+
 (defn- get-accounts-mgmt-options-msg
   [accounts-by-type]
   {:type :text
-   ;; TODO: Extract the logic (of joining individual strings and collections of them into a text) into a fn.
-   :text (str/join "\n\n"
-                   ["Список счетов данной группы:"
-                    (->> accounts-by-type
-                         (map (fn [[acc-type accounts]]
-                                (case acc-type
-                                  (:acc-type/personal :acc-type/group)
-                                  (str (format-bold (get-in account-types-names [acc-type :plural])) "\n"
-                                       (format-list accounts {:text-map-fn :name
-                                                              :escape-md? true}))
-                                  :acc-type/general
-                                  (format-bold "Счёт для общих расходов"))))
-                         (str/join "\n\n"))
-                    "Выберите, что вы хотите сделать:"])
+   :text (join-into-text
+           ["Список счетов данной группы:"
+            (map (fn [[acc-type accounts]]
+                   (case acc-type
+                     (:acc-type/personal :acc-type/group)
+                     (str (format-bold (get-in account-types-names [acc-type :plural])) "\n"
+                          (format-list accounts {:text-map-fn :name
+                                                 :escape-md? true}))
+                     :acc-type/general
+                     (format-bold "Счёт для общих расходов")))
+                 accounts-by-type)
+            "Выберите, что вы хотите сделать:"])
    :options (tg-api/build-message-options
               {:reply-markup (tg-api/build-reply-markup
                                :inline-keyboard
@@ -373,14 +377,13 @@
   {:type :text
    ;; Group account is used to share the expenses between the group members.
    ;; Personal account is needed in case the person is not present in Telegram.
-   :text (str/join "\n\n"
-                   ["Какие счета для чего нужны?"
-                    (str/join "\n"
-                              [(str (format-bold (get-in account-types-names [:acc-type/group :single])) " — "
-                                    (escape-markdown-v2 "используется для распределения расходов между членами группы.\n"))
-                               (str (format-bold (get-in account-types-names [:acc-type/personal :single])) " — "
-                                    (escape-markdown-v2 "используется в случае, если человека нет в Telegram, но учитывать его при расчётах нужно."))])
-                    "Выберите тип счёта:"])
+   :text (join-into-text
+           ["Какие счета для чего нужны?"
+            (str (format-bold (get-in account-types-names [:acc-type/group :single])) " — "
+                 (escape-markdown-v2 "используется для распределения расходов между членами группы."))
+            (str (format-bold (get-in account-types-names [:acc-type/personal :single])) " — "
+                 (escape-markdown-v2 "используется в случае, если человека нет в Telegram, но учитывать его при расчётах нужно."))
+            "Выберите тип счёта:"])
    :options (tg-api/build-message-options
               (merge (apply account-types->options account-types extra-buttons)
                      {:parse-mode "MarkdownV2"}))})
@@ -459,7 +462,7 @@
                           (if (and existing-chat? (empty? ?chat-members))
                             "Пожалуйста, проигнорийруте это сообщение, если у вас уже есть личный счёт в данной группе."
                             "Пожалуйста, ответьте на данное сообщение."))]
-           (str/trim (str part-one "\n\n" part-two)))
+           (join-into-text [part-one part-two]))
    :options (tg-api/build-message-options
               {:reply-markup (tg-api/build-reply-markup
                                :force-reply {:selective (some? ?chat-members)})
