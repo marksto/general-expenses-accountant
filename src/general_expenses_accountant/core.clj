@@ -199,19 +199,43 @@
     {:reply-markup (tg-api/build-reply-markup :force-reply {:selective true})
      :parse-mode "MarkdownV2"}))
 
+(defn- build-items-selection-markup
+  [items-buttons ?extra-buttons]
+  (let [extra-buttons (when (some? ?extra-buttons)
+                        (for [extra-btn ?extra-buttons]
+                          [extra-btn]))
+        ;; NB: A 'vec' is used to keep extra buttons below the regular ones.
+        all-kbd-btns (into (vec items-buttons) extra-buttons)]
+    {:reply-markup (tg-api/build-reply-markup :inline-keyboard all-kbd-btns)}))
+
 (defn- get-select-one-item-markup
   ([items name-extr-fn key-extr-fn val-extr-fn]
    (get-select-one-item-markup items name-extr-fn key-extr-fn val-extr-fn nil))
   ([items name-extr-fn key-extr-fn val-extr-fn ?extra-buttons]
-   (let [select-items (-> (for [item items]
-                            [(tg-api/build-inline-kbd-btn (name-extr-fn item)
-                                                          (key-extr-fn item)
-                                                          (val-extr-fn item))])
-                          (vec) ;; to keep extra buttons below the regular ones
-                          (into (when (some? ?extra-buttons)
-                                  (for [extra-button ?extra-buttons]
-                                    [extra-button]))))]
-     {:reply-markup (tg-api/build-reply-markup :inline-keyboard select-items)})))
+   (let [items-btns (for [item items]
+                      [(tg-api/build-inline-kbd-btn (name-extr-fn item)
+                                                    (key-extr-fn item)
+                                                    (val-extr-fn item))])]
+     (build-items-selection-markup items-btns ?extra-buttons))))
+
+(defn- get-select-multiple-items-markup
+  ([selected-items remaining-items
+    name-extr-fn key-extr-fn val-extr-fn]
+   (get-select-multiple-items-markup selected-items remaining-items
+                                     name-extr-fn key-extr-fn val-extr-fn nil))
+  ([selected-items remaining-items
+    name-extr-fn key-extr-fn val-extr-fn
+    ?extra-buttons]
+   (let [sel-items-btns (for [item selected-items]
+                          [(tg-api/build-inline-kbd-btn (str "✔ " (name-extr-fn item))
+                                                        (key-extr-fn item)
+                                                        (val-extr-fn item))])
+         rem-items-btns (for [item remaining-items]
+                          [(tg-api/build-inline-kbd-btn (name-extr-fn item)
+                                                        (key-extr-fn item)
+                                                        (val-extr-fn item))])
+         all-items-btns (concat sel-items-btns rem-items-btns)]
+     (build-items-selection-markup all-items-btns ?extra-buttons))))
 
 (defn- get-group-ref-option-id
   [group-ref]
@@ -363,13 +387,12 @@
 (defn- get-account-selection-msg
   ([accounts txt]
    (get-account-selection-msg accounts txt nil))
-  ([accounts txt {:keys [extra-buttons extra-options] :as _?extras}]
+  ([accounts txt ?extra-buttons]
    {:pre [(seq accounts)]}
    {:type :text
     :text txt
     :options (tg-api/build-message-options
-               (merge (apply accounts->options accounts extra-buttons)
-                      extra-options))}))
+               (apply accounts->options accounts ?extra-buttons))}))
 
 (defn- get-account-type-selection-msg
   [account-types extra-buttons]
@@ -404,16 +427,18 @@
 
 (defn- get-group-members-selection-msg
   [user selected remaining]
-  ;; TODO: Extract this logic into a 'get-select-multiple-items-markup' fn?
-  (let [all-accounts-with-ticks (concat (map #(update % :name (partial str "✔ ")) selected)
-                                        remaining)]
-    (get-account-selection-msg
-      all-accounts-with-ticks
-      (str (tg-api/get-user-mention-text user)
-           (escape-markdown-v2 ", выберите члена(ов) группы:"))
-      {:extra-buttons [(tg-api/build-inline-kbd-btn undo-button-text :callback-data cd-undo)
-                       (tg-api/build-inline-kbd-btn done-button-text :callback-data cd-done)]
-       :extra-options {:parse-mode "MarkdownV2"}})))
+  (let [extra-buttons [(tg-api/build-inline-kbd-btn undo-button-text :callback-data cd-undo)
+                       (tg-api/build-inline-kbd-btn done-button-text :callback-data cd-done)]]
+    {:type :text
+     :text (str (tg-api/get-user-mention-text user)
+                (escape-markdown-v2 ", выберите члена(ов) группы:"))
+     :options (tg-api/build-message-options
+                (merge (get-select-multiple-items-markup selected remaining
+                                                         :name
+                                                         (constantly :callback-data)
+                                                         get-account-option-id
+                                                         extra-buttons)
+                       {:parse-mode "MarkdownV2"}))}))
 
 (defn- get-new-group-members-msg
   [acc-names]
