@@ -37,7 +37,7 @@
 ;; - WEBHOOK
 
 (defn- construct-webhook-url
-  "Constructs webhook URL according to the Telegram Bot API recommendation."
+  "Constructs webhook URL according to the Telegram recommendation."
   [bot-url api-path token]
   (str bot-url api-path "/" token))
 
@@ -61,8 +61,9 @@
           (try
             (log/info "Starting Telegram polling...") ;; TODO: Move to Morse.
             (m-poll/start token upd-handler)
-            (catch Exception _
-              ;; will be processed later
+            (catch Exception e
+              (log/warn e "Exception during the long-polling start process")
+              ;; NB: We pass 'nil' intentionally, see the 'not-polling?' fn.
               nil))))
 
 (defn- await-for-sec
@@ -107,6 +108,7 @@
 (def ^:private base-url m-api/base-url)
 
 (defn get-me
+  "Returns basic information about the bot in form of a 'User' object."
   [token]
   (let [url (str base-url token "/getMe")
         resp (http/get url {:as :json})]
@@ -126,7 +128,7 @@
 ;;     and 'cache_time', in callback query answers. Thus, this fn interface
 ;;     was generalized.
 (defn answer-callback-query
-  "Sends an answer to a callback query.
+  "Sends an answer to a callback query. On success, 'True' is returned.
    NB: After the user presses a callback button, Telegram clients will display
        a progress bar until you call 'answer-callback-query'. It is, therefore,
        necessary to react by calling 'answer-callback-query', even if there is
@@ -134,7 +136,7 @@
   ([token callback-query-id]
    ;; NB: The 'text' is not specified => nothing will be shown to the user.
    (answer-callback-query token callback-query-id {}))
-  ([token callback-query-id options]
+  ([token callback-query-id {:keys [text] :as options}] ;; TODO: Question Otann about this approach.
    (let [url (str base-url token "/answerCallbackQuery")
          body (into {:callback_query_id callback-query-id} options)
          resp (http/post url {:content-type :json
@@ -190,28 +192,42 @@
             map-to-name)))
 
 (defn command-fn
-  "Generate command handler from an update function"
-  [name handler]
+  "Creates an update handler for the bot command with the specified 'name',
+   using the passed 'handler-fn' w/ the update's 'message' as an argument."
+  [name handler-fn]
   (fn [update]
     (when (some #{name} (get-commands update))
-      (handler (:message update)))))
+      (handler-fn (:message update)))))
 
 (defmacro command
-  "Generate command handler"
+  "Creates an update handler for the bot command with the specified 'name',
+   using the message handler fn in a form of (fn ['bindings'] 'body')."
   [name bindings & body]
   `(command-fn ~name (fn [~bindings] ~@body)))
 
 
-(defn bot-chat-member-status-fn [handler-fn]
+(defn bot-chat-member-status-fn
+  "Creates an update handler for the bot's own 'ChatMemberUpdated' events,
+   using the passed 'handler-fn' w/ the update's 'my_chat_member' as an
+   argument."
+  [handler-fn]
   (m-hlr/update-fn [:my_chat_member] handler-fn))
 
 (defmacro bot-chat-member-status
+  "Creates an update handler for the bot's own 'ChatMemberUpdated' events,
+   using the event handler fn in a form of (fn ['bindings'] 'body')."
   [bindings & body]
   `(bot-chat-member-status-fn (fn [~bindings] ~@body)))
 
-(defn chat-member-status-fn [handler-fn]
+(defn chat-member-status-fn
+  "Creates an update handler for the non-bot's 'ChatMemberUpdated' events,
+   using the passed 'handler-fn' w/ the update's 'chat_member' as an
+   argument."
+  [handler-fn]
   (m-hlr/update-fn [:chat_member] handler-fn))
 
 (defmacro chat-member-status
+  "Creates an update handler for the non-bot's 'ChatMemberUpdated' events,
+   using the event handler fn in a form of (fn ['bindings'] 'body')."
   [bindings & body]
   `(chat-member-status-fn (fn [~bindings] ~@body)))
