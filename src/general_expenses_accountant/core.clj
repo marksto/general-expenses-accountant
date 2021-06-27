@@ -1764,6 +1764,9 @@
         handle-tg-response-fn (fn [tg-response]
                                 (log/debug "Telegram returned:" tg-response)
                                 (try
+                                  ;; TODO: There are 2 possible outcomes. Do we need to differentiate them somehow?
+                                  ;;       - successful request ('ok' equals true)
+                                  ;;       - unsuccessful request ('ok' equals false, error is in the 'description')
                                   (when (and (some? on-success)
                                              (true? (:ok tg-response)))
                                     (on-success (:result tg-response)))
