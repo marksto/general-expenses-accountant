@@ -26,8 +26,8 @@
 ;;          - 'clojure.tools.macro' — only a single fn is used => inline it in 'utils'
 ;;          - 'clj-stacktrace' — is it even used? no references within 'src'
 ;;       2. Improve the error logging:
-;;          - surround all outgoing HTTP requests w/ 'try-catch'
-;;          - on '::api/error' log the error itself (channel message ':description')
+;;          - surround all outgoing HTTP requests w/ 'try-catch' and log the exception (debug level)
+;;          - on '::api/error' log the error itself (the response body ':description'), not just text
 ;;       3. Add explicit type hints in order to avoid unnecessary reflective calls:
 ;;          - Reflection warning, morse/api.clj:137:28 - reference to field getName can't be resolved.
 ;;          - Reflection warning, morse/api.clj:137:28 - call to method endsWith can't be resolved (target class is unknown).
@@ -59,7 +59,7 @@
   [token upd-handler]
   (reset! *updates-channel
           (try
-            (log/info "Starting Telegram polling...") ;; TODO: Move to Morse.
+            (log/info "Starting Telegram polling...") ;; TODO: Move this line inside the 'm-poll/start' fn.
             (m-poll/start token upd-handler)
             (catch Exception e
               (log/warn e "Exception during the long-polling start process")
@@ -101,11 +101,44 @@
   (await-for-sec))
 
 
-;; BOT API METHODS
+;; BOT API METHODS ;; TODO: Move to Morse.
 
-;; TODO: Morse improvement. Check the resp's ':ok' to be 'true' before getting its 'body'.
+;; TODO: Morse improvement. Check the resp's ':ok' to be 'true' before
+;;       getting its 'body'. The approach for the 'getUpdates' and the
+;;       other Bot API methods here may be different. From the Bot API
+;;       documentation:
 
-(def ^:private base-url m-api/base-url)
+;; The response contains a JSON object, which always has a Boolean field 'ok'
+;; and may have an optional String field 'description' with a human-readable
+;; description of the result.
+;;
+;; - If 'ok' equals true, the request was successful
+;;   and the result of the query can be found in the 'result' field.
+;;
+;; - In case of an unsuccessful request, 'ok' equals false
+;;   and the error is explained in the 'description'.
+;;   TODO: This information should be passed on (instead of plain '::error')
+;;         in the 'm-api/get-updates-async' fn.
+;;   TODO: All other methods should normally account for this checking ':ok'
+;;         before returning the ':result'.
+;;
+;; - An Integer 'error_code' field is also returned,
+;;   but its contents are subject to change in the future.
+;;
+;; - Some errors may also have an optional field 'parameters' of the type
+;;   'ResponseParameters', which can help to automatically handle the error.
+;;   TODO: Introduce the auto-retry strategies for some/all of these cases.
+
+; ResponseParameters
+;
+; Contains information about why a request was unsuccessful.
+;
+; Field             	Type    	Description
+; migrate_to_chat_id 	Integer 	Optional. The group has been migrated to
+;                   	        	a supergroup with the specified identifier.
+; retry_after       	Integer 	Optional. In case of exceeding flood control,
+;                   	        	the number of seconds left to wait before
+;                   	        	the request can be repeated.
 
 (defn get-me
   "Returns basic information about the bot in form of a 'User' object."
@@ -145,7 +178,7 @@
      (get resp :body))))
 
 
-;; UPDATE HANDLERS
+;; UPDATE HANDLERS ;; TODO: Move to Morse.
 
 (defn create-complex-handler
   "Creates an update handler fn by combining several 'handlers' into one, and,
