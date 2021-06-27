@@ -25,10 +25,14 @@
 ;; STATE
 
 (defstate ^:private bot-user
-  :start (let [token (config/get-prop :bot-api-token)
-               bot-user (tg-client/get-me token)]
-           (log/debug "Identified myself:" bot-user)
-           bot-user))
+  :start (encore/if-let [token (config/get-prop :bot-api-token)
+                         bot-user (tg-client/get-me token)]
+           (do
+             (log/debug "Identified myself:" bot-user)
+             bot-user)
+           (do
+             (log/fatal "Unable to identify myself")
+             (System/exit 3))))
 
 (defn get-bot-username
   []
