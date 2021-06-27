@@ -329,7 +329,7 @@
            :tags [:new-group-chat :single-user]
            :give :name-request-msg
 
-           :update {:mock-fns {#'tg-client/get-chat-members-count (constantly 2)}
+           :update {:mock-fns {#'tg-client/get-chat-member-count (constantly 2)}
                     :type :my_chat_member
                     :data (fn [ctx]
                             {:chat {:id (:chat-id ctx) :title (:chat-title ctx) :type "group"}

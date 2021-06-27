@@ -2956,7 +2956,7 @@
       (cond
         (tg-api/has-joined? my-chat-member-updated)
         (let [token (config/get-prop :bot-api-token)
-              chat-members-count (tg-client/get-chat-members-count token chat-id)
+              chat-members-count (tg-client/get-chat-member-count token chat-id)
               new-chat (setup-new-group-chat! chat-id chat-title chat-members-count)
               existing-chat? (nil? new-chat)]
           (if existing-chat?

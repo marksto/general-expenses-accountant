@@ -112,9 +112,10 @@
         resp (http/get url {:as :json})]
     (get resp :body)))
 
-(defn get-chat-members-count
+(defn get-chat-member-count
+  "Gets the number of members in a chat. Returns 'Int' on success."
   [token chat-id]
-  (let [url (str base-url token "/getChatMembersCount")
+  (let [url (str base-url token "/getChatMemberCount")
         query {:chat_id chat-id}
         resp (http/get url {:content-type :json
                             :as :json
