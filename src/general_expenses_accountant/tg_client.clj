@@ -35,6 +35,20 @@
 
 (def ^:private base-url m-api/base-url)
 
+(defn- do-get
+  [url req]
+  (try
+    (http/get url req)
+    (catch Exception e
+      (log/debug e "HTTP GET request failed"))))
+
+(defn- do-post
+  [url req]
+  (try
+    (http/post url req)
+    (catch Exception e
+      (log/debug e "HTTP POST request failed"))))
+
 ;; UPDATES SETUP
 
 ;; - WEBHOOK
@@ -49,9 +63,9 @@
   ([token webhook-url options]
    (let [url (str base-url token "/setWebhook")
          body (into {:url webhook-url} options)
-         resp (http/post url {:content-type :json
-                              :as :json
-                              :form-params body})]
+         resp (do-post url {:content-type :json
+                            :form-params body
+                            :as :json})]
      (get resp :body))))
 
 (defn get-webhook-info
@@ -61,7 +75,7 @@
    will be empty."
   [token]
   (let [url (str base-url token "/getWebhookInfo")
-        resp (http/get url {:as :json})]
+        resp (do-get url {:as :json})]
     (get-in resp [:body :result])))
 
 ; project-specific
@@ -248,7 +262,7 @@
   "Returns basic information about the bot in form of a 'User' object."
   [token]
   (let [url (str base-url token "/getMe")
-        resp (http/get url {:as :json})]
+        resp (do-get url {:as :json})]
     (get-in resp [:body :result])))
 
 (defn get-chat-member-count
@@ -256,9 +270,9 @@
   [token chat-id]
   (let [url (str base-url token "/getChatMemberCount")
         query {:chat_id chat-id}
-        resp (http/get url {:content-type :json
-                            :as :json
-                            :query-params query})]
+        resp (do-get url {:content-type :json
+                          :query-params query
+                          :as :json})]
     (get-in resp [:body :result])))
 
 ;; NB: Morse does not support all available optional parameters, e.g. 'url'
@@ -276,9 +290,9 @@
   ([token callback-query-id {:keys [text] :as options}] ;; TODO: Question Otann about this approach.
    (let [url (str base-url token "/answerCallbackQuery")
          body (into {:callback_query_id callback-query-id} options)
-         resp (http/post url {:content-type :json
-                              :as :json
-                              :form-params body})]
+         resp (do-post url {:content-type :json
+                            :form-params body
+                            :as :json})]
      (get resp :body))))
 
 
