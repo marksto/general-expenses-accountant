@@ -15,7 +15,7 @@
              [models :as models]]
 
             [general-expenses-accountant.config :as config]
-            [general-expenses-accountant.nums :as nums])
+            [general-expenses-accountant.utils.nums :as u-nums])
   (:import [clojure.lang Keyword]
            [java.sql ResultSetMetaData]
            [java.util Calendar]
@@ -348,7 +348,7 @@
 (defn restore-numeric-keys
   "Changes the type of keys in the 'map' from Keyword to an Integer."
   [map]
-  (restore-keys map (comp nums/parse-int name)))
+  (restore-keys map (comp u-nums/parse-int name)))
 
 
 ;; CUSTOM PROPS

@@ -1,4 +1,5 @@
-(ns general-expenses-accountant.nums
+(ns general-expenses-accountant.utils.nums
+  "Project utilities for numeric values"
   (:require [clojure.string :as str]))
 
 (defn parse-int

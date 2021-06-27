@@ -16,10 +16,10 @@
             [general-expenses-accountant.config :as config]
             [general-expenses-accountant.domain.chat :as chats]
             [general-expenses-accountant.domain.tlog :as tlogs]
-            [general-expenses-accountant.nums :as nums]
             [general-expenses-accountant.tg-bot-api :as tg-api]
             [general-expenses-accountant.tg-client :as tg-client]
-            [general-expenses-accountant.utils :as utils])
+            [general-expenses-accountant.utils.coll :as u-coll]
+            [general-expenses-accountant.utils.nums :as u-nums])
   (:import [java.util Locale]))
 
 ;; STATE
@@ -1193,7 +1193,7 @@
         account-path (str/split account (re-pattern id-separator))]
     (get-group-chat-account chat-data
                             {:type (keyword "acc-type" (nth account-path 0))
-                             :id (nums/parse-int (nth account-path 1))})))
+                             :id (u-nums/parse-int (nth account-path 1))})))
 
 (defn- create-group-chat-account!
   [chat-id {:keys [acc-type acc-name created-dt created-by members]}]
@@ -1561,7 +1561,7 @@
   (let [transition-keys (:transition event)
         transition (get-in state-transitions transition-keys)
         chat-type (first transition-keys)
-        response-keys (utils/collect [chat-type] (:response transition))
+        response-keys (u-coll/collect [chat-type] (:response transition))
         response-data (get-in responses response-keys)]
     (change-state-fn (:to-state transition))
     (to-response response-data (:param-vals event))))
@@ -2622,7 +2622,7 @@
                   picked-acc (data->account callback-btn-data chat-data)
                   input-data (-> chat-data
                                  (get-user-input-data user-id :create-account)
-                                 (update :members #(utils/add-or-remove picked-acc %)))]
+                                 (update :members #(u-coll/add-or-remove picked-acc %)))]
               (set-user-input-data! chat-id user-id :create-account input-data))
             (proceed-with-next-group-account-creation-steps! chat-id msg-id user)))
         (cb-succeed callback-query-id))
@@ -2849,7 +2849,7 @@
                  (= :group-selection (:chat-state callback-query))
                  (str/starts-with? callback-btn-data cd-group-chat-prefix))
         (let [group-chat-id-str (str/replace-first callback-btn-data cd-group-chat-prefix "")
-              group-chat-id (nums/parse-int group-chat-id-str)]
+              group-chat-id (u-nums/parse-int group-chat-id-str)]
           (assoc-in-chat-data! chat-id [:group] group-chat-id)
           (proceed-with-expense-details! chat-id group-chat-id first-name))
         (cb-succeed callback-query-id))
@@ -2923,7 +2923,7 @@
                  (= :interactive-input (:chat-state callback-query))
                  (= cd-enter callback-btn-data))
         (let [user-input (get-user-input (get-chat-data chat-id))
-              parsed-val (nums/parse-arithmetic-expression user-input)]
+              parsed-val (u-nums/parse-arithmetic-expression user-input)]
           (if (and (number? parsed-val) (pos? parsed-val))
             (do
               (log/debug "User input:" parsed-val)
@@ -3134,7 +3134,7 @@
         :as message}]
       (when (and (= :chat-type/private (:chat-type message))
                  (= :input (:chat-state message)))
-        (let [input (nums/parse-number text)]
+        (let [input (u-nums/parse-number text)]
           (if (number? input)
             (do
               (log/debug "User input:" input)

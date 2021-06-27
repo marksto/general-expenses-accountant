@@ -15,7 +15,7 @@
             [general-expenses-accountant.domain.tlog :as tlogs]
 
             [general-expenses-accountant.tg-client :as tg-client]
-            [general-expenses-accountant.utils :as utils])
+            [general-expenses-accountant.utils.coll :as u-coll])
   (:import [java.util.concurrent.atomic AtomicInteger]))
 
 ;; TODO: Learn how to properly mock 'clj-http' requests?
@@ -1286,7 +1286,7 @@
 (defn- assert-test-params
   [ctx case]
   (let [required-params (if (contains? case :take)
-                          (set (utils/ensure-vec (:take case)))
+                          (set (u-coll/ensure-vec (:take case)))
                           #{})
         provided-params (or (-> (:deps ctx) keys set) #{})
         missing-params (set/difference required-params provided-params)]
@@ -1356,14 +1356,14 @@
                      (with-printing-test-case-name
                        (unit-update-test test-case ctx)))))
         get-give (fn [case]
-                   (utils/ensure-vec (:give case)))]
+                   (u-coll/ensure-vec (:give case)))]
     (if (should-run-independently? test-case independants)
       (do
         (reset-bot-data-afterwards run-fn)
         [results (disj independants test-case)])
       (let [tc-result (run-fn)
             upd-results (if (some? tc-result)
-                          (->> (utils/ensure-vec tc-result)
+                          (->> (u-coll/ensure-vec tc-result)
                                (interleave (get-give test-case))
                                (apply assoc results))
                           results)]

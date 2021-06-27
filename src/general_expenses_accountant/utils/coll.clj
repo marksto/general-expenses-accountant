@@ -1,4 +1,5 @@
-(ns general-expenses-accountant.utils)
+(ns general-expenses-accountant.utils.coll
+  "Project utilities for collections")
 
 (defn ensure-coll
   [val-or-col]
