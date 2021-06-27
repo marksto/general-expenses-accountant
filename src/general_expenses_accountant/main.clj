@@ -24,18 +24,18 @@
 
 (defn initialize!
   []
-  (let [token (config/get-prop :bot-api-token)]
+  (let [tg-client-cfg {:token (config/get-prop :bot-api-token)}]
     (if (config/in-dev?)
-      (tg-client/setup-long-polling! token bot-api)
-      (tg-client/setup-webhook! token (get-bot-url) api-path)))
+      (tg-client/setup-long-polling! tg-client-cfg bot-api)
+      (tg-client/setup-webhook! tg-client-cfg (get-bot-url) api-path)))
   (log/info (l10n/tr :en :init-fine)))
 
 (defn finalize!
   []
   (log/info (l10n/tr :en :finishing))
-  (let [token (config/get-prop :bot-api-token)]
+  (let [tg-client-cfg {:token (config/get-prop :bot-api-token)}]
     (when (config/in-dev?)
-      (tg-client/stop-long-polling! token)))
+      (tg-client/teardown-long-polling! tg-client-cfg)))
   (log/info (l10n/tr :en :exit-fine)))
 
 (defstate ^:private app

@@ -8,7 +8,8 @@
        there are two ways to receive updates:
        - via WEBHOOK (should be set in PROD env)
        - via LONG-POLLING"
-  (:require [clojure.core.async.impl.protocols :refer [closed?]]
+  (:require [clojure.core.async :refer [go-loop <! <!! timeout]]
+            [clojure.core.async.impl.protocols :refer [closed?]]
             [clojure.tools.macro :as macro]
             [clojure.string :as str]
 
@@ -75,12 +76,27 @@
   provide the latest unprocessed messages from users; this way is
   usual for a remotely deployed web application, but can be quite
   tricky for a local development."
-  [token bot-url api-path]
+  [{:keys [token] :as _config} bot-url api-path]
   (let [webhook-url (construct-webhook-url bot-url api-path token)]
     (log/info "Bot URL:" bot-url)
     (set-webhook token webhook-url)))
 
 ;; - LONG-POLLING
+
+; configuration
+
+(def ^:private default-config
+  {:await-async-time 1000
+   :check-period 20000
+   :restart-attempts 5
+   :restart-period 10000
+   :get-updates-opts {}})
+
+(defn- complete
+  [config]
+  (merge default-config config))
+
+; (re)store webhook
 
 (defonce ^:private *webhook-info (atom nil))
 
@@ -106,24 +122,31 @@
       (log/debug "Restoring the webhook from the info:" webhook-info)
       (set-webhook token (:url webhook-info) webhook-info))))
 
+; setup -> teardown
 
 (defonce ^:private *updates-channel (atom nil))
 
 (defn- start-long-polling!
-  [token upd-handler]
+  [{:keys [token get-updates-opts] :as _config} upd-handler]
   (reset! *updates-channel
           (try
             (log/info "Starting Telegram polling...") ;; TODO: Move this line inside the 'm-poll/start' fn.
-            (m-poll/start token upd-handler)
+            (m-poll/start token upd-handler get-updates-opts)
             (catch Exception e
               (log/warn e "Exception during the long-polling start process")
               ;; NB: We pass 'nil' intentionally, see the 'not-polling?' fn.
               nil))))
 
-(defn- await-for-sec
-  "Waits a bit (1 sec) just for async operations to catch up."
-  []
-  (Thread/sleep 1000)) ;; TODO: Make this timeout configurable.
+(defn- stop-long-polling!
+  [{:keys [await-async-time] :as _config}]
+  (m-poll/stop @*updates-channel)
+  ;; NB: Waits a bit just for async operation to catch up.
+  (<!! (timeout await-async-time)))
+
+(defn- restart-long-polling!
+  [config upd-handler]
+  (stop-long-polling! config)
+  (start-long-polling! config upd-handler))
 
 (defn- not-polling?
   []
@@ -131,33 +154,55 @@
     (or (nil? upd-chan)
         (closed? upd-chan))))
 
+(defn- run-status-checker!
+  "An async task that aims to restart the dead long-polling."
+  [{:keys [await-async-time ;; the initial async op timeout
+           check-period restart-attempts restart-period]
+    :as config} upd-handler]
+  (go-loop [wait-ms await-async-time
+            attempt restart-attempts]
+    (log/trace "Waiting for" (/ wait-ms 1000) "sec...")
+    (<! (timeout wait-ms))
+    (if (not-polling?)
+      (do
+        (log/trace "Checking the status... NOT POLLING!")
+        (if (zero? attempt)
+          (do
+            (log/fatal "The long-polling cannot be continued")
+            (System/exit 4))
+          (do
+            (log/trace (format "Trying to restart #%d of %d"
+                               (- (inc restart-attempts) attempt)
+                               restart-attempts))
+            (restart-long-polling! config upd-handler)
+            (recur restart-period (dec attempt)))))
+      (do
+        (log/trace "Checking the status... polling [OK]")
+        ;; NB: Reset the parameters to their initial values.
+        (recur check-period restart-attempts)))))
+
 (defn setup-long-polling!
   "We perform long-polling of server updates ourselves, which
   means a continuous calling of the 'getUpdates' Telegram Bot
   API HTTP endpoint and waiting to receive user messages sent
   to our bot over this time, then making the same call again;
   this way is fine for a local debugging/testing purposes."
-  [token upd-handler]
-  ;; NB: The long-polling won't work if a webhook is set up.
-  ;;     First, get the current webhook info and, if there's
-  ;;     any, save one to be able to restore it later. If no
-  ;;     webhook was preconfigured, do nothing.
-  (when (save-the-current-webhook-info token)
-    (set-webhook token ""))
+  [{:keys [token] :as config} upd-handler]
+  (let [comp-config (complete config)]
+    ;; NB: The long-polling won't work if a webhook is set up.
+    ;;     First, get the current webhook info and, if there's
+    ;;     any, save one to be able to restore it later. If no
+    ;;     webhook was preconfigured, do nothing.
+    (when (save-the-current-webhook-info token)
+      (set-webhook token ""))
+    (start-long-polling! comp-config upd-handler)
+    (run-status-checker! comp-config upd-handler)))
 
-  (start-long-polling! token upd-handler)
-
-  ;; TODO: Make this an async task that aims to "re-spawn" the long-polling. Make the re-spawns configurable.
-  (await-for-sec)
-  (when (not-polling?)
-    (log/fatal "Fatal error during the long-polling setup")
-    (System/exit 1)))
-
-(defn stop-long-polling!
-  [token]
-  (m-poll/stop @*updates-channel)
-  (await-for-sec)
-  (try-restore-the-prior-webhook token))
+(defn teardown-long-polling!
+  [{:keys [token] :as config}]
+  (let [comp-config (complete config)]
+    (stop-long-polling! comp-config)
+    (try-restore-the-prior-webhook token)))
 
 
 ;; BOT API METHODS ;; TODO: Move to Morse.
