@@ -33,8 +33,9 @@
 (defn finalize!
   []
   (log/info (l10n/tr :en :finishing))
-  (when (config/in-dev?)
-    (tg-client/stop-long-polling!))
+  (let [token (config/get-prop :bot-api-token)]
+    (when (config/in-dev?)
+      (tg-client/stop-long-polling! token)))
   (log/info (l10n/tr :en :exit-fine)))
 
 (defstate ^:private app

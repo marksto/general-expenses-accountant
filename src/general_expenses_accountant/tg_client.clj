@@ -32,9 +32,38 @@
 ;;          - Reflection warning, morse/api.clj:137:28 - reference to field getName can't be resolved.
 ;;          - Reflection warning, morse/api.clj:137:28 - call to method endsWith can't be resolved (target class is unknown).
 
+(def ^:private base-url m-api/base-url)
+
 ;; UPDATES SETUP
 
 ;; - WEBHOOK
+
+; Bot API methods ;; TODO: Move to Morse.
+
+(defn set-webhook
+  "Specifies a URL (or a fixed IP address) to receive incoming updates
+   via an outgoing webhook. Returns 'True' on success."
+  ([token webhook-url]
+   (set-webhook token webhook-url {}))
+  ([token webhook-url options]
+   (let [url (str base-url token "/setWebhook")
+         body (into {:url webhook-url} options)
+         resp (http/post url {:content-type :json
+                              :as :json
+                              :form-params body})]
+     (get resp :body))))
+
+(defn get-webhook-info
+  "Use this method to get current webhook status. On success, returns
+   a 'WebhookInfo' object. If the bot uses long-polling ('getUpdates')
+   to receive incoming updates, the 'url' field of the returned object
+   will be empty."
+  [token]
+  (let [url (str base-url token "/getWebhookInfo")
+        resp (http/get url {:as :json})]
+    (get-in resp [:body :result])))
+
+; project-specific
 
 (defn- construct-webhook-url
   "Constructs webhook URL according to the Telegram recommendation."
@@ -49,9 +78,34 @@
   [token bot-url api-path]
   (let [webhook-url (construct-webhook-url bot-url api-path token)]
     (log/info "Bot URL:" bot-url)
-    (m-api/set-webhook token webhook-url)))
+    (set-webhook token webhook-url)))
 
 ;; - LONG-POLLING
+
+(defonce ^:private *webhook-info (atom nil))
+
+(defn- save-the-current-webhook-info
+  "Gets the current webhook info and, if there's a preconfigured webhook,
+   saves one to be able, if possible, to restore it later."
+  [token]
+  (let [webhook-info (get-webhook-info token)]
+    (when-not (empty? (:url webhook-info))
+      (log/debug "Saving the webhook info:" webhook-info)
+      (reset! *webhook-info webhook-info))))
+
+(defn- try-restore-the-prior-webhook
+  "Attempts to restore the prior webhook w/ the pre-saved webhook info.
+
+   NB: The only case of automatic recovery that is not feasible is using
+       a self-signed certificate (this data is not provided by Telegram).
+       Thus, it requires you to manually reset the webhook in such cases."
+  [token]
+  (let [webhook-info @*webhook-info]
+    (when (and (some? webhook-info)
+               (not (true? (:has_custom_certificate webhook-info))))
+      (log/debug "Restoring the webhook from the info:" webhook-info)
+      (set-webhook token (:url webhook-info) webhook-info))))
+
 
 (defonce ^:private *updates-channel (atom nil))
 
@@ -84,8 +138,12 @@
   to our bot over this time, then making the same call again;
   this way is fine for a local debugging/testing purposes."
   [token upd-handler]
-  ;; TODO: First, 'get-webhook-info'. Then, save the 'url', if any, and restore it upon 'stop-long-polling!'.
-  (m-api/set-webhook token "") ;; polling won't work if a webhook is set up
+  ;; NB: The long-polling won't work if a webhook is set up.
+  ;;     First, get the current webhook info and, if there's
+  ;;     any, save one to be able to restore it later. If no
+  ;;     webhook was preconfigured, do nothing.
+  (when (save-the-current-webhook-info token)
+    (set-webhook token ""))
 
   (start-long-polling! token upd-handler)
 
@@ -96,9 +154,10 @@
     (System/exit 1)))
 
 (defn stop-long-polling!
-  []
+  [token]
   (m-poll/stop @*updates-channel)
-  (await-for-sec))
+  (await-for-sec)
+  (try-restore-the-prior-webhook token))
 
 
 ;; BOT API METHODS ;; TODO: Move to Morse.
