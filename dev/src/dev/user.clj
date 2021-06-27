@@ -33,7 +33,7 @@
                                         (config/get-prop :db-user)))
         (str/replace $ #"password" (or (:password db-info)
                                        (config/get-prop :db-password)))
-        (str/replace $ #"database_name" (:db-name db-info))
+        (str/replace $ #"database_name" (:dbname db-info))
         (try
           (sql/execute! db [$] {:transaction? false})
           (println "Successfully created the DB\n")
@@ -43,7 +43,7 @@
 
 (let [db-url (config/get-prop :database-url)
       db-info (db/parse-db-url db-url)
-      db-name (:db-name db-info)]
+      db-name (:dbname db-info)]
   (if (db-does-not-exist? db-url db-name)
     (do
       (println (str "Creating the DB '" db-name "'..."))

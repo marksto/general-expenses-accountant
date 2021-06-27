@@ -15,7 +15,8 @@
              [models :as models]]
 
             [general-expenses-accountant.config :as config]
-            [general-expenses-accountant.utils.nums :as u-nums])
+            [general-expenses-accountant.utils.nums :as u-nums]
+            [general-expenses-accountant.utils.regexp :as u-re])
   (:import [clojure.lang Keyword]
            [java.sql ResultSetMetaData]
            [java.util Calendar]
@@ -32,19 +33,8 @@
 
 (defn- parse-db-url*
   [db-url-re db-url]
-  (let [matcher (re-matcher db-url-re db-url)
-        get-group (fn [^String name]
-                    (try
-                      (.group matcher name)
-                      (catch Exception _
-                        nil)))]
-    (when (.matches matcher)
-      {:adapter (get-group "adapter")
-       :username (get-group "username")
-       :password (get-group "password")
-       :host (get-group "host")
-       :port (get-group "port")
-       :db-name (get-group "dbname")})))
+  (u-re/re-match-get-groups db-url-re db-url
+                            [:adapter :username :password :host :port :dbname]))
 
 (defn parse-db-url
   "The DATABASE_URL for the Heroku Postgres add-on follows the naming convention:
@@ -82,7 +72,7 @@
                    (config/get-prop :db-user))
      :password (or (:password db-info)
                    (config/get-prop :db-password))
-     :database-name (:db-name db-info)
+     :database-name (:dbname db-info)
      :server-name (:host db-info)
      :port-number (:port db-info)}))
 
