@@ -16,6 +16,7 @@
             [general-expenses-accountant.config :as config]
             [general-expenses-accountant.domain.chat :as chats]
             [general-expenses-accountant.domain.tlog :as tlogs]
+            [general-expenses-accountant.md-v2 :as md-v2]
             [general-expenses-accountant.tg-bot-api :as tg-api]
             [general-expenses-accountant.tg-client :as tg-client]
             [general-expenses-accountant.utils.coll :as u-coll]
@@ -168,15 +169,6 @@
 (def ^:private no-group-to-record-error "Нет возможности выбрать группу для записи расходов.")
 
 
-(defn- escape-markdown-v2
-  "A minor part of the Markdown V2 escaping features that is absolutely necessary."
-  [markdown-str]
-  (str/replace markdown-str #"[_*\[\]()~`>#+\-=|{}.!]" #(str "\\" %)))
-
-(defn- format-bold
-  [text-str]
-  (str "*" text-str "*"))
-
 (defn- format-list
   ([items-coll]
    (format-list items-coll nil))
@@ -190,7 +182,7 @@
                                     (str bullet " "))
                                   (text-map-fn %)))
                        (str/join item-sep))]
-     (if escape-md? (escape-markdown-v2 list-str) list-str))))
+     (if escape-md? (md-v2/escape list-str) list-str))))
 
 (defn- format-currency
   [amount lang]
@@ -371,11 +363,11 @@
             (map (fn [[acc-type accounts]]
                    (case acc-type
                      (:acc-type/personal :acc-type/group)
-                     (str (format-bold (get-in account-types-names [acc-type :plural])) "\n"
+                     (str (md-v2/format-bold (get-in account-types-names [acc-type :plural])) "\n"
                           (format-list accounts {:text-map-fn :name
                                                  :escape-md? true}))
                      :acc-type/general
-                     (format-bold "Счёт для общих расходов")))
+                     (md-v2/format-bold "Счёт для общих расходов")))
                  accounts-by-type)
             "Выберите, что вы хотите сделать:"])
    :options (tg-api/build-message-options
@@ -406,10 +398,10 @@
    ;; Personal account is needed in case the person is not present in Telegram.
    :text (join-into-text
            ["Какие счета для чего нужны?"
-            (str (format-bold (get-in account-types-names [:acc-type/group :single])) " — "
-                 (escape-markdown-v2 "используется для распределения расходов между членами группы."))
-            (str (format-bold (get-in account-types-names [:acc-type/personal :single])) " — "
-                 (escape-markdown-v2 "используется в случае, если человека нет в Telegram, но учитывать его при расчётах нужно."))
+            (str (md-v2/format-bold (get-in account-types-names [:acc-type/group :single])) " — "
+                 (md-v2/escape "используется для распределения расходов между членами группы."))
+            (str (md-v2/format-bold (get-in account-types-names [:acc-type/personal :single])) " — "
+                 (md-v2/escape "используется в случае, если человека нет в Telegram, но учитывать его при расчётах нужно."))
             "Выберите тип счёта:"])
    :options (tg-api/build-message-options
               (merge (apply account-types->options account-types extra-buttons)
@@ -419,14 +411,14 @@
   [user]
   {:type :text
    :text (str (tg-api/get-user-mention-text user)
-              (escape-markdown-v2 ", как бы вы хотели назвать новый счёт?"))
+              (md-v2/escape ", как бы вы хотели назвать новый счёт?"))
    :options force-reply-options})
 
 (defn- get-the-name-is-already-taken-msg
   [user]
   {:type :text
    :text (str (tg-api/get-user-mention-text user)
-              (escape-markdown-v2 ", данное имя счёта уже занято. Выберите другое имя."))
+              (md-v2/escape ", данное имя счёта уже занято. Выберите другое имя."))
    :options force-reply-options})
 
 (defn- get-group-members-selection-msg
@@ -435,7 +427,7 @@
                        (tg-api/build-inline-kbd-btn done-button-text :callback-data cd-done)]]
     {:type :text
      :text (str (tg-api/get-user-mention-text user)
-                (escape-markdown-v2 ", выберите члена(ов) группы:"))
+                (md-v2/escape ", выберите члена(ов) группы:"))
      :options (tg-api/build-message-options
                 (merge (get-select-multiple-items-markup selected remaining
                                                          :name
@@ -459,7 +451,7 @@
   [user acc-name]
   {:type :text
    :text (str (tg-api/get-user-mention-text user)
-              ", как бы вы хотели переименовать счёт \"" (escape-markdown-v2 acc-name) "\"?")
+              ", как бы вы хотели переименовать счёт \"" (md-v2/escape acc-name) "\"?")
    :options force-reply-options})
 
 (def ^:private no-eligible-accounts-notification
@@ -481,13 +473,13 @@
 (defn- get-personal-account-name-request-msg
   [existing-chat? ?chat-members]
   {:type :text
-   :text (let [request-txt (escape-markdown-v2 "как будет называться ваш личный счёт?")
+   :text (let [request-txt (md-v2/escape "как будет называться ваш личный счёт?")
                part-one (if (some? ?chat-members)
                           (let [mentions (for [user ?chat-members]
                                            (tg-api/get-user-mention-text user))]
                             (str (str/join " " mentions) ", " request-txt))
                           (str/capitalize request-txt))
-               part-two (escape-markdown-v2
+               part-two (md-v2/escape
                           (if (and existing-chat? (empty? ?chat-members))
                             "Пожалуйста, проигнорийруте это сообщение, если у вас уже есть личный счёт в данной группе."
                             "Пожалуйста, ответьте на данное сообщение."))]
@@ -516,13 +508,13 @@
   [expense-amount expense-details payer-acc-name debtor-acc-name]
   (let [formatted-amount (format-currency expense-amount "ru")
         title-txt (when (some? payer-acc-name)
-                    (str (format-bold (escape-markdown-v2 payer-acc-name)) "\n"))
+                    (str (md-v2/format-bold (md-v2/escape payer-acc-name)) "\n"))
         details-txt (->> [(str formatted-amount "₽")
                           debtor-acc-name
                           expense-details]
                          (filter some?)
                          (str/join " / ")
-                         escape-markdown-v2)]
+                         md-v2/escape)]
     {:type :text
      :text (str title-txt details-txt)
      :options (tg-api/build-message-options
@@ -564,20 +556,20 @@
    (get-interactive-input-msg text nil))
   ([text ?extra-opts]
    {:type :text
-    :text (str (escape-markdown-v2 "Новый расход:\n= ") text)
+    :text (str (md-v2/escape "Новый расход:\n= ") text)
     :options (tg-api/build-message-options
                (merge {:parse-mode "MarkdownV2"} ?extra-opts))}))
 
 (defn- get-inline-calculator-msg
   [user-input]
   (get-interactive-input-msg
-    (escape-markdown-v2 (str user-input "_"))
+    (md-v2/escape (str user-input "_"))
     {:reply-markup inline-calculator-markup}))
 
 (defn- get-interactive-input-success-msg
   [amount]
   (get-interactive-input-msg
-    (escape-markdown-v2 (format-currency amount "ru"))))
+    (md-v2/escape (format-currency amount "ru"))))
 
 (def ^:private interactive-input-disclaimer-msg
   {:type :text
