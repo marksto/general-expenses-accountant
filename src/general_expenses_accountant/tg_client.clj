@@ -112,7 +112,7 @@
   [token]
   (let [url (str base-url token "/getMe")
         resp (http/get url {:as :json})]
-    (get resp :body)))
+    (get-in resp [:body :result])))
 
 (defn get-chat-member-count
   "Gets the number of members in a chat. Returns 'Int' on success."

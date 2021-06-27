@@ -26,7 +26,7 @@
 
 (defstate ^:private bot-user
   :start (let [token (config/get-prop :bot-api-token)
-               bot-user (get (tg-client/get-me token) :result)]
+               bot-user (tg-client/get-me token)]
            (log/debug "Identified myself:" bot-user)
            bot-user))
 
