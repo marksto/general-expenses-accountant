@@ -157,10 +157,11 @@
    default-reply-keyboard)
   ([button-rows]
    (update default-reply-keyboard :keyboard into button-rows))
-  ([button-rows {:keys [resize one-time selective] :as _options}]
+  ([button-rows {:keys [resize one-time placeholder selective] :as _options}]
    (cond-> (build-reply-keyboard button-rows)
            (true? resize) (assoc :resize_keyboard true)
            (true? one-time) (assoc :one_time_keyboard true)
+           (some? placeholder) (assoc :input_field_placeholder placeholder)
            (true? selective) (assoc :selective true))))
 
 ; KeyboardButton
@@ -275,8 +276,9 @@
 (defn build-force-reply
   ([]
    default-force-reply)
-  ([{:keys [selective] :as _options}]
+  ([{:keys [placeholder selective] :as _options}]
    (cond-> default-force-reply
+           (some? placeholder) (assoc :input_field_placeholder placeholder)
            (true? selective) (assoc :selective true))))
 
 ; Reply Markups
