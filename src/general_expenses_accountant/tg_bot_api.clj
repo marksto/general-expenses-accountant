@@ -96,6 +96,11 @@
   [method-name request]
   (merge {:method method-name} request))
 
+;; TODO: All of the following "METHODS"-related things can be reimplemented
+;;       in the form of Clojure specs and passed around as pure data (which
+;;       avoids dealing w/ 2 forms of data representation and cumbersome fn
+;;       calls).
+
 ; /sendMessage
 ;
 ; Use this method to send text messages. On success, the sent Message is returned.
@@ -298,7 +303,7 @@
 (comment
   (build-message-options
     {:reply-markup (build-reply-markup :inline-keyboard
-                                       [[(build-inline-kbd-btn "Callback" :callback_data "<some_data>")]])})
+                                       [[(build-inline-kbd-btn "Callback" :callback-data "<some_data>")]])})
   (build-message-options
     {:reply-markup (build-reply-markup :custom-keyboard [["Add expense"]])})
 
