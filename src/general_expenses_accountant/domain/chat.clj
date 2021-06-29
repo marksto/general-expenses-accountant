@@ -18,9 +18,9 @@
 
    ;; group chat-specific
    :input [db/restore-numeric-keys
-           {:* {:create-account {:account-type keyword
-                                 :account-members {:* {:type keyword}}}
-                :rename-account {:account-type keyword}
+           {:* {:create-account {:acc-type keyword
+                                 :members {:* {:type keyword}}}
+                :rename-account {:acc-type keyword}
                 :locked-messages set}}]
    :accounts {:acc-type/general [db/restore-numeric-keys
                                  {:* {:type keyword
