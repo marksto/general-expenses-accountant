@@ -30,7 +30,7 @@
               :acc-type/group [db/restore-numeric-keys
                                {:* {:type keyword
                                     :members set}}]}
-   :expenses {:popularity db/restore-string-keys}
+   :expense-items db/restore-string-keys
    :user-account-mapping db/restore-numeric-keys})
 
 (t-m/defmodel Chat :chat

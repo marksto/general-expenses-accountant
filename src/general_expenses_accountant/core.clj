@@ -133,6 +133,10 @@
 (def ^:private cd-accounts-reinstate "<accounts/reinstate>")
 
 (def ^:private cd-expense-items "<expense_items>")
+(def ^:private cd-expense-items-create "<expense_items/create>")
+(def ^:private cd-expense-items-rename "<expense_items/rename>")
+(def ^:private cd-expense-items-change-desc "<expense_items/change-desc>")
+(def ^:private cd-expense-items-delete "<expense_items/delete>")
 
 (def ^:private cd-shares "<shares>")
 
@@ -244,14 +248,18 @@
                               (constantly :callback-data)
                               get-group-ref-option-id))
 
+(defn- get-expense-item-display-value
+  [[code data]]
+  (str (str/upper-case code) " (" (:desc data) ")"))
+
 (defn- get-expense-item-option-id
-  [exp-item]
-  (str cd-expense-item-prefix (:code exp-item)))
+  [[code _data]]
+  (str cd-expense-item-prefix code))
 
 (defn- expense-items->options
   [expense-items]
-  (get-select-one-item-markup expense-items
-                              :desc
+  (get-select-one-item-markup (seq expense-items)
+                              get-expense-item-display-value
                               (constantly :callback-data)
                               get-expense-item-option-id))
 
@@ -465,6 +473,27 @@
 (def ^:private canceled-changes-msg
   {:type :text
    :text "Внесение изменений отменено."})
+
+(defn- get-expense-items-mgmt-options-msg
+  [expense-items]
+  (let [expense-items-seq (seq expense-items)]
+    {:type :text
+     :text (if expense-items-seq
+             (join-into-text
+               ["Список статей расходов:"
+                (format-list expense-items-seq {:text-map-fn get-expense-item-display-value
+                                                :escape-md? true})
+                "Выберите, что вы хотите сделать:"])
+             (md-v2/escape "Статьи расходов не заданы."))
+     :options (let [action-btns (cond-> [[(tg-api/build-inline-kbd-btn "Добавить новую" :callback-data cd-expense-items-create)]]
+                                        (some? expense-items-seq)
+                                        (conj [(tg-api/build-inline-kbd-btn "Переименовать" :callback-data cd-expense-items-rename)]
+                                              [(tg-api/build-inline-kbd-btn "Изменить описание" :callback-data cd-expense-items-change-desc)]
+                                              [(tg-api/build-inline-kbd-btn "Удалить" :callback-data cd-expense-items-delete)]))]
+                (tg-api/build-message-options
+                  {:reply-markup (tg-api/build-reply-markup
+                                   :inline-keyboard (conj action-btns [back-button]))
+                   :parse-mode "MarkdownV2"}))}))
 
 ;; TODO: Add messages for 'expense items' here.
 
@@ -1052,9 +1081,10 @@
 
 (defn- get-group-chat-expense-items
   [chat-id]
-  (let [chat-data (get-chat-data chat-id)]
+  (let [chat-data (get-chat-data chat-id)
+        expense-items (:expense-items chat-data)]
     ;; TODO: Sort them according popularity.
-    (get-in chat-data [:expenses :items])))
+    expense-items))
 
 ;; TODO: Implement the "expense items"-related business logic here.
 
@@ -1476,14 +1506,16 @@
     {:accounts-mgmt-options-msg
      {:response-fn get-accounts-mgmt-options-msg
       :response-params [:accounts-by-type]}
-
      :account-type-selection-msg
      {:response-fn get-account-type-selection-msg
       :response-params [:account-types :extra-buttons]}
-
      :account-selection-msg
      {:response-fn get-account-selection-msg
       :response-params [:accounts :txt :extra-buttons]}
+
+     :expense-items-mgmt-options-msg
+     {:response-fn get-expense-items-mgmt-options-msg
+      :response-params [:expense-items]}
 
      :restored-settings-msg
      {:response-fn (partial get-settings-msg false)}}}
@@ -1680,7 +1712,8 @@
       :response [:settings :account-selection-msg]}
 
      :manage-expense-items
-     {:to-state :expense-items-mgmt}
+     {:to-state :expense-items-mgmt
+      :response [:settings :expense-items-mgmt-options-msg]}
 
      :manage-shares
      {:to-state :shares-mgmt}
@@ -2767,9 +2800,11 @@
           (try-with-message-lock-or-send-notification!
             chat-id user-id msg-id callback-query-id
 
-            (proceed-with-msg-and-respond!
-              {:chat-id chat-id :msg-id msg-id}
-              {:transition [:chat-type/group :settings :manage-expense-items]})))
+            (let [expense-items (get-group-chat-expense-items chat-id)]
+              (proceed-with-msg-and-respond!
+                {:chat-id chat-id :msg-id msg-id}
+                {:transition [:chat-type/group :settings :manage-expense-items]
+                 :param-vals {:expense-items expense-items}}))))
         (cb-succeed callback-query-id))
       send-retry-callback-query!))
 

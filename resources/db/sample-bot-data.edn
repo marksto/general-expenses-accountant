@@ -92,17 +92,13 @@
                                                    :created-by 1400000000
                                                    :members #{1 2}}}
                                :last-id 6}
-                    ;; TODO: Re-implement ':items' with another data structure.
-                    :expenses {:items [{:code "food"
-                                        :desc "foodstuffs & manufactured goods"}
-                                       {:code "out"
-                                        :desc "cafes and coffee (eating out)"}
-                                       {:code "gas"
-                                        :desc "gasoline & car expenses"}]
-                               ;; TODO: Implement smart sorting of items.
-                               :popularity {"food" 5
-                                            "out" 2
-                                            "gas" 1}}
+
+                    :expense-items {"food" {:desc "foodstuffs & manufactured goods"
+                                            :pops 5}
+                                    "out" {:desc "cafes and coffee (eating out)"
+                                           :pops 2}
+                                    "gas" {:desc "gasoline & car expenses"
+                                           :pops 1}}
                     ;; TODO: Implement together w/ the 'shares' functionality.
                     :shares {}
 
