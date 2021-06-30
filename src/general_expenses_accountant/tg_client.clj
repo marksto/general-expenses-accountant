@@ -342,6 +342,15 @@
             filter-cmds
             map-to-name)))
 
+;; TODO: Huge Morse improvement. Route multiple command values to a single
+;;       update handler fn. See the recent Bot API changes — "Personalized
+;;       Commands" (https://core.telegram.org/bots/api/#june-25-2021). The
+;;       main idea is that bots can now show lists of commands tailored to
+;;       specific situations, for instance localized commands for users w/
+;;       different languages. So, the mapping could look smth. like this:
+;;       {:en "settings"
+;;        :ru "настройки" + user :language_code ~~> (handler-fn :message)
+;;        :ch "设置"}
 (defn command-fn
   "Creates an update handler for the bot command with the specified 'name',
    using the passed 'handler-fn' w/ the update's 'message' as an argument."

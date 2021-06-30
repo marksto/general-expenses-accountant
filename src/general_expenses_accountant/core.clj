@@ -194,6 +194,7 @@
                  "%.2f" ;; receives BigDecimal
                  (to-array [(bigdec amount)])))
 
+;; TODO: Use the newly introduced 'placeholder' option.
 (def ^:private force-reply-options
   (tg-api/build-message-options
     {:reply-markup (tg-api/build-reply-markup :force-reply {:selective true})
@@ -329,7 +330,7 @@
 (defn- get-settings-msg
   [first-time?]
   {:type :text
-   ;; TODO: Shorten this text and spreading its content between the mgmt views?
+   ;; TODO: Shorten this text and spread its content between the mgmt views?
    :text (format "%s можно настроить, чтобы учитывались:
 - счета — не только личные, но и групповые;
 - статьи расходов — подходящие по смыслу и удобные вам;
@@ -540,8 +541,6 @@
    :text (str (tg-api/get-user-mention-text user)
               (md-v2/escape (str ", задайте новый код для статьи расходов \"" exp-it-desc "\".")))
    :options force-reply-options})
-
-;; TODO: Add messages for 'expense items' here.
 
 ;; TODO: Add messages for 'shares' here.
 
@@ -1197,8 +1196,6 @@
   [callback-btn-data chat-data]
   (let [exp-it-code (str/replace-first callback-btn-data cd-expense-item-prefix "")]
     [exp-it-code (find-expense-item chat-data exp-it-code)]))
-
-;; TODO: Implement the "expense items"-related business logic here.
 
 ;; - CHATS > GROUP CHAT > ACCOUNTS
 
@@ -1893,7 +1890,7 @@
 
 ;; RECIPROCAL ACTIONS
 
-;; TODO: Switch to Event-Driven model. Simplifies?
+;; TODO: Switch to Event-Driven model. Is simpler?
 ;; HTTP requests should be transformed into events
 ;; that are handled by appropriate listeners (fns)
 ;; that, in turn, may result in emitting events.
