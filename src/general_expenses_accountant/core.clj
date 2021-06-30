@@ -517,6 +517,12 @@
               (md-v2/escape ", данный код уже используется для другой статьи расходов. Выберите другой код."))
    :options force-reply-options})
 
+(defn- get-the-expense-item-cannot-be-deleted-msg
+  [exp-it-code exp-it-desc]
+  {:type :text
+   :text (format "Статья расходов \"%s (%s)\" не может быть удалена, поскольку была использована ранее."
+                 exp-it-code exp-it-desc)})
+
 (def ^:private no-eligible-expense-items-notification
   {:type :callback
    :options {:text "Подходящих статей расходов не найдено"}})
@@ -1167,6 +1173,25 @@
       (find-expense-item updated-chat-data new-exp-it-code)
       :failure/the-expense-item-code-is-already-used)))
 
+(defn- can-expense-item-be-deleted?
+  [[_code data]]
+  (not (and (contains? data :pops)
+            (< 0 (:pops data)))))
+
+(defn- delete-group-chat-expense-item!
+  [chat-id exp-it-to-delete]
+  {:pre [(some? exp-it-to-delete)]}
+  (let [exp-it-code (first exp-it-to-delete)
+        updated-chat-data
+        (conditionally-update-chat-data!
+          chat-id
+          #(let [exp-it (find-expense-item % exp-it-code)]
+             (can-expense-item-be-deleted? [exp-it-code exp-it]))
+          #(update % :expense-items dissoc exp-it-code))]
+    (if (some? updated-chat-data)
+      true
+      :failure/the-expense-item-cannot-be-deleted)))
+
 (defn- data->expense-item
   "Retrieves a group chat's expense item by parsing the callback button data."
   [callback-btn-data chat-data]
@@ -1581,6 +1606,9 @@
     :the-expense-item-code-is-already-used-msg
     {:response-fn get-the-expense-item-code-is-already-used-msg
      :response-params [:user]}
+    :the-expense-item-cannot-be-deleted-msg
+    {:response-fn get-the-expense-item-cannot-be-deleted-msg
+     :response-params [:exp-it-code :exp-it-desc]}
 
     :expense-item-redesc-request-msg
     {:response-fn get-expense-item-redesc-request-msg
@@ -1840,6 +1868,9 @@
       :response [:settings :expense-item-selection-msg]}
      :recode-expense-item
      {:to-state :expense-item-encoding
+      :response [:settings :expense-item-selection-msg]}
+     :delete-expense-item
+     {:to-state :expense-item-deletion
       :response [:settings :expense-item-selection-msg]}
 
      :manage-shares
@@ -2521,6 +2552,20 @@
                                         {:to-user user-id
                                          :type :request-exp-it-recode})))
 
+(defn- proceed-with-expense-item-deletion!
+  [chat-id exp-it-to-delete]
+  (let [delete-exp-it-res (delete-group-chat-expense-item! chat-id exp-it-to-delete)]
+    (if (is-failure? delete-exp-it-res)
+      (case delete-exp-it-res
+        :failure/the-expense-item-cannot-be-deleted
+        (respond!* {:chat-id chat-id}
+                   [:chat-type/group :the-expense-item-cannot-be-deleted-msg]
+                   :param-vals {:exp-it-code (first exp-it-to-delete)
+                                :exp-it-desc (:desc (second exp-it-to-delete))})
+        (throw (ex-info "Unexpected operation result" {:result delete-exp-it-res})))
+      (respond!* {:chat-id chat-id}
+                 [:chat-type/group :successful-changes-msg]))))
+
 
 ;; TODO: Linearize calls to these macros with a wrapper macro & a map.
 
@@ -3069,6 +3114,10 @@
                                   cd-expense-items-recode #(proceed-with-expense-item-selection!
                                                              chat-id msg-id callback-query-id
                                                              :recode-expense-item)
+                                  cd-expense-items-delete #(proceed-with-expense-item-selection!
+                                                             chat-id msg-id callback-query-id
+                                                             :delete-expense-item
+                                                             can-expense-item-be-deleted?)
                                   nil)]
               (respond!)
               (cb-succeed callback-query-id)))))
@@ -3120,7 +3169,28 @@
         (cb-succeed callback-query-id))
       send-retry-callback-query!))
 
-  ;; TODO: Implement handlers for ':expense-items-mgmt'.
+  (m-hlr/callback-fn
+    (handle-with-care!
+      [{callback-query-id :id
+        {user-id :id} :from
+        {msg-id :message_id {chat-id :id} :chat} :message
+        callback-btn-data :data
+        :as callback-query}]
+      (when (and (= :chat-type/group (:chat-type callback-query))
+                 (= :settings (-> callback-query :bot-msg :type))
+                 (= :expense-item-deletion (-> callback-query :bot-msg :state))
+                 (str/starts-with? callback-btn-data cd-expense-item-prefix))
+        (do-when-chat-is-ready-or-send-notification!
+          (:chat-state callback-query) callback-query-id
+          (try-with-message-lock-or-send-notification!
+            chat-id user-id msg-id callback-query-id
+
+            (proceed-with-restoring-group-chat-intro! chat-id user-id msg-id)
+            (let [chat-data (get-chat-data chat-id)
+                  expense-item (data->expense-item callback-btn-data chat-data)]
+              (proceed-with-expense-item-deletion! chat-id expense-item))))
+        (cb-succeed callback-query-id))
+      send-retry-callback-query!))
 
   (m-hlr/callback-fn
     (handle-with-care!
