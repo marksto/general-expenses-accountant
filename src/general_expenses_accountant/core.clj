@@ -173,6 +173,12 @@
 (def ^:private no-group-to-record-error "Нет возможности выбрать группу для записи расходов.")
 
 
+(defn- join-into-text
+  ([strings-or-colls]
+   (join-into-text strings-or-colls "\n\n"))
+  ([strings-or-colls sep]
+   (str/join sep (flatten strings-or-colls))))
+
 (defn- format-list
   ([items-coll]
    (format-list items-coll nil))
@@ -315,6 +321,8 @@
 
 ; group chats
 
+; - basic messages
+
 ;; TODO: Make messages texts localizable:
 ;;       - take the ':language_code' of the chat initiator (no personal settings)
 ;;       - externalize texts, keep only their keys (to get them via 'l10n')
@@ -326,6 +334,42 @@
                 (if (= chat-members-count 2)
                   [first-name "тебе" "любых" "ответь"]
                   ["народ" "вам" "ваших" "ответьте каждый"]))})
+
+(defn- get-personal-account-name-request-msg
+  [existing-chat? ?chat-members]
+  {:type :text
+   :text (let [request-txt (md-v2/escape "как будет называться ваш личный счёт?")
+               part-one (if (some? ?chat-members)
+                          (let [mentions (for [user ?chat-members]
+                                           (tg-api/get-user-mention-text user))]
+                            (str (str/join " " mentions) ", " request-txt))
+                          (str/capitalize request-txt))
+               part-two (md-v2/escape
+                          (if (and existing-chat? (empty? ?chat-members))
+                            "Пожалуйста, проигнорийруте это сообщение, если у вас уже есть личный счёт в данной группе."
+                            "Пожалуйста, ответьте на данное сообщение."))]
+           (join-into-text [part-one part-two]))
+   :options (tg-api/build-message-options
+              {:reply-markup (tg-api/build-reply-markup
+                               :force-reply {:selective (some? ?chat-members)})
+               :parse-mode "MarkdownV2"})})
+
+(defn- get-personal-accounts-left-msg
+  [count]
+  {:type :text
+   :text (format "Ожидаем остальных... Осталось %s." count)})
+
+(defn- get-bot-readiness-msg
+  [bot-username]
+  {:type :text
+   :text "Я готов к ведению учёта. Давайте же начнём!"
+   :options (tg-api/build-message-options
+              {:reply-markup (tg-api/build-reply-markup
+                               :inline-keyboard
+                               [[(tg-api/build-inline-kbd-btn "Перейти в чат для ввода расходов"
+                                                              :url (str "https://t.me/" bot-username))]])})})
+
+; - settings
 
 (defn- get-settings-msg
   [first-time?]
@@ -343,27 +387,15 @@
                                  (tg-api/build-inline-kbd-btn "Статьи" :callback-data cd-expense-items)
                                  (tg-api/build-inline-kbd-btn "Доли" :callback-data cd-shares)]])})})
 
-(def ^:private waiting-for-user-input-notification
-  {:type :callback
-   :options {:text "Ожидание ответа пользователя в чате"}})
+(def ^:private successful-changes-msg
+  {:type :text
+   :text "Изменения внесены успешно."})
 
-(def ^:private waiting-for-other-user-notification
-  {:type :callback
-   :options {:text "Ответ ожидается от другого пользователя"}})
+(def ^:private canceled-changes-msg
+  {:type :text
+   :text "Внесение изменений отменено."})
 
-(def ^:private message-already-in-use-notification
-  {:type :callback
-   :options {:text "С этим сообщением уже взаимодействуют"}})
-
-(def ^:private ignored-callback-query-notification
-  {:type :callback
-   :options {:text "Запрос не может быть обработан"}})
-
-(defn- join-into-text
-  ([strings-or-colls]
-   (join-into-text strings-or-colls "\n\n"))
-  ([strings-or-colls sep]
-   (str/join sep (flatten strings-or-colls))))
+; - accounts mgmt
 
 (defn- get-accounts-mgmt-options-msg
   [accounts-by-type]
@@ -468,13 +500,7 @@
   {:type :callback
    :options {:text "Подходящих счетов не найдено"}})
 
-(def ^:private successful-changes-msg
-  {:type :text
-   :text "Изменения внесены успешно."})
-
-(def ^:private canceled-changes-msg
-  {:type :text
-   :text "Внесение изменений отменено."})
+; - expense items mgmt
 
 (defn- get-expense-items-mgmt-options-msg
   [expense-items]
@@ -544,39 +570,7 @@
 
 ;; TODO: Add messages for 'shares' here.
 
-(defn- get-personal-account-name-request-msg
-  [existing-chat? ?chat-members]
-  {:type :text
-   :text (let [request-txt (md-v2/escape "как будет называться ваш личный счёт?")
-               part-one (if (some? ?chat-members)
-                          (let [mentions (for [user ?chat-members]
-                                           (tg-api/get-user-mention-text user))]
-                            (str (str/join " " mentions) ", " request-txt))
-                          (str/capitalize request-txt))
-               part-two (md-v2/escape
-                          (if (and existing-chat? (empty? ?chat-members))
-                            "Пожалуйста, проигнорийруте это сообщение, если у вас уже есть личный счёт в данной группе."
-                            "Пожалуйста, ответьте на данное сообщение."))]
-           (join-into-text [part-one part-two]))
-   :options (tg-api/build-message-options
-              {:reply-markup (tg-api/build-reply-markup
-                               :force-reply {:selective (some? ?chat-members)})
-               :parse-mode "MarkdownV2"})})
-
-(defn- get-personal-accounts-left-msg
-  [count]
-  {:type :text
-   :text (format "Ожидаем остальных... Осталось %s." count)})
-
-(defn- get-bot-readiness-msg
-  [bot-username]
-  {:type :text
-   :text "Я готов к ведению учёта. Давайте же начнём!"
-   :options (tg-api/build-message-options
-              {:reply-markup (tg-api/build-reply-markup
-                               :inline-keyboard
-                               [[(tg-api/build-inline-kbd-btn "Перейти в чат для ввода расходов"
-                                                              :url (str "https://t.me/" bot-username))]])})})
+; - expenses
 
 (defn- get-new-expense-msg
   [expense-amount expense-details payer-acc-name debtor-acc-name]
@@ -593,6 +587,24 @@
      :text (str title-txt details-txt)
      :options (tg-api/build-message-options
                 {:parse-mode "MarkdownV2"})}))
+
+; - warnings
+
+(def ^:private waiting-for-user-input-notification
+  {:type :callback
+   :options {:text "Ожидание ответа пользователя в чате"}})
+
+(def ^:private waiting-for-other-user-notification
+  {:type :callback
+   :options {:text "Ответ ожидается от другого пользователя"}})
+
+(def ^:private message-already-in-use-notification
+  {:type :callback
+   :options {:text "С этим сообщением уже взаимодействуют"}})
+
+(def ^:private ignored-callback-query-notification
+  {:type :callback
+   :options {:text "Запрос не может быть обработан"}})
 
 ; private chats
 
@@ -2515,7 +2527,7 @@
     state-transition-name ?filter-pred]
    (let [chat-data (get-chat-data chat-id)
          eligible-expense-items (cond->> (get-group-chat-expense-items chat-data)
-                                (some? ?filter-pred) (filter ?filter-pred))]
+                                         (some? ?filter-pred) (filter ?filter-pred))]
      (if (seq eligible-expense-items)
        (proceed-with-msg-and-respond!
          {:chat-id chat-id :msg-id msg-id}
