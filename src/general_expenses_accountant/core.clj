@@ -3581,6 +3581,7 @@
   (m-hlr/message-fn
     (handle-with-care!
       [{text :text
+        {emoji :emoji} :sticker
         {user-id :id :as user} :from
         {chat-id :id} :chat
         :as message}]
@@ -3590,7 +3591,7 @@
                                  :type :request-exp-it-recode}))
         (let [input-data (-> (get-chat-data chat-id)
                              (get-user-input-data user-id :recode-expense-item)
-                             (assoc :new-exp-it-code text))]
+                             (assoc :new-exp-it-code (or text emoji)))]
           (set-user-input-data! chat-id user-id :recode-expense-item input-data))
         (proceed-with-expense-item-operation! chat-id user
                                               :request-exp-it-recode
