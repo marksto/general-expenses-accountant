@@ -528,6 +528,13 @@
               (md-v2/escape (str ", как бы вы по-другому описали статью расходов \"" exp-it-desc "\"?")))
    :options force-reply-options})
 
+(defn- get-expense-item-recode-request-msg
+  [user exp-it-desc]
+  {:type :text
+   :text (str (tg-api/get-user-mention-text user)
+              (md-v2/escape (str ", задайте новый код для статьи расходов \"" exp-it-desc "\".")))
+   :options force-reply-options})
+
 ;; TODO: Add messages for 'expense items' here.
 
 ;; TODO: Add messages for 'shares' here.
@@ -1144,6 +1151,22 @@
           update-in [:expense-items exp-it-code] merge exp-it-data)]
     (find-expense-item updated-chat-data exp-it-code)))
 
+(defn- change-group-chat-expense-item-code!
+  [chat-id {:keys [exp-it-code new-exp-it-code]}]
+  {:pre [(some? exp-it-code) (some? new-exp-it-code)]}
+  (let [updated-chat-data
+        (conditionally-update-chat-data!
+          chat-id
+          #(nil? (find-expense-item % new-exp-it-code))
+          (fn [chat-data]
+            (-> chat-data
+                (update :expense-items dissoc exp-it-code)
+                (assoc-in [:expense-items new-exp-it-code]
+                          (get-in chat-data [:expense-items exp-it-code])))))]
+    (if (some? updated-chat-data)
+      (find-expense-item updated-chat-data new-exp-it-code)
+      :failure/the-expense-item-code-is-already-used)))
+
 (defn- data->expense-item
   "Retrieves a group chat's expense item by parsing the callback button data."
   [callback-btn-data chat-data]
@@ -1563,7 +1586,9 @@
     {:response-fn get-expense-item-redesc-request-msg
      :response-params [:user :exp-it-desc]}
 
-
+    :expense-item-recode-request-msg
+    {:response-fn get-expense-item-recode-request-msg
+     :response-params [:user :exp-it-desc]}
 
     :successful-changes-msg
     {:response-fn (constantly successful-changes-msg)}
@@ -1812,6 +1837,9 @@
       :response [:settings :expense-items-mgmt-options-msg]}
      :redesc-expense-item
      {:to-state :expense-item-description
+      :response [:settings :expense-item-selection-msg]}
+     :recode-expense-item
+     {:to-state :expense-item-encoding
       :response [:settings :expense-item-selection-msg]}
 
      :manage-shares
@@ -2481,6 +2509,18 @@
                                         {:to-user user-id
                                          :type :request-exp-it-redesc})))
 
+(defn- proceed-with-expense-item-re-encoding!
+  [chat-id {user-id :id :as user} exp-it-to-recode]
+  (let [input-data {:exp-it-code (first exp-it-to-recode)}]
+    (set-user-input-data! chat-id user-id :recode-expense-item input-data))
+  (respond!* {:chat-id chat-id}
+             [:chat-type/group :expense-item-recode-request-msg]
+             :param-vals {:user user
+                          :exp-it-desc (:desc (second exp-it-to-recode))}
+             :on-success #(set-bot-msg! chat-id (:message_id %)
+                                        {:to-user user-id
+                                         :type :request-exp-it-recode})))
+
 
 ;; TODO: Linearize calls to these macros with a wrapper macro & a map.
 
@@ -3026,6 +3066,9 @@
                                   cd-expense-items-redesc #(proceed-with-expense-item-selection!
                                                              chat-id msg-id callback-query-id
                                                              :redesc-expense-item)
+                                  cd-expense-items-recode #(proceed-with-expense-item-selection!
+                                                             chat-id msg-id callback-query-id
+                                                             :recode-expense-item)
                                   nil)]
               (respond!)
               (cb-succeed callback-query-id)))))
@@ -3051,6 +3094,29 @@
             (let [chat-data (get-chat-data chat-id)
                   expense-item (data->expense-item callback-btn-data chat-data)]
               (proceed-with-expense-item-re-description! chat-id user expense-item))))
+        (cb-succeed callback-query-id))
+      send-retry-callback-query!))
+
+  (m-hlr/callback-fn
+    (handle-with-care!
+      [{callback-query-id :id
+        {user-id :id :as user} :from
+        {msg-id :message_id {chat-id :id} :chat} :message
+        callback-btn-data :data
+        :as callback-query}]
+      (when (and (= :chat-type/group (:chat-type callback-query))
+                 (= :settings (-> callback-query :bot-msg :type))
+                 (= :expense-item-encoding (-> callback-query :bot-msg :state))
+                 (str/starts-with? callback-btn-data cd-expense-item-prefix))
+        (do-when-chat-is-ready-or-send-notification!
+          (:chat-state callback-query) callback-query-id
+          (try-with-message-lock-or-send-notification!
+            chat-id user-id msg-id callback-query-id
+
+            (proceed-with-restoring-group-chat-intro! chat-id user-id msg-id)
+            (let [chat-data (get-chat-data chat-id)
+                  expense-item (data->expense-item callback-btn-data chat-data)]
+              (proceed-with-expense-item-re-encoding! chat-id user expense-item))))
         (cb-succeed callback-query-id))
       send-retry-callback-query!))
 
@@ -3430,6 +3496,27 @@
                                               :request-exp-it-redesc
                                               :redesc-expense-item
                                               update-group-chat-expense-item!)
+        op-succeed)
+      send-retry-message!))
+
+  (m-hlr/message-fn
+    (handle-with-care!
+      [{text :text
+        {user-id :id :as user} :from
+        {chat-id :id} :chat
+        :as message}]
+      (when (and (= :chat-type/group (:chat-type message))
+                 (check-bot-msg (get-original-bot-msg chat-id message)
+                                {:to-user user-id
+                                 :type :request-exp-it-recode}))
+        (let [input-data (-> (get-chat-data chat-id)
+                             (get-user-input-data user-id :recode-expense-item)
+                             (assoc :new-exp-it-code text))]
+          (set-user-input-data! chat-id user-id :recode-expense-item input-data))
+        (proceed-with-expense-item-operation! chat-id user
+                                              :request-exp-it-recode
+                                              :recode-expense-item
+                                              change-group-chat-expense-item-code!)
         op-succeed)
       send-retry-message!))
 
