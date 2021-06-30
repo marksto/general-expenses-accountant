@@ -840,7 +840,7 @@
                                                               :type :settings
                                                               :state :initial}
                                                              {:to-user (:user-id ctx)
-                                                              :type :request-rename}]})}
+                                                              :type :request-acc-rename}]})}
                     :responses {:total 2
                                 :assert-preds (fn [ctx]
                                                 [(fn [res]

@@ -257,11 +257,12 @@
   (str cd-expense-item-prefix code))
 
 (defn- expense-items->options
-  [expense-items]
+  [expense-items & extra-buttons]
   (get-select-one-item-markup (seq expense-items)
                               get-expense-item-display-value
                               (constantly :callback-data)
-                              get-expense-item-option-id))
+                              get-expense-item-option-id
+                              extra-buttons))
 
 (defn- get-account-option-id
   [acc]
@@ -459,7 +460,7 @@
   [user acc-name]
   {:type :text
    :text (str (tg-api/get-user-mention-text user)
-              ", как бы вы хотели переименовать счёт \"" (md-v2/escape acc-name) "\"?")
+              (md-v2/escape (str ", как бы вы хотели переименовать счёт \"" acc-name "\"?")))
    :options force-reply-options})
 
 (def ^:private no-eligible-accounts-notification
@@ -514,6 +515,17 @@
   {:type :text
    :text (str (tg-api/get-user-mention-text user)
               (md-v2/escape ", данный код уже используется для другой статьи расходов. Выберите другой код."))
+   :options force-reply-options})
+
+(def ^:private no-eligible-expense-items-notification
+  {:type :callback
+   :options {:text "Подходящих статей расходов не найдено"}})
+
+(defn- get-expense-item-redesc-request-msg
+  [user exp-it-desc]
+  {:type :text
+   :text (str (tg-api/get-user-mention-text user)
+              (md-v2/escape (str ", как бы вы по-другому описали статью расходов \"" exp-it-desc "\"?")))
    :options force-reply-options})
 
 ;; TODO: Add messages for 'expense items' here.
@@ -648,12 +660,14 @@
               (group-refs->options group-refs))})
 
 (defn- get-expense-item-selection-msg
-  [expense-items]
-  {:pre [(seq expense-items)]}
-  {:type :text
-   :text "Выберите статью расходов:"
-   :options (tg-api/build-message-options
-              (expense-items->options expense-items))})
+  ([expense-items]
+   (get-expense-item-selection-msg expense-items nil))
+  ([expense-items ?extra-buttons]
+   {:pre [(seq expense-items)]}
+   {:type :text
+    :text "Выберите статью расходов:"
+    :options (tg-api/build-message-options
+               (apply expense-items->options expense-items ?extra-buttons))}))
 
 (defn- get-expense-manual-description-msg
   [user-name]
@@ -1110,16 +1124,31 @@
   (get (get-group-chat-expense-items chat-data) exp-it-code))
 
 (defn- create-group-chat-expense-item!
-  [chat-id {:keys [exp-it-code exp-it-desc]}]
-  {:pre [(some? exp-it-code) (some? exp-it-desc)]}
+  [chat-id {:keys [exp-it-code exp-it-data]}]
+  {:pre [(some? exp-it-code) (some? exp-it-data)]}
   (let [updated-chat-data
         (conditionally-update-chat-data!
           chat-id
           #(nil? (find-expense-item % exp-it-code))
-          #(assoc-in % [:expense-items exp-it-code] {:desc exp-it-desc}))]
+          #(assoc-in % [:expense-items exp-it-code] exp-it-data))]
     (if (some? updated-chat-data)
       (find-expense-item updated-chat-data exp-it-code)
       :failure/the-expense-item-code-is-already-used)))
+
+(defn- update-group-chat-expense-item!
+  [chat-id {:keys [exp-it-code exp-it-data]}]
+  {:pre [(some? exp-it-code) (some? exp-it-data)]}
+  (let [updated-chat-data
+        (update-chat-data!
+          chat-id
+          update-in [:expense-items exp-it-code] merge exp-it-data)]
+    (find-expense-item updated-chat-data exp-it-code)))
+
+(defn- data->expense-item
+  "Retrieves a group chat's expense item by parsing the callback button data."
+  [callback-btn-data chat-data]
+  (let [exp-it-code (str/replace-first callback-btn-data cd-expense-item-prefix "")]
+    [exp-it-code (find-expense-item chat-data exp-it-code)]))
 
 ;; TODO: Implement the "expense items"-related business logic here.
 
@@ -1530,6 +1559,12 @@
     {:response-fn get-the-expense-item-code-is-already-used-msg
      :response-params [:user]}
 
+    :expense-item-redesc-request-msg
+    {:response-fn get-expense-item-redesc-request-msg
+     :response-params [:user :exp-it-desc]}
+
+
+
     :successful-changes-msg
     {:response-fn (constantly successful-changes-msg)}
     :canceled-changes-msg
@@ -1546,6 +1581,8 @@
     {:response-fn (constantly no-eligible-accounts-notification)}
     :no-group-members-selected-notification
     {:response-fn (constantly no-group-members-selected-notification)}
+    :no-eligible-expense-items-notification
+    {:response-fn (constantly no-eligible-expense-items-notification)}
 
     ; message-specific
 
@@ -1563,6 +1600,9 @@
      :expense-items-mgmt-options-msg
      {:response-fn get-expense-items-mgmt-options-msg
       :response-params [:expense-items]}
+     :expense-item-selection-msg
+     {:response-fn get-expense-item-selection-msg
+      :response-params [:expense-items :extra-buttons]}
 
      :restored-settings-msg
      {:response-fn (partial get-settings-msg false)}}}
@@ -1735,7 +1775,16 @@
     :account-reinstatement #{:accounts-mgmt
                              :initial}
 
-    :expense-items-mgmt #{:initial}
+    :expense-items-mgmt #{:expense-item-description
+                          :expense-item-encoding
+                          :expense-item-deletion
+                          :initial}
+    :expense-item-description #{:expense-items-mgmt
+                                :initial}
+    :expense-item-encoding #{:expense-items-mgmt
+                             :initial}
+    :expense-item-deletion #{:expense-items-mgmt
+                             :initial}
 
     :shares-mgmt #{:initial}}})
 
@@ -1761,6 +1810,9 @@
      :manage-expense-items
      {:to-state :expense-items-mgmt
       :response [:settings :expense-items-mgmt-options-msg]}
+     :redesc-expense-item
+     {:to-state :expense-item-description
+      :response [:settings :expense-item-selection-msg]}
 
      :manage-shares
      {:to-state :shares-mgmt}
@@ -2179,6 +2231,14 @@
 
 ; - accounts mgmt
 
+(defn- proceed-with-accounts-mgmt!
+  [chat-id msg-id]
+  (let [accounts-by-type (get-group-chat-accounts-by-type chat-id)]
+    (proceed-with-msg-and-respond!
+      {:chat-id chat-id :msg-id msg-id}
+      {:transition [:chat-type/group :settings :manage-accounts]
+       :param-vals {:accounts-by-type accounts-by-type}})))
+
 (defn- proceed-with-account-type-selection!
   [chat-id msg-id]
   (proceed-with-msg-and-respond!
@@ -2291,7 +2351,7 @@
                           :acc-name (:name acc-to-rename)}
              :on-success #(set-bot-msg! chat-id (:message_id %)
                                         {:to-user user-id
-                                         :type :request-rename})))
+                                         :type :request-acc-rename})))
 
 (defn- proceed-with-personal-account-creation!
   [chat-id chat-title
@@ -2329,6 +2389,15 @@
                    [:chat-type/group :successful-changes-msg])))))
 
 ; - expense items mgmt
+
+(defn- proceed-with-expense-items-mgmt!
+  [chat-id msg-id]
+  (let [chat-data (get-chat-data chat-id)
+        expense-items (get-group-chat-expense-items chat-data)]
+    (proceed-with-msg-and-respond!
+      {:chat-id chat-id :msg-id msg-id}
+      {:transition [:chat-type/group :settings :manage-expense-items]
+       :param-vals {:expense-items expense-items}})))
 
 (defn- proceed-with-expense-item-description!
   [chat-id {user-id :id :as user}]
@@ -2380,6 +2449,37 @@
                                                :name input-name}]})
         (respond!* {:chat-id chat-id}
                    [:chat-type/group :successful-changes-msg])))))
+
+(defn- proceed-with-expense-item-selection!
+  ([chat-id msg-id callback-query-id
+    state-transition-name]
+   (proceed-with-expense-item-selection! chat-id msg-id callback-query-id
+                                         state-transition-name nil))
+  ([chat-id msg-id callback-query-id
+    state-transition-name ?filter-pred]
+   (let [chat-data (get-chat-data chat-id)
+         eligible-expense-items (cond->> (get-group-chat-expense-items chat-data)
+                                (some? ?filter-pred) (filter ?filter-pred))]
+     (if (seq eligible-expense-items)
+       (proceed-with-msg-and-respond!
+         {:chat-id chat-id :msg-id msg-id}
+         {:transition [:chat-type/group :settings state-transition-name]
+          :param-vals {:expense-items eligible-expense-items
+                       :extra-buttons [back-button]}})
+       (respond!* {:callback-query-id callback-query-id}
+                  [:chat-type/group :no-eligible-expense-items-notification])))))
+
+(defn- proceed-with-expense-item-re-description!
+  [chat-id {user-id :id :as user} exp-it-to-redesc]
+  (let [input-data {:exp-it-code (first exp-it-to-redesc)}]
+    (set-user-input-data! chat-id user-id :redesc-expense-item input-data))
+  (respond!* {:chat-id chat-id}
+             [:chat-type/group :expense-item-redesc-request-msg]
+             :param-vals {:user user
+                          :exp-it-desc (:desc (second exp-it-to-redesc))}
+             :on-success #(set-bot-msg! chat-id (:message_id %)
+                                        {:to-user user-id
+                                         :type :request-exp-it-redesc})))
 
 
 ;; TODO: Linearize calls to these macros with a wrapper macro & a map.
@@ -2666,11 +2766,7 @@
           (try-with-message-lock-or-send-notification!
             chat-id user-id msg-id callback-query-id
 
-            (let [accounts-by-type (get-group-chat-accounts-by-type chat-id)]
-              (proceed-with-msg-and-respond!
-                {:chat-id chat-id :msg-id msg-id}
-                {:transition [:chat-type/group :settings :manage-accounts]
-                 :param-vals {:accounts-by-type accounts-by-type}}))))
+            (proceed-with-accounts-mgmt! chat-id msg-id)))
         (cb-succeed callback-query-id))
       send-retry-callback-query!))
 
@@ -2689,26 +2785,24 @@
           (try-with-message-lock-or-send-notification!
             chat-id user-id msg-id callback-query-id
 
-            (if-let [respond! (condp = callback-btn-data
-                                cd-accounts-create #(proceed-with-account-type-selection!
-                                                      chat-id msg-id)
-                                cd-accounts-rename #(proceed-with-account-selection!
-                                                      chat-id msg-id callback-query-id
-                                                      :rename-account
-                                                      (can-rename-account? chat-id user-id))
-                                cd-accounts-revoke #(proceed-with-account-selection!
-                                                      chat-id msg-id callback-query-id
-                                                      :revoke-account
-                                                      (can-revoke-account? chat-id user-id))
-                                cd-accounts-reinstate #(proceed-with-account-selection!
-                                                         chat-id msg-id callback-query-id
-                                                         :reinstate-account
-                                                         (can-reinstate-account? chat-id user-id))
-                                nil)]
-              (do
-                (respond!)
-                (cb-succeed callback-query-id))
-              (release-message-lock! chat-id user-id msg-id)))))
+            (when-let [respond! (condp = callback-btn-data
+                                  cd-accounts-create #(proceed-with-account-type-selection!
+                                                        chat-id msg-id)
+                                  cd-accounts-rename #(proceed-with-account-selection!
+                                                        chat-id msg-id callback-query-id
+                                                        :rename-account
+                                                        (can-rename-account? chat-id user-id))
+                                  cd-accounts-revoke #(proceed-with-account-selection!
+                                                        chat-id msg-id callback-query-id
+                                                        :revoke-account
+                                                        (can-revoke-account? chat-id user-id))
+                                  cd-accounts-reinstate #(proceed-with-account-selection!
+                                                           chat-id msg-id callback-query-id
+                                                           :reinstate-account
+                                                           (can-reinstate-account? chat-id user-id))
+                                  nil)]
+              (respond!)
+              (cb-succeed callback-query-id)))))
       send-retry-callback-query!))
 
   (m-hlr/callback-fn
@@ -2907,12 +3001,7 @@
           (try-with-message-lock-or-send-notification!
             chat-id user-id msg-id callback-query-id
 
-            (let [chat-data (get-chat-data chat-id)
-                  expense-items (get-group-chat-expense-items chat-data)]
-              (proceed-with-msg-and-respond!
-                {:chat-id chat-id :msg-id msg-id}
-                {:transition [:chat-type/group :settings :manage-expense-items]
-                 :param-vals {:expense-items expense-items}}))))
+            (proceed-with-expense-items-mgmt! chat-id msg-id)))
         (cb-succeed callback-query-id))
       send-retry-callback-query!))
 
@@ -2925,16 +3014,44 @@
         :as callback-query}]
       (when (and (= :chat-type/group (:chat-type callback-query))
                  (= :settings (-> callback-query :bot-msg :type))
-                 (= :expense-items-mgmt (-> callback-query :bot-msg :state))
-                 (= cd-expense-items-create callback-btn-data))
+                 (= :expense-items-mgmt (-> callback-query :bot-msg :state)))
+        (do-when-chat-is-ready-or-send-notification!
+          (:chat-state callback-query) callback-query-id
+          (try-with-message-lock-or-send-notification!
+            chat-id user-id msg-id callback-query-id
+
+            (when-let [respond! (condp = callback-btn-data
+                                  cd-expense-items-create #(proceed-with-expense-item-creation-steps!
+                                                             chat-id user)
+                                  cd-expense-items-redesc #(proceed-with-expense-item-selection!
+                                                             chat-id msg-id callback-query-id
+                                                             :redesc-expense-item)
+                                  nil)]
+              (respond!)
+              (cb-succeed callback-query-id)))))
+      send-retry-callback-query!))
+
+  (m-hlr/callback-fn
+    (handle-with-care!
+      [{callback-query-id :id
+        {user-id :id :as user} :from
+        {msg-id :message_id {chat-id :id} :chat} :message
+        callback-btn-data :data
+        :as callback-query}]
+      (when (and (= :chat-type/group (:chat-type callback-query))
+                 (= :settings (-> callback-query :bot-msg :type))
+                 (= :expense-item-description (-> callback-query :bot-msg :state))
+                 (str/starts-with? callback-btn-data cd-expense-item-prefix))
         (do-when-chat-is-ready-or-send-notification!
           (:chat-state callback-query) callback-query-id
           (try-with-message-lock-or-send-notification!
             chat-id user-id msg-id callback-query-id
 
             (proceed-with-restoring-group-chat-intro! chat-id user-id msg-id)
-            (proceed-with-expense-item-creation-steps! chat-id user)
-            (cb-succeed callback-query-id))))
+            (let [chat-data (get-chat-data chat-id)
+                  expense-item (data->expense-item callback-btn-data chat-data)]
+              (proceed-with-expense-item-re-description! chat-id user expense-item))))
+        (cb-succeed callback-query-id))
       send-retry-callback-query!))
 
   ;; TODO: Implement handlers for ':expense-items-mgmt'.
@@ -2984,11 +3101,10 @@
               (proceed-with-restoring-group-chat-intro! chat-id user-id msg-id)
 
               (:account-type-selection :account-renaming :account-revocation :account-reinstatement)
-              (let [accounts-by-type (get-group-chat-accounts-by-type chat-id)]
-                (proceed-with-msg-and-respond!
-                  {:chat-id chat-id :msg-id msg-id}
-                  {:transition [:chat-type/group :settings :manage-accounts]
-                   :param-vals {:accounts-by-type accounts-by-type}})))))
+              (proceed-with-accounts-mgmt! chat-id msg-id)
+
+              (:expense-item-description :expense-item-encoding :expense-item-deletion)
+              (proceed-with-expense-items-mgmt! chat-id msg-id))))
         (cb-succeed callback-query-id))
       send-retry-callback-query!))
 
@@ -3244,13 +3360,13 @@
       (when (and (= :chat-type/group (:chat-type message))
                  (check-bot-msg (get-original-bot-msg chat-id message)
                                 {:to-user user-id
-                                 :type :request-rename}))
+                                 :type :request-acc-rename}))
         (let [input-data (-> (get-chat-data chat-id)
                              (get-user-input-data user-id :rename-account)
                              (assoc :new-acc-name text))]
           (set-user-input-data! chat-id user-id :rename-account input-data))
         (proceed-with-account-operation! chat-id user
-                                         :request-rename
+                                         :request-acc-rename
                                          :rename-account
                                          change-group-chat-account-name!)
         op-succeed)
@@ -3266,7 +3382,7 @@
                  (check-bot-msg (get-original-bot-msg chat-id message)
                                 {:to-user user-id
                                  :type :request-exp-it-desc}))
-        (let [input-data {:exp-it-desc text}]
+        (let [input-data {:exp-it-data {:desc text}}]
           (set-user-input-data! chat-id user-id :create-expense-item input-data))
         (proceed-with-expense-item-encoding! chat-id user)
         (drop-bot-msg! chat-id {:to-user user-id
@@ -3293,6 +3409,27 @@
                                               :request-exp-it-code
                                               :create-expense-item
                                               create-group-chat-expense-item!)
+        op-succeed)
+      send-retry-message!))
+
+  (m-hlr/message-fn
+    (handle-with-care!
+      [{text :text
+        {user-id :id :as user} :from
+        {chat-id :id} :chat
+        :as message}]
+      (when (and (= :chat-type/group (:chat-type message))
+                 (check-bot-msg (get-original-bot-msg chat-id message)
+                                {:to-user user-id
+                                 :type :request-exp-it-redesc}))
+        (let [input-data (-> (get-chat-data chat-id)
+                             (get-user-input-data user-id :redesc-expense-item)
+                             (assoc-in [:exp-it-data :desc] text))]
+          (set-user-input-data! chat-id user-id :redesc-expense-item input-data))
+        (proceed-with-expense-item-operation! chat-id user
+                                              :request-exp-it-redesc
+                                              :redesc-expense-item
+                                              update-group-chat-expense-item!)
         op-succeed)
       send-retry-message!))
 
