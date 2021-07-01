@@ -221,6 +221,13 @@
 
 ;; BOT API METHODS ;; TODO: Move to Morse.
 
+;; TODO: For all functions representing the Telegram Bot API methods:
+;;       1. specify all method parameters, both required and optional,
+;;          as a single function parameter, a params map,
+;;       2. specify preconditions that check each passed argument for
+;;          its type, optionality, and other constraints,
+;;       3. automatically convert all '_' into '-' in params map keys.
+
 ;; TODO: Morse improvement. Check the resp's ':ok' to be 'true' before
 ;;       getting its 'body'. The approach for the 'getUpdates' and the
 ;;       other Bot API methods here may be different. From the Bot API

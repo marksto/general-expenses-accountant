@@ -4,7 +4,11 @@
 
             [general-expenses-accountant.md-v2 :as md-v2]))
 
-;; TODO: Define the most used "AVAILABLE TYPES" as CLJC records w/ type hints.
+;; AVAILABLE TYPES
+
+;; TODO: Here, define Clojure Specs for those objects that are passed to the
+;;       Telegram Bot API as method parameters, e.g. 'MessageEntity', to use
+;;       these Specs in the preconditions of the corresponding functions.
 
 ;; AUXILIARY CHECKS
 
